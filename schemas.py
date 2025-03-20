@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""
+ * This file is part of Gluesync Scheduler Module.
+ *
+ * Gluesync Scheduler Module is dual-licensed under the following licenses:
+ *
+ * 1. GNU General Public License (GPL) Version 3
+ *    You may use, modify, and distribute this software under the terms of the GPL v3.
+ *    See the LICENSE-GPL file or <http://www.gnu.org/licenses/gpl-3.0.html> for details.
+ *    This option is available at no cost, but any derivative works must also be licensed under GPL v3.
+ *
+ * 2. MOLO17 Commercial License
+ *    Alternatively, you may use this software under the MOLO17 Commercial License,
+ *    which includes a warranty and permits proprietary use. Contact MOLO17 at info@molo17.com
+ *    for licensing terms and conditions.
+ *
+ * You must choose one of these licenses to use this software. Using this software implies
+ * acceptance of one of these licenses. See the accompanying LICENSE files or contact
+ * MOLO17 for more information.
+ *
+ * Copyright (C) 2025 MOLO17. All rights reserved.
+"""
+
+from datetime import datetime
+from typing import Optional, List
+from pydantic import BaseModel, Field
+
+from models import TaskType
+
+
+class JobBase(BaseModel):
+    """Base model for job data with common fields"""
+    name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
+    description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
+    task_type: TaskType = Field(..., description="Type of task to perform (ENTITY_START, ENTITY_STOP, PIPELINE_START, PIPELINE_STOP, ENTITY_SNAPSHOT)")
+    cron_expression: str = Field(..., description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight)", example="0 0 * * *")
+    pipeline_id: str = Field(..., description="ID of the pipeline to operate on", example="pipeline-123")
+    entity_id: Optional[str] = Field(None, description="ID of the entity to operate on (required for entity operations)", example="entity-456")
+    with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
+    enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
+
+
+class JobCreate(JobBase):
+    """Model for creating a new job (inherits all fields from JobBase)"""
+    class Config:
+        schema_extra = {
+            "example": {
+                "name": "Daily entity backup",
+                "description": "Create a daily snapshot of critical entities",
+                "task_type": "ENTITY_SNAPSHOT",
+                "cron_expression": "0 0 * * *",
+                "pipeline_id": "pipeline-123",
+                "entity_id": "entity-456",
+                "with_snapshot": True,
+                "enabled": True
+            }
+        }
+
+
+class JobUpdate(BaseModel):
+    """Model for updating an existing job (all fields are optional)"""
+    name: Optional[str] = Field(None, description="Updated name of the job", example="Updated daily entity backup")
+    description: Optional[str] = Field(None, description="Updated description of the job", example="Updated description for the daily backup")
+    cron_expression: Optional[str] = Field(None, description="Updated cron expression", example="0 0 * * *")
+    pipeline_id: Optional[str] = Field(None, description="Updated pipeline ID", example="pipeline-123")
+    entity_id: Optional[str] = Field(None, description="Updated entity ID", example="entity-456")
+    with_snapshot: Optional[bool] = Field(None, description="Updated snapshot setting")
+    enabled: Optional[bool] = Field(None, description="Updated enabled status")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "name": "Updated daily entity backup",
+                "description": "Updated description",
+                "cron_expression": "0 0 * * *",
+                "enabled": True
+            }
+        }
+
+
+class Job(JobBase):
+    """Complete job model with all fields (used for responses)"""
+    id: int = Field(..., description="Unique identifier for the job", example=1)
+    cron_job_identifier: str = Field(..., description="Unique identifier used in the crontab", example="gluesync_job_1")
+    created_at: datetime = Field(..., description="Timestamp when the job was created")
+    updated_at: datetime = Field(..., description="Timestamp when the job was last updated")
+    last_run: Optional[datetime] = Field(None, description="Timestamp of the last execution (null if never run)")
+    next_run: Optional[datetime] = Field(None, description="Timestamp of the next scheduled execution")
+    command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
+
+    class Config:
+        orm_mode = True
+        schema_extra = {
+            "example": {
+                "id": 1,
+                "name": "Daily entity backup",
+                "description": "Create a daily snapshot of critical entities",
+                "task_type": "ENTITY_SNAPSHOT",
+                "cron_expression": "0 0 * * *",
+                "pipeline_id": "pipeline-123",
+                "entity_id": "entity-456",
+                "with_snapshot": True,
+                "enabled": True,
+                "command": "python play_pause.py resync --pipeline pipeline-123 --entity entity-456",
+                "cron_job_identifier": "gluesync_job_1",
+                "created_at": "2025-03-20T10:00:00Z",
+                "updated_at": "2025-03-20T10:00:00Z",
+                "last_run": "2025-03-20T00:00:00Z",
+                "next_run": "2025-03-21T00:00:00Z"
+            }
+        }
+
+
+class JobList(BaseModel):
+    """Model for paginated list of jobs"""
+    items: List[Job] = Field(..., description="List of job objects")
+    total: int = Field(..., description="Total number of jobs (without pagination)")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "items": [
+                    {
+                        "id": 1,
+                        "name": "Daily entity backup",
+                        "description": "Create a daily snapshot of critical entities",
+                        "task_type": "ENTITY_SNAPSHOT",
+                        "cron_expression": "0 0 * * *",
+                        "pipeline_id": "pipeline-123",
+                        "entity_id": "entity-456",
+                        "with_snapshot": True,
+                        "enabled": True,
+                        "command": "python play_pause.py resync --pipeline pipeline-123 --entity entity-456",
+                        "cron_job_identifier": "gluesync_job_1",
+                        "created_at": "2025-03-20T10:00:00Z",
+                        "updated_at": "2025-03-20T10:00:00Z",
+                        "last_run": "2025-03-20T00:00:00Z",
+                        "next_run": "2025-03-21T00:00:00Z"
+                    }
+                ],
+                "total": 1
+            }
+        }
+
+
+class ErrorResponse(BaseModel):
+    """Model for error responses"""
+    detail: str = Field(..., description="Error message with details about the problem")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "detail": "Job with ID 123 not found"
+            }
+        }

@@ -1,0 +1,56 @@
+# This file is part of Gluesync Scheduler Module.
+# Gluesync Scheduler Module is dual-licensed under the following licenses:
+
+# 1. GNU General Public License (GPL) Version 3
+#    You may use, modify, and distribute this software under the terms of the GPL v3.
+#    See the LICENSE-GPL file or <http://www.gnu.org/licenses/gpl-3.0.html> for details.
+#    This option is available at no cost, but any derivative works must also be licensed under GPL v3.
+# 2. MOLO17 Commercial License
+#    Alternatively, you may use this software under the MOLO17 Commercial License,
+#    which includes a warranty and permits proprietary use. Contact MOLO17 at info@molo17.com
+#    for licensing terms and conditions.
+
+# You must choose one of these licenses to use this software. Using this software implies
+# acceptance of one of these licenses. See the accompanying LICENSE files or contact
+# MOLO17 for more information.
+
+# Copyright (C) 2025 MOLO17. All rights reserved.
+
+stages:
+  - deploy
+
+default:
+  tags:
+    - gs-docker-performance-test
+
+variables:
+  DOCKER_TLS_CERTDIR: ""
+
+deploy:
+  stage: deploy
+  image: docker:latest
+  services:
+    - name: docker:dind
+      variables:
+        DOCKER_TLS_CERTDIR: ""
+  script:
+    - echo "Building & deploying started..."
+
+    - apk add --no-cache bash
+
+    - 
+      | 
+      MODULE_NAME=${CI_COMMIT_TAG#tag-}  # Removes everything before "tag-"
+      MODULE_NAME=${MODULE_NAME%-v*}  # Removes everything after the last "-"
+
+      TAGPART=`echo $CI_COMMIT_TAG | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)'`
+
+      DEFAULT_NAME=${DOCKER_REGISTRY}/${APP_NAME}
+      ADDITIONAL_TAG="${DEFAULT_NAME}:${TAGPART}"
+
+    - docker login -u danieleangeli -p "$CI_REGISTRY_PASSWORD"
+    - docker build -t $DEFAULT_NAME:latest .
+    - docker tag $DEFAULT_NAME:latest "$ADDITIONAL_TAG"
+    - docker push "$ADDITIONAL_TAG"
+  rules:
+    - if: $CI_COMMIT_TAG
