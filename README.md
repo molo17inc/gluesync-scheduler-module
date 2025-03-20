@@ -1,7 +1,7 @@
 # Gluesync Scheduler Module
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![License](https://img.shields.io/badge/license-AGPL--3.0-green)
+![License](https://img.shields.io/badge/license-Dual-green)
 
 A backend service that provides a set of REST APIs for scheduling and managing cron jobs to automate Gluesync tasks, including starting/stopping entities and pipelines, as well as running snapshots.
 
@@ -139,7 +139,19 @@ Examples:
 
 ## License
 
-This project is licensed under the [GNU Affero General Public License (AGPL) v3](LICENSE).
+This project is dual-licensed under the following licenses:
+
+1. **GNU Affero General Public License (AGPL) v3**
+   - This is a free, copyleft license that allows you to use, modify, and distribute this software.
+   - If you choose this option, any derivative works must also be licensed under AGPL v3.
+   - See the [LICENSE-GPL](LICENSE-GPL) file for details.
+
+2. **MOLO17 Commercial License**
+   - For those who want to use this software in proprietary applications without the copyleft requirements of AGPL.
+   - This option includes a warranty and permits proprietary use.
+   - Contact MOLO17 at [info@molo17.com](mailto:info@molo17.com) for licensing terms and conditions.
+
+You must choose one of these licenses to use this software. Using this software implies acceptance of one of these licenses.
 
 ## Contributing
 
