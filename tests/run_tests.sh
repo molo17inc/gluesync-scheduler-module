@@ -3,18 +3,27 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
+# Create Gluesync default directories
+mkdir -p /opt/gluesync/data
+
 # Create license file for SDK from environment variable
 if [ -z "$GLUESYNC_LICENSE_CONTENT" ]; then
     echo "Warning: GLUESYNC_LICENSE_CONTENT environment variable not set, using mock content"
-    echo "mock-license-content" > gs-license.dat
+    echo "mock-license-content" > /opt/gluesync/data/gs-license.dat
 else
-    echo "$GLUESYNC_LICENSE_CONTENT" > gs-license.dat
+    echo "$GLUESYNC_LICENSE_CONTENT" > /opt/gluesync/data/gs-license.dat
+fi
+
+# Copy security config if it exists
+if [ -f security-config.json ]; then
+    cp security-config.json /opt/gluesync/data/security-config.json
 fi
 
 # Set up environment variables for testing
-export GLUESYNC_LICENSE_FILE=gs-license.dat
+export GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat
 export GLUESYNC_MODULE_TAG=scheduler-module
 export GLUESYNC_USE_SSL=False
+export GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
 export DB_URL=sqlite:///./tests/data/test_scheduler.db
 export DEBUG=True
 export CORE_HUB_URL=http://localhost:8080

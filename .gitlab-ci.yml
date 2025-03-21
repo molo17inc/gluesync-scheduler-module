@@ -34,12 +34,17 @@ variables:
   before_script:
     - pip install -r requirements.txt
     - pip install pytest pytest-cov python-dotenv
+    # Create Gluesync default directories
+    - mkdir -p /opt/gluesync/data
     # Use license file from GitLab CI variables
-    - echo "$GLUESYNC_LICENSE_CONTENT" > gs-license.dat
+    - echo "$GLUESYNC_LICENSE_CONTENT" > /opt/gluesync/data/gs-license.dat
+    # Copy security config if it exists
+    - if [ -f security-config.json ]; then cp security-config.json /opt/gluesync/data/security-config.json; fi
     # Set up environment variables for testing
-    - export GLUESYNC_LICENSE_FILE=gs-license.dat
+    - export GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat
     - export GLUESYNC_MODULE_TAG=scheduler-module
     - export GLUESYNC_USE_SSL=False
+    - export GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
     - export DB_URL=sqlite:///./tests/data/test_scheduler.db
     - export DEBUG=True
     - export CORE_HUB_URL=http://mock-corehub:8080

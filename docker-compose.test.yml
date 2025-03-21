@@ -10,9 +10,10 @@ services:
       - DB_URL=sqlite:///./tests/data/test_scheduler.db
       - DEBUG=True
       - CORE_HUB_URL=http://mock-corehub:8080
-      - GLUESYNC_LICENSE_FILE=gs-license.dat
+      - GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat
       - GLUESYNC_MODULE_TAG=chronos-module
       - GLUESYNC_USE_SSL=False
+      - GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
       - CRONTAB_USER=root
     volumes:
       - ./:/app
@@ -20,7 +21,9 @@ services:
       bash -c "
         echo 'Running tests in CI environment...' &&
         pip install pytest pytest-cov pytest-mock python-dotenv &&
-        echo \"${GLUESYNC_LICENSE_CONTENT}\" > gs-license.dat &&
+        mkdir -p /opt/gluesync/data &&
+        echo \"${GLUESYNC_LICENSE_CONTENT}\" > /opt/gluesync/data/gs-license.dat &&
+        if [ -f security-config.json ]; then cp security-config.json /opt/gluesync/data/security-config.json; fi &&
         python -m pytest tests/ -v --cov=. --cov-report=term --cov-report=html:coverage-report --junitxml=test-results.xml
       "
     networks:

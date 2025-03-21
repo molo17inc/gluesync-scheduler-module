@@ -144,6 +144,14 @@ class GluesyncSDKClient:
         use_ssl = settings.GLUESYNC_USE_SSL
         if settings.CORE_HUB_URL and parsed_url and parsed_url.scheme == "https":
             use_ssl = True
+        
+        # Security configuration
+        security_config = settings.GLUESYNC_SECURITY_CONFIG
+        if not os.path.exists(security_config):
+            logger.warning(f"Security config file not found at {security_config}, will use default settings")
+            security_config = None
+            
+        # Legacy settings (kept for backward compatibility)
         keystore_path = settings.GLUESYNC_KEYSTORE_PATH
         keystore_password = settings.GLUESYNC_KEYSTORE_PASSWORD
         
@@ -154,6 +162,8 @@ class GluesyncSDKClient:
             license_file_path=license_file_path,
             module_tag=settings.GLUESYNC_MODULE_TAG,
             ssl=use_ssl,
+            security_config=security_config,
+            # Legacy settings (kept for backward compatibility)
             keystore_path=keystore_path,
             keystore_password=keystore_password
         )

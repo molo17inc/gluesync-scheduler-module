@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Create Gluesync default directories
+RUN mkdir -p /opt/gluesync/data
+
 # Set environment variables for Python, dependency installation, and the application
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -20,11 +23,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ALLOWED_ORIGINS=* \
     # Scheduler settings \
     CRONTAB_USER= \
-    # Gluesync SDK settings \
-    GLUESYNC_LICENSE_FILE=gs-license.dat \
+    # Gluesync SDK settings using default paths \
+    GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat \
     GLUESYNC_USE_SSL=False \
-    GLUESYNC_KEYSTORE_PATH= \
-    GLUESYNC_KEYSTORE_PASSWORD=
+    GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
