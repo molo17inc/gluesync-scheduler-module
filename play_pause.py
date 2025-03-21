@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
- * This file is part of GlueSync Scheduler Module.
+ * This file is part of Gluesync Scheduler Module.
  *
- * GlueSync Scheduler Module is dual-licensed under the following licenses:
+ * Gluesync Scheduler Module is dual-licensed under the following licenses:
  *
  * 1. GNU General Public License (GPL) Version 3
  *    You may use, modify, and distribute this software under the terms of the GPL v3.
@@ -38,7 +38,7 @@ from gluesync_sdk_client import gluesync_sdk_client
 logger = logging.getLogger(__name__)
 
 class CoreHubClient:
-    """Client for interacting with the GlueSync Core Hub API"""
+    """Client for interacting with the Gluesync Core Hub API"""
     
     def __init__(self):
         """Initialize the Core Hub client with configuration from settings"""
@@ -344,7 +344,7 @@ def main():
     """
     # Create argument parser
     parser = argparse.ArgumentParser(
-        description="GlueSync Pipeline Management Tool",
+        description="Gluesync Pipeline Management Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     

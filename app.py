@@ -39,8 +39,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="GlueSync Scheduler Module",
-    description="REST API service for scheduling tasks in GlueSync. This module provides endpoints to create, manage, and execute scheduled jobs for GlueSync pipelines and entities.",
+    title="Gluesync Scheduler Module",
+    description="REST API service for scheduling tasks in Gluesync. This module provides endpoints to create, manage, and execute scheduled jobs for Gluesync pipelines and entities.",
     version="1.0.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -57,7 +57,7 @@ app = FastAPI(
     ],
     contact={
         "name": "MOLO17 Support",
-        "url": "https://www.molo17.com/contact/",
+        "url": "https://support.molo17.com",
         "email": "info@molo17.com",
     },
     license_info={
@@ -82,6 +82,14 @@ async def startup_event():
     try:
         await gluesync_sdk_client.initialize()
         logger.info("Gluesync SDK client initialized successfully")
+        
+        # Update the CoreHub URL from the SDK if available
+        if gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
+            sdk_corehub_url = gluesync_sdk_client.corehub_url
+            logger.info(f"Using CoreHub URL from SDK: {sdk_corehub_url}")
+            settings.update_corehub_url(sdk_corehub_url)
+        else:
+            logger.info(f"Using configured CoreHub URL: {settings.CORE_HUB_URL}")
     except Exception as e:
         logger.error(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("Application will continue, but CoreHub connection may not be available")

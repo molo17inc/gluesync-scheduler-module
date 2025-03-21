@@ -31,8 +31,15 @@ load_dotenv(dotenv_path=env_path)
 
 class Settings:
     # Core Hub settings
+    # CORE_HUB_URL will be dynamically set from the SDK after discovery
+    # This default value is only used if the SDK is not available or not initialized
     CORE_HUB_URL = os.getenv('CORE_HUB_URL', 'http://localhost:1717')
     ENTITY_START_TIMEOUT = int(os.getenv('ENTITY_START_TIMEOUT', '2'))
+    
+    def update_corehub_url(self, url: str):
+        """Update the CoreHub URL from the SDK"""
+        if url:
+            self.CORE_HUB_URL = url
     
     # API Server settings
     HOST = os.getenv('HOST', '0.0.0.0')
@@ -50,7 +57,8 @@ class Settings:
     
     # Gluesync SDK settings
     GLUESYNC_LICENSE_FILE = os.getenv('GLUESYNC_LICENSE_FILE', 'gs-license.dat')
-    GLUESYNC_MODULE_TAG = os.getenv('GLUESYNC_MODULE_TAG', 'scheduler-module')
+    # Module tag is hardcoded and cannot be changed externally
+    GLUESYNC_MODULE_TAG = 'chronos-module'
     GLUESYNC_USE_SSL = os.getenv('GLUESYNC_USE_SSL', 'False').lower() in ('true', '1', 'yes')
     GLUESYNC_KEYSTORE_PATH = os.getenv('GLUESYNC_KEYSTORE_PATH', None)
     GLUESYNC_KEYSTORE_PASSWORD = os.getenv('GLUESYNC_KEYSTORE_PASSWORD', None)

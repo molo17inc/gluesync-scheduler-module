@@ -74,6 +74,21 @@ class GluesyncSDKClient:
     def is_initialized(self) -> bool:
         """Check if the client is initialized"""
         return self._is_initialized
+        
+    @property
+    def corehub_url(self) -> str:
+        """Get the CoreHub URL after discovery"""
+        if not self._client or not self._is_initialized:
+            return None
+            
+        # Get the host and port from the client
+        host = self._client.host
+        port = self._client.port
+        scheme = "https" if self._client.use_ssl else "http"
+        
+        if host and port:
+            return f"{scheme}://{host}:{port}"
+        return None
     
     async def initialize(self):
         """Initialize the Gluesync client"""
