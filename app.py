@@ -88,13 +88,16 @@ async def startup_event():
             await asyncio.wait_for(initialization_task, timeout=30.0)  # 30 seconds timeout
             logger.info("Gluesync SDK client initialized successfully")
             
-            # Update the CoreHub URL from the SDK if available
-            if gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
-                sdk_corehub_url = gluesync_sdk_client.corehub_url
-                logger.info(f"Using CoreHub URL from SDK: {sdk_corehub_url}")
-                settings.update_corehub_url(sdk_corehub_url)
-            else:
-                logger.info(f"Using configured CoreHub URL: {settings.CORE_HUB_URL}")
+            # The CoreHub URL should already be updated in the SDK client's initialize method
+            # if discovery was successful, but we'll check it here for completeness
+            if gluesync_sdk_client.is_initialized:
+                if gluesync_sdk_client.corehub_url:
+                    logger.info(f"Using CoreHub URL from SDK: {gluesync_sdk_client.corehub_url}")
+                elif settings.CORE_HUB_URL:
+                    logger.info(f"Using configured CoreHub URL: {settings.CORE_HUB_URL}")
+                else:
+                    logger.warning("No CoreHub URL available. The application will continue, "
+                                 "but CoreHub connection may not be available.")
         except asyncio.TimeoutError:
             logger.warning("Timeout while waiting for CoreHub discovery. The application will continue, "
                          "but CoreHub connection may not be available until a CoreHub is discovered.")

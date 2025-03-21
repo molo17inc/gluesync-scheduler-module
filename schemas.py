@@ -43,7 +43,7 @@ class JobBase(BaseModel):
 class JobCreate(JobBase):
     """Model for creating a new job (inherits all fields from JobBase)"""
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "name": "Daily entity backup",
                 "description": "Create a daily snapshot of critical entities",
@@ -68,7 +68,7 @@ class JobUpdate(BaseModel):
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "name": "Updated daily entity backup",
                 "description": "Updated description",
@@ -89,8 +89,8 @@ class Job(JobBase):
     command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
 
     class Config:
-        orm_mode = True
-        schema_extra = {
+        from_attributes = True
+        json_schema_extra = {
             "example": {
                 "id": 1,
                 "name": "Daily entity backup",
@@ -117,7 +117,7 @@ class JobList(BaseModel):
     total: int = Field(..., description="Total number of jobs (without pagination)")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "items": [
                     {
@@ -148,7 +148,7 @@ class ErrorResponse(BaseModel):
     detail: str = Field(..., description="Error message with details about the problem")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "detail": "Job with ID 123 not found"
             }

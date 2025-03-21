@@ -84,14 +84,38 @@ class GluesyncSDKClient:
         # Get the host and port from the client
         host = self._client.host
         port = self._client.port
-        scheme = "https" if self._client.use_ssl else "http"
+        use_ssl = self._client.use_ssl
         
-        if host and port:
-            return f"{scheme}://{host}:{port}"
-        return None
+        # Use the helper method to build the URL
+        return self._build_corehub_url(host, port, use_ssl)
+        
+    def _build_corehub_url(self, host, port, use_ssl=False):
+        """Build a proper CoreHub URL with the given host, port and SSL setting
+        
+        Args:
+            host (str): The host name or IP address
+            port (int): The port number
+            use_ssl (bool): Whether to use HTTPS or HTTP
+            
+        Returns:
+            str: The formatted CoreHub URL
+        """
+        if not host:
+            return None
+            
+        # Use default port if None
+        if port is None:
+            port = 1717
+            
+        scheme = "https" if use_ssl else "http"
+        return f"{scheme}://{host}:{port}"
     
     async def initialize(self):
-        """Initialize the Gluesync client"""
+        """Initialize the Gluesync client with indefinite retries and exponential backoff
+        
+        The method will retry indefinitely with exponential backoff starting at 1 second,
+        doubling each time up to 30 seconds, then resetting back to 1 second.
+        """
         if self._is_initialized:
             logger.info("Gluesync SDK client already initialized")
             return
@@ -100,6 +124,7 @@ class GluesyncSDKClient:
         host = None
         port = None
         use_discovery = True
+        parsed_url = None
         
         if settings.CORE_HUB_URL:
             parsed_url = urlparse(settings.CORE_HUB_URL)
@@ -117,57 +142,94 @@ class GluesyncSDKClient:
         
         # SSL configuration
         use_ssl = settings.GLUESYNC_USE_SSL
-        if settings.CORE_HUB_URL and parsed_url.scheme == "https":
+        if settings.CORE_HUB_URL and parsed_url and parsed_url.scheme == "https":
             use_ssl = True
         keystore_path = settings.GLUESYNC_KEYSTORE_PATH
         keystore_password = settings.GLUESYNC_KEYSTORE_PASSWORD
         
-        try:
-            # Create the client
-            self._client = GluesyncClient(
-                host=host,  # None will trigger UDP discovery
-                port=port,  # None will use default port
-                license_file_path=license_file_path,
-                module_tag=settings.GLUESYNC_MODULE_TAG,
-                ssl=use_ssl,
-                keystore_path=keystore_path,
-                keystore_password=keystore_password
-            )
-            
-            # Set up event handlers
-            self._client.on_connected = self._on_connected
-            self._client.on_disconnected = self._on_disconnected
-            self._client.on_error = self._on_error
-            
-            # Connect to CoreHub
-            if host and port:
-                logger.info(f"Connecting to CoreHub at {host}:{port}...")
-            else:
-                logger.info("Starting UDP discovery to find CoreHub...")
-            await self._client.connect()
-            
-            self._is_initialized = True
-            logger.info("Gluesync SDK client initialized successfully")
-            
-        except GluesyncLicenseError as e:
-            logger.error(f"License error: {e}")
-            raise
-            
-        except GluesyncAuthenticationError as e:
-            logger.error(f"Authentication error: {e}")
-            raise
-            
-        except GluesyncConnectionError as e:
-            logger.error(f"Connection error: {e}")
-            raise
-            
-        except GluesyncError as e:
-            logger.error(f"Gluesync error: {e}")
-            raise
-            
-        except Exception as e:
-            logger.exception(f"Unexpected error: {e}")
-            raise
+        # Create the client
+        self._client = GluesyncClient(
+            host=host,  # None will trigger UDP discovery
+            port=port if port is not None else 1717,  # Use default port 1717 if None
+            license_file_path=license_file_path,
+            module_tag=settings.GLUESYNC_MODULE_TAG,
+            ssl=use_ssl,
+            keystore_path=keystore_path,
+            keystore_password=keystore_password
+        )
+        
+        # Set up event handlers
+        self._client.on_connected = self._on_connected
+        self._client.on_disconnected = self._on_disconnected
+        self._client.on_error = self._on_error
+        
+        # Connect to CoreHub with indefinite retry logic and exponential backoff
+        retry_count = 0
+        backoff_delay = 1  # Start with 1 second delay
+        max_backoff = 30  # Maximum backoff of 30 seconds
+        cycle_count = 0   # Count full cycles of backoff
+        
+        while True:  # Retry indefinitely
+            try:
+                if host and port:
+                    logger.info(f"Connecting to CoreHub at {host}:{port}...")
+                    await self._client.connect()
+                    break  # Connection successful
+                else:
+                    # UDP discovery mode
+                    if retry_count > 0:
+                        logger.info(f"Retry {retry_count} (cycle {cycle_count}) for UDP discovery...")
+                    else:
+                        logger.info("Starting UDP discovery to find CoreHub...")
+                    
+                    await self._client.connect()
+                    
+                    # After connect, check if we have a host (discovery worked)
+                    if self._client.host:
+                        logger.info(f"UDP discovery successful! Found CoreHub at {self._client.host}:{self._client.port}")
+                        # Update the discovered host/port for future use
+                        host = self._client.host
+                        port = self._client.port
+                        # Update the CoreHub URL in settings
+                        corehub_url = self._build_corehub_url(host, port, use_ssl)
+                        if corehub_url:
+                            settings.update_corehub_url(corehub_url)
+                            logger.info(f"Updated CoreHub URL to {corehub_url}")
+                        break  # Connection successful
+                    else:
+                        # If no host was discovered, raise an error to trigger retry
+                        raise GluesyncConnectionError("UDP discovery did not find a CoreHub")
+                    
+            except GluesyncConnectionError as e:
+                if host and port:
+                    # If we have a specific host/port and can't connect, don't retry
+                    logger.error(f"Failed to connect to CoreHub at {host}:{port}: {e}")
+                    raise
+                else:
+                    # For UDP discovery, retry with exponential backoff
+                    retry_count += 1
+                    logger.warning(f"UDP discovery attempt {retry_count} failed: {e}")
+                    
+                    # Calculate backoff with exponential increase
+                    logger.info(f"Waiting {backoff_delay} seconds before next retry...")
+                    await asyncio.sleep(backoff_delay)
+                    
+                    # Double the backoff for next time, up to the maximum
+                    backoff_delay = min(backoff_delay * 2, max_backoff)
+                    
+                    # If we've reached max backoff, reset on the next failure
+                    if backoff_delay >= max_backoff:
+                        backoff_delay = 1  # Reset to 1 second
+                        cycle_count += 1   # Increment cycle count
+                        logger.info(f"Completed backoff cycle {cycle_count}, resetting delay to 1 second")
+                        
+            except (GluesyncLicenseError, GluesyncAuthenticationError) as e:
+                # Don't retry for these errors
+                logger.error(f"{type(e).__name__}: {e}")
+                raise
+        
+        self._is_initialized = True
+        logger.info("Gluesync SDK client initialized successfully")
     
     async def shutdown(self):
         """Shutdown the Gluesync client"""
@@ -206,6 +268,8 @@ class GluesyncSDKClient:
             error: The exception that occurred
         """
         logger.error(f"Error in connection: {error}")
+        
+
 
 
 # Create a global instance for easy import
