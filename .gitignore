@@ -58,3 +58,5 @@ site/
 
 # Project specific
 scheduler.db
+gluesync-sdk
+gs-license.dat
