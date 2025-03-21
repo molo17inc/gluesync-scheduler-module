@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libc6-dev \
     python3-dev \
+    cron \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
