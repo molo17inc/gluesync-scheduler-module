@@ -1,0 +1,41 @@
+# Docker Compose file for testing the Gluesync Scheduler Module
+# This file is used to run tests in a Docker environment that simulates the CI environment
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DB_URL=sqlite:///./tests/data/test_scheduler.db
+      - DEBUG=True
+      - CORE_HUB_URL=http://mock-corehub:8080
+      - GLUESYNC_LICENSE_FILE=gs-license.dat
+      - GLUESYNC_MODULE_TAG=chronos-module
+      - GLUESYNC_USE_SSL=False
+      - CRONTAB_USER=root
+    volumes:
+      - ./:/app
+    command: >
+      bash -c "
+        echo 'Running tests in CI environment...' &&
+        pip install pytest pytest-cov pytest-mock python-dotenv &&
+        echo \"${GLUESYNC_LICENSE_CONTENT}\" > gs-license.dat &&
+        python -m pytest tests/ -v --cov=. --cov-report=term --cov-report=html:coverage-report --junitxml=test-results.xml
+      "
+    networks:
+      - test-network
+
+  mock-corehub:
+    image: wiremock/wiremock:latest
+    volumes:
+      - ./tests/wiremock:/home/wiremock
+    ports:
+      - "8080:8080"
+    command: --verbose
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

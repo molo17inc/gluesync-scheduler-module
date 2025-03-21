@@ -178,6 +178,45 @@ The integration uses only the SDK-provided authentication token for all CoreHub 
 
 The module automatically retrieves the CoreHub URL from the SDK after discovery, ensuring that the correct URL is used even when the CoreHub is discovered dynamically through UDP broadcast.
 
+## Testing
+
+The module includes comprehensive tests to ensure functionality and reliability. Tests are organized into three categories:
+
+1. **Cron Job Tests**: Tests the creation, updating, and execution of cron jobs through the scheduler module.
+2. **CoreHub Integration Tests**: Tests the integration with the CoreHub API through the SDK.
+3. **API Tests**: Tests the REST API endpoints for managing scheduled jobs.
+
+### Running Tests Locally
+
+To run the tests locally:
+
+```bash
+./tests/run_tests.sh
+```
+
+Or to run a specific test file:
+
+```bash
+./tests/run_tests.sh tests/test_cron_jobs.py
+```
+
+### Running Tests in Docker
+
+To run tests in a Docker environment that simulates the CI environment:
+
+```bash
+./run_tests.sh --docker
+```
+
+### CI/CD Pipeline
+
+The module uses GitLab CI/CD for continuous integration and deployment. The pipeline includes:
+
+- **Test Stage**: Runs all tests with coverage reporting
+- **Deploy Stage**: Builds and deploys the Docker image (only on tags)
+
+See [CI_SETUP.md](CI_SETUP.md) for details on setting up the GitLab CI/CD variables.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
@@ -187,6 +226,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+6. Make sure all tests pass in the CI pipeline
 
 ## Authors
 

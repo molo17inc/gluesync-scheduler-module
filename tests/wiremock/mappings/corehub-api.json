@@ -1,0 +1,89 @@
+{
+  "mappings": [
+    {
+      "request": {
+        "method": "GET",
+        "urlPattern": "/pipelines/[^/]+/config"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "id": "test-pipeline-id",
+          "name": "Test Pipeline",
+          "entities": [
+            {
+              "entityId": "test-entity-id",
+              "entityName": "Test Entity"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "urlPathPattern": "/pipelines/[^/]+/commands/sync/start"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "status": "success",
+          "message": "Entity started successfully"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "urlPathPattern": "/pipelines/[^/]+/commands/sync/stop"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "status": "success",
+          "message": "Entity paused successfully"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "urlPathPattern": "/pipelines/[^/]+/commands/sync/resync"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "status": "success",
+          "message": "Entity resynced successfully"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPattern": "/ext-module"
+      },
+      "response": {
+        "status": 101,
+        "headers": {
+          "Upgrade": "websocket",
+          "Connection": "Upgrade",
+          "Sec-WebSocket-Accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        },
+        "body": "WebSocket connection established"
+      }
+    }
+  ]
+}

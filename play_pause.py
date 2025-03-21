@@ -203,6 +203,21 @@ class CoreHubClient:
             params=params
         )
         print(f"Paused sync for entity: {entity_id}")
+        
+    def resync_entity(self, pipeline_id: str, entity_id: str) -> None:
+        """Resynchronize a specific entity
+        
+        Args:
+            pipeline_id: ID of the pipeline
+            entity_id: ID of the entity
+        """
+        params = {'entity': entity_id}
+        self.fetch_core_hub(
+            f"/pipelines/{pipeline_id}/commands/sync/resync",
+            method='POST',
+            params=params
+        )
+        print(f"Resynced entity: {entity_id}")
     
     def resync_pipeline(self, pipeline_id: str, entity_id: Optional[str] = None) -> Dict[str, Any]:
         """Trigger a one-time snapshot sync for a pipeline or specific entity
