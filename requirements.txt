@@ -7,6 +7,6 @@ sqlalchemy==2.0.28
 python-dotenv==1.0.1
 pytest==8.1.1
 httpx==0.27.0
+croniter==2.0.1
 
-# Local gluesync_sdk dependency - could be replaced with PyPI package once available
-# -e ../gluesync-python-corehub-handshake-sdk/
+# The gluesync_sdk dependency is installed directly in the Dockerfile

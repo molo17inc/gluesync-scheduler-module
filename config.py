@@ -32,8 +32,8 @@ load_dotenv(dotenv_path=env_path)
 class Settings:
     # Core Hub settings
     # CORE_HUB_URL will be dynamically set from the SDK after discovery
-    # This default value is only used if the SDK is not available or not initialized
-    CORE_HUB_URL = os.getenv('CORE_HUB_URL', 'http://localhost:1717')
+    # If not provided, UDP discovery will be used to find the CoreHub
+    CORE_HUB_URL = os.getenv('CORE_HUB_URL', '')
     ENTITY_START_TIMEOUT = int(os.getenv('ENTITY_START_TIMEOUT', '2'))
     
     def update_corehub_url(self, url: str):

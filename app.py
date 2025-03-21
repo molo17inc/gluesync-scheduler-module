@@ -80,16 +80,26 @@ app.add_middleware(
 async def startup_event():
     logger.info("Initializing Gluesync SDK client...")
     try:
-        await gluesync_sdk_client.initialize()
-        logger.info("Gluesync SDK client initialized successfully")
-        
-        # Update the CoreHub URL from the SDK if available
-        if gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
-            sdk_corehub_url = gluesync_sdk_client.corehub_url
-            logger.info(f"Using CoreHub URL from SDK: {sdk_corehub_url}")
-            settings.update_corehub_url(sdk_corehub_url)
-        else:
-            logger.info(f"Using configured CoreHub URL: {settings.CORE_HUB_URL}")
+        # Set a timeout for the initialization to avoid hanging indefinitely
+        # if the CoreHub is not available
+        initialization_task = asyncio.create_task(gluesync_sdk_client.initialize())
+        try:
+            # Wait for the initialization to complete with a timeout
+            await asyncio.wait_for(initialization_task, timeout=30.0)  # 30 seconds timeout
+            logger.info("Gluesync SDK client initialized successfully")
+            
+            # Update the CoreHub URL from the SDK if available
+            if gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
+                sdk_corehub_url = gluesync_sdk_client.corehub_url
+                logger.info(f"Using CoreHub URL from SDK: {sdk_corehub_url}")
+                settings.update_corehub_url(sdk_corehub_url)
+            else:
+                logger.info(f"Using configured CoreHub URL: {settings.CORE_HUB_URL}")
+        except asyncio.TimeoutError:
+            logger.warning("Timeout while waiting for CoreHub discovery. The application will continue, "
+                         "but CoreHub connection may not be available until a CoreHub is discovered.")
+            # Don't cancel the task, let it continue in the background
+            # so that it can connect when a CoreHub becomes available
     except Exception as e:
         logger.error(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("Application will continue, but CoreHub connection may not be available")

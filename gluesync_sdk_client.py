@@ -96,10 +96,19 @@ class GluesyncSDKClient:
             logger.info("Gluesync SDK client already initialized")
             return
         
-        # Parse host and port from CORE_HUB_URL
-        parsed_url = urlparse(settings.CORE_HUB_URL)
-        host = parsed_url.hostname or "localhost"
-        port = parsed_url.port or 1717
+        # Parse host and port from CORE_HUB_URL if provided
+        host = None
+        port = None
+        use_discovery = True
+        
+        if settings.CORE_HUB_URL:
+            parsed_url = urlparse(settings.CORE_HUB_URL)
+            host = parsed_url.hostname
+            port = parsed_url.port
+            use_discovery = False
+            logger.info(f"Using provided CoreHub URL: {settings.CORE_HUB_URL}")
+        else:
+            logger.info("No CoreHub URL provided, will use UDP discovery")
         
         # Get license file path from settings
         license_file_path = settings.GLUESYNC_LICENSE_FILE
@@ -107,15 +116,17 @@ class GluesyncSDKClient:
             logger.warning(f"License file not found at {license_file_path}, will attempt to proceed without it")
         
         # SSL configuration
-        use_ssl = settings.GLUESYNC_USE_SSL or parsed_url.scheme == "https"
+        use_ssl = settings.GLUESYNC_USE_SSL
+        if settings.CORE_HUB_URL and parsed_url.scheme == "https":
+            use_ssl = True
         keystore_path = settings.GLUESYNC_KEYSTORE_PATH
         keystore_password = settings.GLUESYNC_KEYSTORE_PASSWORD
         
         try:
             # Create the client
             self._client = GluesyncClient(
-                host=host,
-                port=port,
+                host=host,  # None will trigger UDP discovery
+                port=port,  # None will use default port
                 license_file_path=license_file_path,
                 module_tag=settings.GLUESYNC_MODULE_TAG,
                 ssl=use_ssl,
@@ -129,7 +140,10 @@ class GluesyncSDKClient:
             self._client.on_error = self._on_error
             
             # Connect to CoreHub
-            logger.info(f"Connecting to CoreHub at {host}:{port}...")
+            if host and port:
+                logger.info(f"Connecting to CoreHub at {host}:{port}...")
+            else:
+                logger.info("Starting UDP discovery to find CoreHub...")
             await self._client.connect()
             
             self._is_initialized = True

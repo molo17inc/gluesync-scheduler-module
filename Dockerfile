@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     # Core Hub settings \
-    CORE_HUB_URL=http://localhost:1717 \
+    CORE_HUB_URL= \
     ENTITY_START_TIMEOUT=2 \
     # API Server settings \
     HOST=0.0.0.0 \
@@ -28,18 +28,23 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc &&
-    apt-get clean &&
+    gcc \
+    libc6-dev \
+    python3-dev \
+    && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the project files
+# Copy the project files including the submodule
 COPY . .
+
+# Install specific websockets version first to avoid compatibility issues
+RUN pip install websockets==11.0.3
+
+# Install the SDK from the submodule first
+RUN pip install -e ./gluesync-sdk
+
+# Install other Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose the port the app runs on
 EXPOSE 1717
