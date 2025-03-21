@@ -21,12 +21,22 @@
  * Copyright (C) 2025 MOLO17. All rights reserved.
 """
 
+import asyncio
+import logging
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.router import router
 from config import settings
+from gluesync_sdk_client import gluesync_sdk_client
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG if settings.DEBUG else logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="GlueSync Scheduler Module",
@@ -64,6 +74,36 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Setup event handlers for Gluesync SDK client initialization and shutdown
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Initializing Gluesync SDK client...")
+    try:
+        await gluesync_sdk_client.initialize()
+        logger.info("Gluesync SDK client initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Gluesync SDK client: {e}")
+        logger.warning("Application will continue, but CoreHub connection may not be available")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Shutting down Gluesync SDK client...")
+    try:
+        await gluesync_sdk_client.shutdown()
+        logger.info("Gluesync SDK client shutdown successfully")
+    except Exception as e:
+        logger.error(f"Error during Gluesync SDK client shutdown: {e}")
+
+# Middleware to catch any uncaught exceptions
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        logger.exception(f"Uncaught exception: {e}")
+        # Re-raise to let FastAPI handle the error response
+        raise
 
 # Include the API router
 app.include_router(router, prefix="/api")

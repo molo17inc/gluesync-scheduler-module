@@ -25,12 +25,17 @@ import os
 import json
 import time
 import argparse
+import logging
 from typing import Dict, List, Optional, Any, Union
 
 import requests
 from urllib.parse import quote_plus
 
 from config import settings
+from gluesync_sdk_client import gluesync_sdk_client
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 class CoreHubClient:
     """Client for interacting with the GlueSync Core Hub API"""
@@ -38,11 +43,23 @@ class CoreHubClient:
     def __init__(self):
         """Initialize the Core Hub client with configuration from settings"""
         self.base_url = settings.CORE_HUB_URL
-        self.username = settings.DEFAULT_USER
-        self.password = settings.DEFAULT_PASSWORD
-        self.entity_start_timeout = 2  # seconds to wait between entity operations
+        self.entity_start_timeout = settings.ENTITY_START_TIMEOUT  # seconds to wait between entity operations
         self.token = None
+        
+        # Try to get token from gluesync SDK client if available
+        self._try_sdk_token()
     
+    def _try_sdk_token(self):
+        """Try to get token from gluesync SDK client if it's initialized"""
+        try:
+            if gluesync_sdk_client.is_initialized and gluesync_sdk_client.token:
+                self.token = gluesync_sdk_client.token
+                logger.info("Using token from gluesync SDK client")
+                return True
+        except Exception as e:
+            logger.warning(f"Could not get token from gluesync SDK client: {e}")
+        return False
+            
     def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict[str, Any]] = None, 
                       params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """Make a request to the Core Hub API
@@ -56,6 +73,10 @@ class CoreHubClient:
         Returns:
             Response data as dictionary or None if request failed
         """
+        # Try to get the SDK token first if we don't have one yet
+        if not self.token:
+            self._try_sdk_token()
+            
         url = f"{self.base_url}{path}"
         headers = {
             'Authorization': f'Bearer {self.token}' if self.token else None,
@@ -64,46 +85,38 @@ class CoreHubClient:
 
         # Log request details if in debug mode
         if settings.DEBUG:
-            print(f"Sending request to: {url}")
-            print(f"Method: {method}")
-            print(f"Headers: {headers}")
-            print(f"Body: {body}")
-            print(f"Params: {params}")
+            logger.debug(f"Sending request to: {url}")
+            logger.debug(f"Method: {method}")
+            logger.debug(f"Headers: {headers}")
+            logger.debug(f"Body: {body}")
+            logger.debug(f"Params: {params}")
 
         response = requests.request(method, url, headers=headers, json=body, params=params)
 
         # Log response details if in debug mode
         if settings.DEBUG:
-            print(f"Response status code: {response.status_code}")
-            print(f"Response content: {response.text}")
+            logger.debug(f"Response status code: {response.status_code}")
+            logger.debug(f"Response content: {response.text}")
 
         if response.status_code < 200 or response.status_code >= 300:
-            print(f"Request to {url} failed with status code {response.status_code}: {response.text}")
+            logger.error(f"Request to {url} failed with status code {response.status_code}: {response.text}")
             return None
 
         try:
             return response.json()
         except json.JSONDecodeError:
-            print(f"Failed to parse JSON response: {response.text}")
+            logger.error(f"Failed to parse JSON response: {response.text}")
             return None
 
     def authenticate(self) -> None:
         """Authenticate with the Core Hub API and store the token"""
-        auth_response = self.fetch_core_hub(
-            '/authentication/login',
-            method='POST',
-            body={'username': self.username, 'password': self.password}
-        )
-        if auth_response is None:
-            raise Exception('Authentication request failed - check server connection and credentials')
-        
-        if not isinstance(auth_response, dict):
-            raise Exception('Authentication response is not in the expected format')
-        
-        token = auth_response.get('apiToken')
-        if not token:
-            raise Exception('Authentication succeeded but no API token was returned')
-        self.token = token
+        # Use the SDK token only
+        if self._try_sdk_token() and self.token:
+            logger.info("Using authentication token from gluesync SDK client")
+            return
+
+        # If SDK token is not available, raise an exception
+        raise Exception('Authentication requires SDK token - ensure the gluesync_sdk_client is properly initialized')
     
     def get_pipelines(self) -> List[Dict[str, Any]]:
         """Get a list of all pipelines

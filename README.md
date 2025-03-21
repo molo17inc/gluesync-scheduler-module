@@ -16,6 +16,7 @@ A backend service that provides a set of REST APIs for scheduling and managing c
   - More task types can be easily added
 - **Job Management**: View, create, update, disable/enable, and delete scheduled jobs
 - **Containerized Deployment**: Docker support for easy deployment
+- **CoreHub Integration**: Direct SDK integration with GlueSync CoreHub for secure authentication and communication
 
 ## Prerequisites
 
@@ -80,14 +81,24 @@ Configure the application using environment variables:
 | Variable | Description | Default |
 |----------|-------------|----------|
 | `CORE_HUB_URL` | URL of the Gluesync Core Hub | `http://localhost:1717` |
-| `DEFAULT_USER` | Default user for Core Hub authentication | `admin` |
-| `DEFAULT_PASSWORD` | Default password for Core Hub authentication | `admin` |
 | `HOST` | Host to bind the API server | `0.0.0.0` |
 | `PORT` | Port to bind the API server | `1717` |
 | `DEBUG` | Enable debug mode | `False` |
 | `DB_URL` | Database connection URL | `sqlite:///./scheduler.db` |
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
+
+### GlueSync SDK Configuration
+
+Additional environment variables for the GlueSync SDK integration:
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `GLUESYNC_LICENSE_FILE` | Path to the GlueSync license file | `gs-license.dat` |
+| `GLUESYNC_MODULE_TAG` | Module identifier for CoreHub registration | `scheduler-module` |
+| `GLUESYNC_USE_SSL` | Whether to use SSL for CoreHub connection | `False` |
+| `GLUESYNC_KEYSTORE_PATH` | Path to JKS keystore file for SSL | `None` |
+| `GLUESYNC_KEYSTORE_PASSWORD` | Password for JKS keystore | `None` |
 
 You can set these in a `.env` file in the project root.
 
@@ -152,6 +163,17 @@ This project is dual-licensed under the following licenses:
    - Contact MOLO17 at [info@molo17.com](mailto:info@molo17.com) for licensing terms and conditions.
 
 You must choose one of these licenses to use this software. Using this software implies acceptance of one of these licenses.
+
+## CoreHub Integration
+
+This module now integrates directly with the GlueSync CoreHub using the official `gluesync_sdk`. The SDK provides:
+
+- Secure WebSocket connection to the CoreHub
+- Automatic handshake and authentication
+- JWT token management for API calls
+- Proper error handling for connection issues
+
+The integration uses only the SDK-provided authentication token for all CoreHub API calls. Manual authentication with username/password is completely removed, making the module more secure and streamlined.
 
 ## Contributing
 
