@@ -21,6 +21,14 @@ services:
     command: >
       bash -c "
         echo 'Running tests in CI environment...' &&
+        # Initialize and update the Git submodule
+        git submodule init &&
+        git submodule update &&
+        # Install specific websockets version first to avoid compatibility issues
+        pip install websockets==11.0.3 &&
+        # Install the SDK from the submodule first
+        pip install -e ./gluesync-sdk &&
+        # Install other dependencies
         pip install pytest pytest-cov pytest-mock python-dotenv &&
         mkdir -p /opt/gluesync/data &&
         mkdir -p ./tests/data &&

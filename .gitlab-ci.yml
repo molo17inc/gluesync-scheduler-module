@@ -32,6 +32,14 @@ variables:
   stage: test
   image: python:3.9
   before_script:
+    # Initialize and update the Git submodule
+    - git submodule init
+    - git submodule update
+    # Install specific websockets version first to avoid compatibility issues
+    - pip install websockets==11.0.3
+    # Install the SDK from the submodule first
+    - pip install -e ./gluesync-sdk
+    # Install other dependencies
     - pip install -r requirements.txt
     - pip install pytest pytest-cov python-dotenv
     # Create Gluesync default directories

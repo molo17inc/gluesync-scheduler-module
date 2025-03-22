@@ -3,6 +3,13 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
+# Initialize and update the Git submodule
+git submodule init
+git submodule update
+
+# Create test data directory
+mkdir -p ./tests/data
+
 # Create Gluesync default directories
 mkdir -p /opt/gluesync/data
 
@@ -28,6 +35,13 @@ export DB_URL=sqlite:///./tests/data/test_scheduler.db
 export DEBUG=True
 export CORE_HUB_URL=http://localhost:8080
 export CRONTAB_USER=$USER
+export HOST=0.0.0.0  # Bind to all interfaces
+
+# Install specific websockets version first to avoid compatibility issues
+pip install websockets==11.0.3
+
+# Install the SDK from the submodule
+pip install -e ./gluesync-sdk
 
 # Check if a specific test file is provided
 if [ $# -eq 1 ]; then
