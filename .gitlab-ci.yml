@@ -49,6 +49,10 @@ variables:
     - export DEBUG=True
     - export CORE_HUB_URL=http://mock-corehub:8080
     - export CRONTAB_USER=$USER
+    # Set HOST to 0.0.0.0 to bind to all interfaces in CI environment
+    - export HOST=0.0.0.0
+    # Create test data directory
+    - mkdir -p ./tests/data
   artifacts:
     when: always
     reports:

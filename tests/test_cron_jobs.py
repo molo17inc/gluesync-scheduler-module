@@ -42,7 +42,7 @@ from services.job_service import JobService
 
 # Test configuration
 TEST_DB_URL = "sqlite:///./tests/data/test_scheduler.db"
-TEST_API_URL = "http://localhost:1717/api"
+TEST_API_URL = "http://127.0.0.1:1717/api"  # Use IP address instead of localhost
 TEST_PIPELINE_ID = "test-pipeline-123"
 TEST_ENTITY_ID = "test-entity-456"
 
@@ -59,6 +59,14 @@ def setup_test_env():
     env["DB_URL"] = TEST_DB_URL
     env["DEBUG"] = "True"
     env["PORT"] = "1717"
+    env["HOST"] = "0.0.0.0"  # Bind to all interfaces, not just localhost
+    
+    # Make sure the data directory exists
+    os.makedirs(os.path.dirname(TEST_DB_URL.replace('sqlite:///', '')), exist_ok=True)
+    
+    print("Starting test API server...")
+    print(f"Using database: {TEST_DB_URL}")
+    print(f"Server will bind to {env['HOST']}:{env['PORT']}")
     
     # Start the server
     server_process = subprocess.Popen(
@@ -68,20 +76,40 @@ def setup_test_env():
         stderr=subprocess.PIPE
     )
     
-    # Wait for server to start
-    time.sleep(5)
+    # Wait for server to start - longer in CI environment
+    wait_time = 10  # Increased wait time
+    print(f"Waiting {wait_time} seconds for server to start...")
+    time.sleep(wait_time)
     
     # Check if server is running
-    try:
-        response = requests.get(f"{TEST_API_URL}/jobs")
-        assert response.status_code == 200
-    except Exception as e:
+    max_retries = 3
+    retry_delay = 2
+    success = False
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"Attempt {attempt+1}/{max_retries} to connect to server...")
+            response = requests.get(f"{TEST_API_URL}/jobs", timeout=5)
+            if response.status_code == 200:
+                print("Successfully connected to test server!")
+                success = True
+                break
+            else:
+                print(f"Server responded with status code {response.status_code}")
+        except Exception as e:
+            print(f"Connection attempt {attempt+1} failed: {e}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+    
+    if not success:
         # If server didn't start, print output and raise
+        print("All connection attempts failed. Checking server output...")
         stdout, stderr = server_process.communicate(timeout=1)
         print(f"Server stdout: {stdout.decode()}")
         print(f"Server stderr: {stderr.decode()}")
         server_process.terminate()
-        raise Exception(f"Failed to start test server: {e}")
+        raise Exception("Failed to start test server after multiple attempts")
     
     yield
     

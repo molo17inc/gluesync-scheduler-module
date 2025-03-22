@@ -15,6 +15,7 @@ services:
       - GLUESYNC_USE_SSL=False
       - GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
       - CRONTAB_USER=root
+      - HOST=0.0.0.0
     volumes:
       - ./:/app
     command: >
@@ -22,6 +23,7 @@ services:
         echo 'Running tests in CI environment...' &&
         pip install pytest pytest-cov pytest-mock python-dotenv &&
         mkdir -p /opt/gluesync/data &&
+        mkdir -p ./tests/data &&
         echo \"${GLUESYNC_LICENSE_CONTENT}\" > /opt/gluesync/data/gs-license.dat &&
         if [ -f security-config.json ]; then cp security-config.json /opt/gluesync/data/security-config.json; fi &&
         python -m pytest tests/ -v --cov=. --cov-report=term --cov-report=html:coverage-report --junitxml=test-results.xml
