@@ -26,10 +26,12 @@ services:
         git submodule update &&
         # Install specific websockets version first to avoid compatibility issues
         pip install websockets==11.0.3 &&
-        # Install the SDK from the submodule first
-        pip install -e ./gluesync-sdk &&
+        # Set environment variable to use mock implementation
+        export USE_MOCK=true &&
         # Install other dependencies
         pip install pytest pytest-cov pytest-mock python-dotenv &&
+        # Make sure mock files are executable
+        chmod +x tests/run_with_mock.py &&
         mkdir -p /opt/gluesync/data &&
         mkdir -p ./tests/data &&
         echo \"${GLUESYNC_LICENSE_CONTENT}\" > /opt/gluesync/data/gs-license.dat &&

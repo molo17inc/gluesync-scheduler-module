@@ -1,0 +1,12 @@
+{
+  "ssl": {
+    "sslCertificatePath": "/opt/gluesync/data/gluesync.com.jks",
+    "certificateAlias": "gluesync",
+    "certificatePassword": "gluesync",
+    "certificateKeyPassword": "gluesync"
+  },
+  "dh": {
+    "diffieHellmanPassword": "gluesync-password",
+    "salt": "gluesync-salt"
+  }
+}

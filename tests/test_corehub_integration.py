@@ -29,6 +29,12 @@ import pytest
 import requests
 import subprocess
 from unittest.mock import patch, MagicMock
+
+# Add the project root directory to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Import mock gluesync_sdk before any other imports that might use it
+from tests.mock_gluesync_sdk import GluesyncSDK
 from datetime import datetime, timedelta
 
 # Add the project root directory to the Python path

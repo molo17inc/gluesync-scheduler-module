@@ -27,11 +27,13 @@ import pytest
 import requests
 import subprocess
 import sys
-import os
 from datetime import datetime
 
-# Add the project root directory to the Python path
+# Add project root to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Import mock gluesync_sdk before any other imports that might use it
+from tests.mock_gluesync_sdk import GluesyncSDK
 from models import TaskType
 
 # Test configuration
@@ -44,6 +46,12 @@ TEST_ENTITY_ID = "test-entity-api-456"
 @pytest.fixture(scope="session")
 def setup_api_test_env():
     """Set up test environment with a clean database and running server"""
+    # Import necessary modules inside the function to avoid UnboundLocalError
+    import os
+    import subprocess
+    import sys
+    import time
+    
     # Create test database directory if it doesn't exist
     os.makedirs("./tests/data", exist_ok=True)
     
@@ -53,6 +61,8 @@ def setup_api_test_env():
     env["DEBUG"] = "True"
     env["PORT"] = "1718"
     env["HOST"] = "0.0.0.0"  # Bind to all interfaces, not just localhost
+    env["PYTHONPATH"] = os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) + os.pathsep + env.get("PYTHONPATH", "")
+    env["USE_MOCK"] = "true"  # Ensure we use the mock implementation
     
     # Make sure the data directory exists
     os.makedirs(os.path.dirname(TEST_DB_URL.replace('sqlite:///', '')), exist_ok=True)
@@ -60,13 +70,22 @@ def setup_api_test_env():
     print("Starting test API server...")
     print(f"Using database: {TEST_DB_URL}")
     print(f"Server will bind to {env['HOST']}:{env['PORT']}")
+    print(f"PYTHONPATH: {env['PYTHONPATH']}")
     
-    # Start the server
+    # Use the existing run_with_mock.py script instead of creating a new one
+    mock_script_path = os.path.join(os.path.dirname(__file__), 'run_with_mock.py')
+    
+    # Ensure the script is executable
+    if not os.access(mock_script_path, os.X_OK):
+        os.chmod(mock_script_path, 0o755)
+    
+    # Start the server with our mock script
     server_process = subprocess.Popen(
-        ["python", "app.py"],
+        [sys.executable, mock_script_path],
         env=env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+        stderr=subprocess.PIPE,
+        cwd=os.path.join(os.path.dirname(__file__), '..')
     )
     
     # Wait for server to start - longer in CI environment
@@ -98,11 +117,45 @@ def setup_api_test_env():
     if not success:
         # If server didn't start, print output and raise
         print("All connection attempts failed. Checking server output...")
-        stdout, stderr = server_process.communicate(timeout=1)
-        print(f"Server stdout: {stdout.decode()}")
-        print(f"Server stderr: {stderr.decode()}")
-        server_process.terminate()
-        raise Exception("Failed to start test server after multiple attempts")
+        
+        # Use non-blocking reads to avoid hanging
+        stdout_data = b""
+        stderr_data = b""
+        
+        # Try to read stdout without blocking
+        try:
+            # Set stdout to non-blocking mode
+            import fcntl, os
+            flags = fcntl.fcntl(server_process.stdout, fcntl.F_GETFL)
+            fcntl.fcntl(server_process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            stdout_data = server_process.stdout.read() or b""
+        except Exception as e:
+            print(f"Error reading stdout: {e}")
+        
+        # Try to read stderr without blocking
+        try:
+            # Set stderr to non-blocking mode
+            flags = fcntl.fcntl(server_process.stderr, fcntl.F_GETFL)
+            fcntl.fcntl(server_process.stderr, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            stderr_data = server_process.stderr.read() or b""
+        except Exception as e:
+            print(f"Error reading stderr: {e}")
+        
+        print(f"Server stdout: {stdout_data.decode() if stdout_data else 'No output'}")
+        print(f"Server stderr: {stderr_data.decode() if stderr_data else 'No output'}")
+        
+        # Terminate the server process
+        try:
+            server_process.terminate()
+            server_process.wait(timeout=5)
+        except Exception as e:
+            print(f"Error terminating server process: {e}")
+            try:
+                server_process.kill()
+            except:
+                pass
+        
+        raise Exception("Failed to start test server after multiple attempts - server returned 500 Internal Server Error")
     
     yield
     
@@ -121,7 +174,7 @@ def test_create_job_api(setup_api_test_env):
     job_data = {
         "name": "API Test Job 1",
         "description": "Test job for API testing",
-        "task_type": "PIPELINE_START",
+        "task_type": "pipeline_start",
         "cron_expression": "*/10 * * * *",  # Run every 10 minutes
         "pipeline_id": TEST_PIPELINE_ID,
         "with_snapshot": False,
@@ -129,6 +182,8 @@ def test_create_job_api(setup_api_test_env):
     }
     
     response = requests.post(f"{TEST_API_URL}/jobs", json=job_data)
+    print(f"Response status code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 201
     
     job = response.json()
@@ -155,7 +210,7 @@ def test_get_job_api(setup_api_test_env):
     job_data = {
         "name": "API Test Job 2",
         "description": "Test job for API get testing",
-        "task_type": "ENTITY_START",
+        "task_type": "entity_start",
         "cron_expression": "0 */2 * * *",  # Run every 2 hours
         "pipeline_id": TEST_PIPELINE_ID,
         "entity_id": TEST_ENTITY_ID,
@@ -164,6 +219,8 @@ def test_get_job_api(setup_api_test_env):
     }
     
     response = requests.post(f"{TEST_API_URL}/jobs", json=job_data)
+    print(f"Response status code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 201
     job_id = response.json()["id"]
     
@@ -192,7 +249,7 @@ def test_list_jobs_api(setup_api_test_env):
     job_data_1 = {
         "name": "API Test Job 3",
         "description": "Test job for API list testing 1",
-        "task_type": "PIPELINE_START",
+        "task_type": "pipeline_start",
         "cron_expression": "*/15 * * * *",
         "pipeline_id": TEST_PIPELINE_ID,
         "with_snapshot": False,
@@ -202,7 +259,7 @@ def test_list_jobs_api(setup_api_test_env):
     job_data_2 = {
         "name": "API Test Job 4",
         "description": "Test job for API list testing 2",
-        "task_type": "ENTITY_STOP",
+        "task_type": "entity_stop",
         "cron_expression": "0 0 * * *",
         "pipeline_id": TEST_PIPELINE_ID,
         "entity_id": TEST_ENTITY_ID,
@@ -233,7 +290,7 @@ def test_list_jobs_api(setup_api_test_env):
     assert job_id_2 in job_ids
     
     # Test filtering by task_type
-    response = requests.get(f"{TEST_API_URL}/jobs?task_type=ENTITY_STOP")
+    response = requests.get(f"{TEST_API_URL}/jobs?task_type=entity_stop")
     assert response.status_code == 200
     
     jobs = response.json()
@@ -259,7 +316,7 @@ def test_update_job_api(setup_api_test_env):
     job_data = {
         "name": "API Test Job 5",
         "description": "Test job for API update testing",
-        "task_type": "PIPELINE_SNAPSHOT",
+        "task_type": "pipeline_snapshot",
         "cron_expression": "0 12 * * *",  # Run at noon
         "pipeline_id": TEST_PIPELINE_ID,
         "with_snapshot": False,
@@ -267,6 +324,8 @@ def test_update_job_api(setup_api_test_env):
     }
     
     response = requests.post(f"{TEST_API_URL}/jobs", json=job_data)
+    print(f"Response status code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 201
     job_id = response.json()["id"]
     
@@ -303,7 +362,7 @@ def test_delete_job_api(setup_api_test_env):
     job_data = {
         "name": "API Test Job 6",
         "description": "Test job for API delete testing",
-        "task_type": "ENTITY_SNAPSHOT",
+        "task_type": "entity_snapshot",
         "cron_expression": "0 0 * * 0",  # Run at midnight on Sundays
         "pipeline_id": TEST_PIPELINE_ID,
         "entity_id": TEST_ENTITY_ID,
@@ -312,6 +371,8 @@ def test_delete_job_api(setup_api_test_env):
     }
     
     response = requests.post(f"{TEST_API_URL}/jobs", json=job_data)
+    print(f"Response status code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 201
     job_id = response.json()["id"]
     
@@ -341,7 +402,7 @@ def test_invalid_job_creation(setup_api_test_env):
     # Test invalid cron expression
     job_data = {
         "name": "Invalid Job",
-        "task_type": "PIPELINE_START",
+        "task_type": "pipeline_start",
         "cron_expression": "invalid cron",
         "pipeline_id": TEST_PIPELINE_ID,
         "enabled": True

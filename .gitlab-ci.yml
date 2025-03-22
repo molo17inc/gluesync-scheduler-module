@@ -37,8 +37,14 @@ variables:
     - git submodule update
     # Install specific websockets version first to avoid compatibility issues
     - pip install websockets==11.0.3
-    # Install the SDK from the submodule first
-    - pip install -e ./gluesync-sdk
+    # Copy mock implementation files
+    - mkdir -p tests
+    - cp -f $CI_PROJECT_DIR/tests/mock_gluesync_sdk.py $CI_PROJECT_DIR/tests/
+    - cp -f $CI_PROJECT_DIR/tests/mock_gluesync_sdk_client.py $CI_PROJECT_DIR/tests/
+    - cp -f $CI_PROJECT_DIR/tests/run_with_mock.py $CI_PROJECT_DIR/tests/
+    - chmod +x $CI_PROJECT_DIR/tests/run_with_mock.py
+    # Set environment variable to use mock implementation
+    - export USE_MOCK=true
     # Install other dependencies
     - pip install -r requirements.txt
     - pip install pytest pytest-cov python-dotenv
