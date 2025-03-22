@@ -72,16 +72,15 @@ variables:
     reports:
       junit: test-results.xml
     paths:
-      - coverage-report/
+      - coverage.xml
       - test-results.xml
 
 unit_tests:
   <<: *test_template
   script:
     - echo "Running unit tests for the scheduler module"
-    - mkdir -p coverage-report
-    - pytest tests/test_corehub_integration.py -v --junitxml=test-results.xml --cov=. --cov-report=term --cov-report=html:coverage-report
-    - ls -la coverage-report/  # Debug: check if files were generated
+    - python -m pytest tests/test_corehub_integration.py -v --junitxml=test-results.xml --cov=. --cov-report=term --cov-report=xml:coverage.xml
+    - ls -la .  # Debug: list files in working directory
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
@@ -89,9 +88,8 @@ api_tests:
   <<: *test_template
   script:
     - echo "Running API tests for the scheduler module"
-    - mkdir -p coverage-report
-    - pytest tests/test_api.py -v --junitxml=test-results.xml --cov=. --cov-report=term --cov-report=html:coverage-report
-    - ls -la coverage-report/  # Debug: check if files were generated
+    - python -m pytest tests/test_api.py -v --junitxml=test-results.xml --cov=. --cov-report=term --cov-report=xml:coverage.xml
+    - ls -la .  # Debug: list files in working directory
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
@@ -99,9 +97,8 @@ cron_job_tests:
   <<: *test_template
   script:
     - echo "Running cron job tests for the scheduler module"
-    - mkdir -p coverage-report
-    - pytest tests/test_cron_jobs.py -v --junitxml=test-results.xml --cov=. --cov-report=term --cov-report=html:coverage-report
-    - ls -la coverage-report/  # Debug: check if files were generated
+    - python -m pytest tests/test_cron_jobs.py -v --junitxml=test-results.xml --cov=. --cov-report=term --cov-report=xml:coverage.xml
+    - ls -la .  # Debug: list files in working directory
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 

@@ -380,7 +380,7 @@ def test_job_execution(setup_test_env, db_session):
     job_data = {
         "name": "Test Job 4",
         "description": "Test job for CI - execution test",
-        "task_type": "ENTITY_SNAPSHOT",
+        "task_type": "entity_snapshot",
         "cron_expression": cron_expression,
         "pipeline_id": TEST_PIPELINE_ID,
         "entity_id": TEST_ENTITY_ID,
