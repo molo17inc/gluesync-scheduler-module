@@ -26,11 +26,15 @@ import time
 import pytest
 import requests
 import subprocess
+import sys
+import os
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from crontab import CronTab
 
+# Add the project root directory to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database import Base
 from models import ScheduledJob, TaskType
 from services.cron_service import CronService
