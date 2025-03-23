@@ -163,9 +163,6 @@ class GluesyncSDKClient:
             module_tag=settings.GLUESYNC_MODULE_TAG,
             ssl=use_ssl,
             security_config=security_config,
-            # Legacy settings (kept for backward compatibility)
-            keystore_path=keystore_path,
-            keystore_password=keystore_password
         )
         
         # Set up event handlers

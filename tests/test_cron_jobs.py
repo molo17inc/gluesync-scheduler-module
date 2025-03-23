@@ -284,7 +284,7 @@ def test_update_cron_job(setup_test_env, db_session, cron_service):
     job_data = {
         "name": "Test Job 2",
         "description": "Test job for CI - update test",
-        "task_type": "ENTITY_START",
+        "task_type": "entity_start",
         "cron_expression": "0 */2 * * *",  # Run every 2 hours
         "pipeline_id": TEST_PIPELINE_ID,
         "entity_id": TEST_ENTITY_ID,
