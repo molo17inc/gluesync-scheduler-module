@@ -74,6 +74,8 @@ variables:
     paths:
       - coverage.xml
       - test-results.xml
+  rules:
+    - if: $CI_COMMIT_TAG == null
 
 unit_tests:
   <<: *test_template
