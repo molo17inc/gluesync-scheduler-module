@@ -125,7 +125,7 @@ class CronService:
         entity_id_str = str(job.entity_id) if job.entity_id is not None else "N/A"
         
         cmd = f"echo '\n=== JOB EXECUTION START: '\`{timestamp_cmd}\`' ===\n' >> {log_file} && \
-               echo 'Job ID: {job_id_str}\nJob Name: {job.name}\nTask Type: {job.task_type}\nPipeline ID: {job.pipeline_id}\nEntity ID: {entity_id_str}\nWith Snapshot: {job.with_snapshot}\nSchedule: {job.schedule}\n' >> {log_file} && \
+               echo 'Job ID: {job_id_str}\nJob Name: {job.name}\nTask Type: {job.task_type}\nPipeline ID: {job.pipeline_id}\nEntity ID: {entity_id_str}\nWith Snapshot: {job.with_snapshot}\nSchedule: {job.cron_expression}\n' >> {log_file} && \
                echo 'Executing command: {curl_cmd}\n' >> {log_file} && \
                {curl_cmd} -v >> {log_file} 2>&1 && \
                echo '\n=== JOB EXECUTION END: '\`{timestamp_cmd}\`' ===\n' >> {log_file}"
