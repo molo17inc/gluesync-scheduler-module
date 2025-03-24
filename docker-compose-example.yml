@@ -12,6 +12,7 @@ services:
       - ./gs-license.dat:/opt/gluesync/data/gs-license.dat
       - ./security-config.json:/opt/gluesync/data/security-config.json
       - ./logs:/app/logs
+      - ./data:/app/data
     ports:
       - "1717:1717"
     command: uvicorn app:app --host 0.0.0.0 --port 1717
@@ -21,7 +22,7 @@ services:
       - HOST=0.0.0.0
       - PORT=1717
       - DEBUG=False
-      - DB_URL=sqlite:///./scheduler.db
+      - DB_URL=sqlite:///./data/scheduler.db
       - ALLOWED_ORIGINS=*
       - CRONTAB_USER=root
       - GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat
