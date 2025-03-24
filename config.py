@@ -47,7 +47,14 @@ class Settings:
     DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
     
     # Database settings
-    DB_URL = os.getenv('DB_URL', 'sqlite:///./scheduler.db')
+    # Use the mounted data directory for persistent storage
+    DATA_DIR = os.getenv('DATA_DIR', './data')
+    DB_URL = os.getenv('DB_URL', f'sqlite:///{DATA_DIR}/scheduler.db')
+    
+    def __init__(self):
+        """Initialize settings and ensure data directory exists"""
+        # Create data directory if it doesn't exist
+        os.makedirs(self.DATA_DIR, exist_ok=True)
     
     # CORS settings
     ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*').split(',')

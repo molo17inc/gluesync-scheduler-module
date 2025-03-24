@@ -29,8 +29,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.router import router
 from api.pipeline_router import router as pipeline_router
-from config import settings
+from config import settings, Settings
 from gluesync_sdk_client import gluesync_sdk_client
+
+# Initialize settings to ensure data directory exists
+settings = Settings()
 
 # Configure logging
 logging.basicConfig(

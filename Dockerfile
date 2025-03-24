@@ -33,8 +33,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Create Gluesync default directories
-RUN mkdir -p /opt/gluesync/data
+# Create Gluesync default directories and app data directory
+RUN mkdir -p /opt/gluesync/data && \
+    mkdir -p /app/data && \
+    chmod 777 /app/data
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -47,7 +49,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=1717 \
     DEBUG=False \
     # Database settings \
-    DB_URL=sqlite:///./scheduler.db \
+    DATA_DIR=/app/data \
+    DB_URL=sqlite:///./data/scheduler.db \
     # CORS settings \
     ALLOWED_ORIGINS=* \
     # Scheduler settings \
