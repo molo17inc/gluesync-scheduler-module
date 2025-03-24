@@ -1,6 +1,6 @@
-# GitLab CI Setup for Gluesync Scheduler Module
+# GitLab CI Setup for Gluesync Scheduler Module (aka Chronos)
 
-This document describes how to set up the GitLab CI/CD pipeline for the Gluesync Scheduler Module.
+This document describes how to set up the GitLab CI/CD pipeline for the Gluesync Scheduler Module (aka Chronos).
 
 ## Required CI/CD Variables
 

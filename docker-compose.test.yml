@@ -1,4 +1,4 @@
-# Docker Compose file for testing the Gluesync Scheduler Module
+# Docker Compose file for testing the Gluesync Scheduler Module (aka Chronos)
 # This file is used to run tests in a Docker environment that simulates the CI environment
 
 services:

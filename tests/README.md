@@ -1,6 +1,6 @@
-# Gluesync Scheduler Module Tests
+# Gluesync Scheduler Module (aka Chronos) Tests
 
-This directory contains tests for the Gluesync Scheduler Module. These tests are designed to verify the functionality of the scheduler module, including the creation, updating, and execution of cron jobs.
+This directory contains tests for the Gluesync Scheduler Module (aka Chronos). These tests are designed to verify the functionality of the scheduler module, including the creation, updating, and execution of cron jobs.
 
 ## Test Structure
 

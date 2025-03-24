@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
- * This file is part of Gluesync Scheduler Module.
+ * This file is part of Gluesync Scheduler Module (aka Chronos).
  *
- * Gluesync Scheduler Module is dual-licensed under the following licenses:
+ * Gluesync Scheduler Module (aka Chronos) is dual-licensed under the following licenses:
  *
  * 1. GNU General Public License (GPL) Version 3
  *    You may use, modify, and distribute this software under the terms of the GPL v3.
@@ -39,7 +39,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Gluesync Scheduler Module",
+    title="Gluesync Scheduler Module (aka Chronos)",
     description="REST API service for scheduling tasks in Gluesync. This module provides endpoints to create, manage, and execute scheduled jobs for Gluesync pipelines and entities.",
     version="1.0.0",
     docs_url="/api/docs",

@@ -1,7 +1,7 @@
 #!/bin/bash
-# Script to run tests for the Gluesync Scheduler Module
+# Script to run tests for the Gluesync Scheduler Module (aka Chronos)
 
-set -e  # Exit immediately if a command exits with a non-zero status
+set -e # Exit immediately if a command exits with a non-zero status
 
 # Initialize and update the Git submodule
 git submodule init

@@ -1,4 +1,4 @@
-# Gluesync Scheduler Module
+# Gluesync Scheduler Module (aka Chronos)
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![License](https://img.shields.io/badge/license-Dual-green)
@@ -102,6 +102,66 @@ Additional environment variables for the Gluesync SDK integration:
 > **Note**: The module identifier (`GLUESYNC_MODULE_TAG`) is hardcoded as `scheduler-module` and cannot be changed externally.
 
 You can set these in a `.env` file in the project root.
+
+## Running Locally and Testing with Postman
+
+To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with Postman, follow these steps:
+
+### Prerequisites
+
+- Ensure Docker is installed on your machine.
+- Ensure Python is installed on your machine.
+
+### Environment Setup
+
+1. **Set Up Environment Variables**:
+
+   Create a `.env` file in the root of your project directory with the following content:
+
+   ```text
+   GLUESYNC_LICENSE_FILE=gs-license.dat
+   GLUESYNC_MODULE_TAG=scheduler-module
+   GLUESYNC_USE_SSL=False
+   GLUESYNC_SECURITY_CONFIG=/path/to/security-config.json
+   DB_URL=sqlite:///./data/test_scheduler.db
+   DEBUG=True
+   CORE_HUB_URL=http://localhost:8080
+   CRONTAB_USER=$USER
+   HOST=0.0.0.0
+   ```
+
+### Running the Application
+
+2. **Build and Run the Docker Container**:
+
+   Use Docker to build and run the project with the following commands:
+
+   ```bash
+   docker build -t gluesync-scheduler-module .
+   docker run -p 8080:8080 --env-file .env gluesync-scheduler-module
+   ```
+
+   This will start the application, and it should be accessible on `http://localhost:8080`.
+
+### Testing the API with Postman
+
+3. **Test with Postman**:
+
+   Open Postman and create a new request.
+
+   Set the request URL to `http://localhost:8080/your-endpoint`.
+
+   Choose the appropriate HTTP method (GET, POST, etc.) and set any required headers or body data.
+
+   Send the request and observe the response.
+
+4. **Verify Logs and Outputs**:
+
+   Check the terminal for logs to ensure the application is running correctly.
+
+   If there are any issues, verify the Docker logs for more details.
+
+By following these steps, you should be able to run the project locally and test the API using Postman. If you encounter any issues, feel free to ask for further assistance!
 
 ## API Documentation
 
