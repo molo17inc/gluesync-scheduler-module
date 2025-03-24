@@ -87,9 +87,11 @@ router = APIRouter(
             "description": "Internal server error during operation"
         },
     },
-    dependencies=[Depends(verify_localhost)],  # Apply localhost verification to all routes
-    description="**INTERNAL USE ONLY**: These endpoints are exclusively for internal system use by the scheduler module's cron jobs. They are not intended for external API consumption and are restricted to localhost access only."
+    dependencies=[Depends(verify_localhost)]  # Apply localhost verification to all routes
 )
+
+# Note: Router-level description is not supported in the installed FastAPI version
+# The internal use only warning is included in each endpoint's documentation
 
 @router.post(
     "/{pipeline_id}/play",
