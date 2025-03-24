@@ -23,12 +23,16 @@
 
 from typing import List, Optional, Dict, Any
 import uuid
+import logging
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from models import ScheduledJob
-from schemas import JobCreate, JobUpdate
+from schemas import JobCreate, JobUpdate, ScheduleConfig
 from services.cron_service import CronService
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class JobService:
@@ -42,6 +46,40 @@ class JobService:
         temp_job = ScheduledJob(**job_data)
         command = self.cron_service._get_job_command(temp_job)
         return command
+        
+    def _schedule_to_cron(self, schedule: ScheduleConfig) -> str:
+        """
+        Convert a ScheduleConfig to a cron expression
+        
+        Args:
+            schedule: ScheduleConfig object
+            
+        Returns:
+            str: Equivalent cron expression
+        """
+        if not schedule:
+            return None
+            
+        # Handle days of week
+        if not schedule.days_of_week:
+            # Empty list means every day
+            day_of_week = "*"
+        else:
+            # Map days to cron format (0-6, where 0 is Sunday)
+            day_map = {
+                "monday": 1,
+                "tuesday": 2,
+                "wednesday": 3,
+                "thursday": 4,
+                "friday": 5,
+                "saturday": 6,
+                "sunday": 0
+            }
+            days = [str(day_map[day.lower()]) for day in schedule.days_of_week]
+            day_of_week = ",".join(days)
+        
+        # Create cron expression: minute hour * * day_of_week
+        return f"{schedule.minute} {schedule.hour} * * {day_of_week}"
     
     def get_jobs(self, skip: int = 0, limit: int = 100) -> List[ScheduledJob]:
         """Get all scheduled jobs with pagination"""
@@ -57,11 +95,25 @@ class JobService:
     
     def create_job(self, job_data: JobCreate) -> ScheduledJob:
         """Create a new scheduled job"""
+        # Convert Pydantic model to dict (exclude unset values)
+        job_dict = job_data.dict(exclude_unset=True)
+        
+        # Handle schedule conversion to cron expression if provided
+        if job_data.schedule:
+            logger.info(f"Converting user-friendly schedule to cron expression")
+            cron_expression = self._schedule_to_cron(job_data.schedule)
+            job_dict['cron_expression'] = cron_expression
+            logger.info(f"Converted schedule to cron expression: {cron_expression}")
+            
+            # Remove schedule from dict as it's not in the ScheduledJob model
+            if 'schedule' in job_dict:
+                job_dict.pop('schedule')
+        
         # Validate cron expression
-        if not self.cron_service.validate_cron_expression(job_data.cron_expression):
+        if not self.cron_service.validate_cron_expression(job_dict['cron_expression']):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid cron expression: {job_data.cron_expression}"
+                detail=f"Invalid cron expression: {job_dict['cron_expression']}"
             )
         
         # Check if a job with the same name already exists
@@ -71,9 +123,6 @@ class JobService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Job with name '{job_data.name}' already exists"
             )
-        
-        # Convert Pydantic model to dict
-        job_dict = job_data.dict()
         
         # Generate command based on job type
         command = self._create_command(job_dict)
@@ -114,16 +163,27 @@ class JobService:
         job = self.get_job_by_id(job_id)
         if not job:
             return None
-        
-        # Check if the cron expression is being updated and is valid
-        if job_data.cron_expression and not self.cron_service.validate_cron_expression(job_data.cron_expression):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid cron expression: {job_data.cron_expression}"
-            )
-        
+            
         # Update job fields from the request
         update_data = job_data.dict(exclude_unset=True)
+        
+        # Handle schedule conversion to cron expression if provided
+        if job_data.schedule:
+            logger.info(f"Converting user-friendly schedule to cron expression for job update")
+            cron_expression = self._schedule_to_cron(job_data.schedule)
+            update_data['cron_expression'] = cron_expression
+            logger.info(f"Converted schedule to cron expression: {cron_expression}")
+            
+            # Remove schedule from dict as it's not in the ScheduledJob model
+            if 'schedule' in update_data:
+                update_data.pop('schedule')
+        
+        # Check if the cron expression is being updated and is valid
+        if 'cron_expression' in update_data and not self.cron_service.validate_cron_expression(update_data['cron_expression']):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid cron expression: {update_data['cron_expression']}"
+            )
         
         # Check if any fields that affect the command have changed
         command_affecting_fields = {
@@ -147,7 +207,7 @@ class JobService:
         self.cron_service.update_job(job)
         
         # Update next run time if cron expression changed
-        if job_data.cron_expression:
+        if 'cron_expression' in update_data:
             job.next_run = self.cron_service.get_next_run_time(job.cron_expression)
         
         self.db.commit()

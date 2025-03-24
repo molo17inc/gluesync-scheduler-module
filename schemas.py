@@ -22,10 +22,51 @@
 """
 
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field
+from typing import Optional, List, Union
+from pydantic import BaseModel, Field, validator
+from enum import Enum
 
 from models import TaskType
+
+
+class DayOfWeek(str, Enum):
+    """Days of the week for scheduling"""
+    MONDAY = "monday"
+    TUESDAY = "tuesday"
+    WEDNESDAY = "wednesday"
+    THURSDAY = "thursday"
+    FRIDAY = "friday"
+    SATURDAY = "saturday"
+    SUNDAY = "sunday"
+    
+
+class ScheduleConfig(BaseModel):
+    """User-friendly schedule configuration"""
+    days_of_week: List[DayOfWeek] = Field(
+        default_factory=list,
+        description="Days of the week when the job should run (empty list means every day)",
+        example=["monday", "wednesday", "friday"]
+    )
+    hour: int = Field(
+        ..., 
+        description="Hour of the day (0-23)", 
+        example=8,
+        ge=0,
+        lt=24
+    )
+    minute: int = Field(
+        ..., 
+        description="Minute of the hour (0-59)", 
+        example=30,
+        ge=0,
+        lt=60
+    )
+    
+    @validator('days_of_week')
+    def validate_days(cls, v):
+        if not v:
+            return v  # Empty list means every day
+        return v
 
 
 class JobBase(BaseModel):
@@ -33,11 +74,21 @@ class JobBase(BaseModel):
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
     task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline")
-    cron_expression: str = Field(..., description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight)", example="0 0 * * *")
+    schedule: Optional[ScheduleConfig] = Field(None, description="User-friendly schedule configuration")
+    cron_expression: Optional[str] = Field(None, description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight). Not required if schedule is provided.", example="0 0 * * *")
     pipeline_id: str = Field(..., description="ID of the pipeline to operate on", example="pipeline-123")
     entity_id: Optional[str] = Field(None, description="ID of the entity to operate on (required for entity operations)", example="entity-456")
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
+    
+    @validator('cron_expression', 'schedule')
+    def validate_schedule_options(cls, v, values):
+        # Ensure either cron_expression or schedule is provided
+        if 'cron_expression' in values and values['cron_expression'] is None and \
+           ('schedule' not in values or values['schedule'] is None):
+            if v is None:  # This is the second field being validated
+                raise ValueError("Either cron_expression or schedule must be provided")
+        return v
 
 
 class JobCreate(JobBase):
@@ -61,7 +112,8 @@ class JobUpdate(BaseModel):
     """Model for updating an existing job (all fields are optional)"""
     name: Optional[str] = Field(None, description="Updated name of the job", example="Updated daily entity backup")
     description: Optional[str] = Field(None, description="Updated description of the job", example="Updated description for the daily backup")
-    cron_expression: Optional[str] = Field(None, description="Updated cron expression", example="0 0 * * *")
+    schedule: Optional[ScheduleConfig] = Field(None, description="Updated user-friendly schedule configuration")
+    cron_expression: Optional[str] = Field(None, description="Updated cron expression. Not required if schedule is provided.", example="0 0 * * *")
     pipeline_id: Optional[str] = Field(None, description="Updated pipeline ID", example="pipeline-123")
     entity_id: Optional[str] = Field(None, description="Updated entity ID", example="entity-456")
     with_snapshot: Optional[bool] = Field(None, description="Updated snapshot setting")
@@ -72,7 +124,11 @@ class JobUpdate(BaseModel):
             "example": {
                 "name": "Updated daily entity backup",
                 "description": "Updated description",
-                "cron_expression": "0 0 * * *",
+                "schedule": {
+                    "days_of_week": ["monday", "wednesday", "friday"],
+                    "hour": 8,
+                    "minute": 30
+                },
                 "enabled": True
             }
         }
