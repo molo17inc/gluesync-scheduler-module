@@ -76,6 +76,7 @@ COPY ./models.py .
 COPY ./schemas.py .
 COPY ./play_pause.py .
 COPY ./gluesync_sdk_client.py .
+COPY ./database.py .
 COPY ./api ./api
 COPY ./services ./services
 
