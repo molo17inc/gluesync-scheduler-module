@@ -57,13 +57,45 @@ class JobService:
         Returns:
             str: Equivalent cron expression
         """
+        logger.info(f"Converting schedule to cron expression: {schedule}")
         if not schedule:
+            logger.warning("Schedule is None, returning None")
             return None
+            
+        logger.info(f"Schedule minute value: '{schedule.minute}', type: {type(schedule.minute)}")
+        logger.info(f"Schedule hour value: '{schedule.hour}', type: {type(schedule.hour)}")
+        logger.info(f"Schedule days_of_week: {schedule.days_of_week}")
+            
+        # Validate minute and hour values
+        try:
+            minute = int(schedule.minute)
+            logger.info(f"Parsed minute value to int: {minute}")
+            if minute < 0 or minute > 59:
+                error_msg = f"Invalid minute value: {minute}. Must be between 0 and 59."
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+        except (ValueError, TypeError) as e:
+            error_msg = f"Invalid minute value: {schedule.minute}. {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
+        try:
+            hour = int(schedule.hour)
+            logger.info(f"Parsed hour value to int: {hour}")
+            if hour < 0 or hour > 23:
+                error_msg = f"Invalid hour value: {hour}. Must be between 0 and 23."
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+        except (ValueError, TypeError) as e:
+            error_msg = f"Invalid hour value: {schedule.hour}. {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
             
         # Handle days of week
         if not schedule.days_of_week:
             # Empty list means every day
             day_of_week = "*"
+            logger.info("No days of week specified, using '*' for every day")
         else:
             # Map days to cron format (0-6, where 0 is Sunday)
             day_map = {
@@ -75,11 +107,20 @@ class JobService:
                 "saturday": 6,
                 "sunday": 0
             }
-            days = [str(day_map[day.lower()]) for day in schedule.days_of_week]
-            day_of_week = ",".join(days)
+            logger.info(f"Days of week specified: {schedule.days_of_week}")
+            try:
+                days = [str(day_map[day.lower()]) for day in schedule.days_of_week]
+                day_of_week = ",".join(days)
+                logger.info(f"Converted days to cron format: {day_of_week}")
+            except KeyError as e:
+                error_msg = f"Invalid day of week: {e}. Must be one of: {', '.join(day_map.keys())}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
         
         # Create cron expression: minute hour * * day_of_week
-        return f"{schedule.minute} {schedule.hour} * * {day_of_week}"
+        cron_expression = f"{minute} {hour} * * {day_of_week}"
+        logger.info(f"Generated cron expression: '{cron_expression}'")
+        return cron_expression
     
     def get_jobs(self, skip: int = 0, limit: int = 100) -> List[ScheduledJob]:
         """Get all scheduled jobs with pagination"""
@@ -98,23 +139,44 @@ class JobService:
         # Convert Pydantic model to dict (exclude unset values)
         job_dict = job_data.dict(exclude_unset=True)
         
+        logger.info(f"Creating job with data: {job_dict}")
+        
+        # Check if either cron_expression or schedule is provided
+        if not job_data.cron_expression and not job_data.schedule:
+            logger.error("Neither cron_expression nor schedule was provided")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Either cron_expression or schedule must be provided"
+            )
+        
         # Handle schedule conversion to cron expression if provided
         if job_data.schedule:
-            logger.info(f"Converting user-friendly schedule to cron expression")
-            cron_expression = self._schedule_to_cron(job_data.schedule)
-            job_dict['cron_expression'] = cron_expression
-            logger.info(f"Converted schedule to cron expression: {cron_expression}")
+            logger.info(f"Converting user-friendly schedule to cron expression: {job_data.schedule}")
+            try:
+                cron_expression = self._schedule_to_cron(job_data.schedule)
+                job_dict['cron_expression'] = cron_expression
+                logger.info(f"Successfully converted schedule to cron expression: '{cron_expression}'")
+            except ValueError as e:
+                logger.error(f"Failed to convert schedule to cron expression: {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid schedule configuration: {str(e)}"
+                )
             
             # Remove schedule from dict as it's not in the ScheduledJob model
             if 'schedule' in job_dict:
+                logger.info("Removing schedule from job_dict as it's not in the ScheduledJob model")
                 job_dict.pop('schedule')
         
         # Validate cron expression
+        logger.info(f"Validating cron expression: '{job_dict['cron_expression']}'")
         if not self.cron_service.validate_cron_expression(job_dict['cron_expression']):
+            logger.error(f"Invalid cron expression: {job_dict['cron_expression']}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid cron expression: {job_dict['cron_expression']}"
             )
+        logger.info("Cron expression is valid")
         
         # Check if a job with the same name already exists
         existing_job = self.get_job_by_name(job_data.name)

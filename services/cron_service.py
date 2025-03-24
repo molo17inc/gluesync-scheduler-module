@@ -148,13 +148,30 @@ class CronService:
         try:
             # Generate a unique identifier for this job
             job_id = f"gluesync_job_{uuid.uuid4().hex[:8]}"
+            logger.info(f"Generated job ID: {job_id} for job '{job.name}'")
+            
+            # Log job details
+            logger.info(f"Adding job to crontab with details:")
+            logger.info(f"  Name: {job.name}")
+            logger.info(f"  Description: {job.description}")
+            logger.info(f"  Task Type: {job.task_type}")
+            logger.info(f"  Cron Expression: '{job.cron_expression}'")
+            logger.info(f"  Pipeline ID: {job.pipeline_id}")
+            logger.info(f"  Entity ID: {job.entity_id if job.entity_id else 'N/A'}")
+            logger.info(f"  With Snapshot: {job.with_snapshot}")
+            logger.info(f"  Enabled: {job.enabled}")
+            logger.info(f"  Command: {job.command}")
             
             # Create a new cron job
+            logger.info(f"Creating new cron job with command: {job.command}")
             cron_job = self.crontab.new(command=job.command, comment=job_id)
             
             # Normalize the cron expression for better compatibility
             original_expression = job.cron_expression
+            logger.info(f"Original cron expression: '{original_expression}'")
+            
             normalized_expression = self._normalize_cron_expression(original_expression)
+            logger.info(f"Normalized cron expression: '{normalized_expression}'")
             
             # Log the cron expression being used
             if original_expression != normalized_expression:
@@ -163,22 +180,38 @@ class CronService:
                 logger.info(f"Setting cron expression: '{normalized_expression}' for job: {job.name}")
             
             # Set the cron expression
-            cron_job.setall(normalized_expression)
+            logger.info(f"Setting cron expression: '{normalized_expression}'")
+            try:
+                cron_job.setall(normalized_expression)
+                logger.info(f"Successfully set cron expression")
+            except Exception as ce:
+                logger.error(f"Failed to set cron expression: {str(ce)}")
+                raise ValueError(f"Failed to set cron expression '{normalized_expression}': {str(ce)}")
             
             # Enable/disable the job
+            logger.info(f"Setting job enabled: {job.enabled}")
             cron_job.enable(job.enabled)
             
             # Write to crontab
-            self.crontab.write()
+            logger.info(f"Writing job to crontab...")
+            try:
+                self.crontab.write()
+                logger.info(f"Successfully wrote job to crontab")
+            except Exception as we:
+                logger.error(f"Failed to write to crontab: {str(we)}")
+                raise ValueError(f"Failed to write to crontab: {str(we)}")
             
             # Verify the job was created successfully
+            logger.info(f"Verifying job was created successfully...")
             for existing_job in self.crontab:
                 if existing_job.comment == job_id:
                     logger.info(f"Successfully created cron job with ID: {job_id}")
                     return job_id
             
             # If we get here, the job wasn't found in the crontab
-            raise ValueError(f"Job was not found in crontab after creation. Check crontab permissions.")
+            error_msg = f"Job was not found in crontab after creation. Check crontab permissions."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
             
         except Exception as e:
             error_msg = f"Failed to create cron job: {str(e)}"
@@ -257,30 +290,62 @@ class CronService:
         Returns:
             str: The normalized cron expression
         """
+        logger.info(f"Normalizing cron expression: '{cron_expression}'")
         try:
             # Normalize the cron expression to ensure compatibility
             # Some crontab implementations are more strict about format
             parts = cron_expression.split()
-            if len(parts) == 5:
-                # Standard cron expression with 5 parts
-                minute, hour, day_of_month, month, day_of_week = parts
+            logger.info(f"Split cron expression into {len(parts)} parts: {parts}")
+            
+            if len(parts) != 5:
+                logger.warning(f"Cron expression has {len(parts)} parts, expected 5. This might cause issues.")
+                return cron_expression
                 
-                # Ensure */1 is converted to * for better compatibility
-                if minute == "*/1":
-                    minute = "*"
-                if hour == "*/1":
-                    hour = "*"
-                if day_of_month == "*/1":
-                    day_of_month = "*"
-                if month == "*/1":
-                    month = "*"
-                if day_of_week == "*/1":
-                    day_of_week = "*"
-                    
-                # Reconstruct the normalized expression
-                normalized_expression = f"{minute} {hour} {day_of_month} {month} {day_of_week}"
-                return normalized_expression
-            return cron_expression
+            # Standard cron expression with 5 parts
+            minute, hour, day_of_month, month, day_of_week = parts
+            logger.info(f"Parsed cron parts - minute: '{minute}', hour: '{hour}', day_of_month: '{day_of_month}', month: '{month}', day_of_week: '{day_of_week}'")
+            
+            # Validate minute field (0-59)
+            try:
+                # Check for specific values
+                if minute != "*" and not "," in minute and not "-" in minute and not "/" in minute:
+                    minute_val = int(minute)
+                    if minute_val < 0 or minute_val > 59:
+                        logger.warning(f"Minute value '{minute_val}' is out of range (0-59), this may cause crontab errors")
+            except ValueError:
+                logger.warning(f"Minute value '{minute}' could not be parsed as integer, assuming special format")
+            
+            # Validate hour field (0-23)
+            try:
+                if hour != "*" and not "," in hour and not "-" in hour and not "/" in hour:
+                    hour_val = int(hour)
+                    if hour_val < 0 or hour_val > 23:
+                        logger.warning(f"Hour value '{hour_val}' is out of range (0-23), this may cause crontab errors")
+            except ValueError:
+                logger.warning(f"Hour value '{hour}' could not be parsed as integer, assuming special format")
+                
+            # Ensure */1 is converted to * for better compatibility
+            if minute == "*/1":
+                logger.info("Converting minute '*/1' to '*' for better compatibility")
+                minute = "*"
+            if hour == "*/1":
+                logger.info("Converting hour '*/1' to '*' for better compatibility")
+                hour = "*"
+            if day_of_month == "*/1":
+                logger.info("Converting day_of_month '*/1' to '*' for better compatibility")
+                day_of_month = "*"
+            if month == "*/1":
+                logger.info("Converting month '*/1' to '*' for better compatibility")
+                month = "*"
+            if day_of_week == "*/1":
+                logger.info("Converting day_of_week '*/1' to '*' for better compatibility")
+                day_of_week = "*"
+                
+            # Reconstruct the normalized expression
+            normalized_expression = f"{minute} {hour} {day_of_month} {month} {day_of_week}"
+            logger.info(f"Normalized cron expression: '{normalized_expression}'")
+            return normalized_expression
+            
         except Exception as e:
             logger.warning(f"Failed to normalize cron expression '{cron_expression}': {str(e)}")
             return cron_expression
