@@ -112,16 +112,22 @@ class CronService:
         # Enhanced logging with timestamps, request details, and response
         timestamp_cmd = "date '+%Y-%m-%d %H:%M:%S'"
         
+        # Store the original curl command before we modify it
+        curl_cmd = cmd
+        
         # Create a more detailed logging command that captures:
         # 1. Timestamp when job starts
         # 2. The job details (type, pipeline, entity)
         # 3. The actual curl command being executed
         # 4. The response from the API with proper formatting
         # 5. Timestamp when job completes
+        job_id_str = str(job.id) if job.id is not None else "Not assigned"
+        entity_id_str = str(job.entity_id) if job.entity_id is not None else "N/A"
+        
         cmd = f"echo '\n=== JOB EXECUTION START: '\`{timestamp_cmd}\`' ===\n' >> {log_file} && \
-               echo 'Job ID: {job.id or "Not assigned"}\nJob Name: {job.name}\nTask Type: {job.task_type}\nPipeline ID: {job.pipeline_id}\nEntity ID: {job.entity_id or "N/A"}\nWith Snapshot: {job.with_snapshot}\nSchedule: {job.schedule}\n' >> {log_file} && \
-               echo 'Executing command: {cmd}\n' >> {log_file} && \
-               {cmd} -v >> {log_file} 2>&1 && \
+               echo 'Job ID: {job_id_str}\nJob Name: {job.name}\nTask Type: {job.task_type}\nPipeline ID: {job.pipeline_id}\nEntity ID: {entity_id_str}\nWith Snapshot: {job.with_snapshot}\nSchedule: {job.schedule}\n' >> {log_file} && \
+               echo 'Executing command: {curl_cmd}\n' >> {log_file} && \
+               {curl_cmd} -v >> {log_file} 2>&1 && \
                echo '\n=== JOB EXECUTION END: '\`{timestamp_cmd}\`' ===\n' >> {log_file}"
         
         return cmd
