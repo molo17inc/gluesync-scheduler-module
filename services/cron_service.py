@@ -141,23 +141,42 @@ class CronService:
             
         Returns:
             str: The unique identifier for the cron job
+            
+        Raises:
+            ValueError: If there's an issue with the cron expression or job creation
         """
-        # Generate a unique identifier for this job
-        job_id = f"gluesync_job_{uuid.uuid4().hex[:8]}"
-        
-        # Create a new cron job
-        cron_job = self.crontab.new(command=job.command, comment=job_id)
-        
-        # Set the cron expression
-        cron_job.setall(job.cron_expression)
-        
-        # Enable/disable the job
-        cron_job.enable(job.enabled)
-        
-        # Write to crontab
-        self.crontab.write()
-        
-        return job_id
+        try:
+            # Generate a unique identifier for this job
+            job_id = f"gluesync_job_{uuid.uuid4().hex[:8]}"
+            
+            # Create a new cron job
+            cron_job = self.crontab.new(command=job.command, comment=job_id)
+            
+            # Log the cron expression being used
+            logger.info(f"Setting cron expression: '{job.cron_expression}' for job: {job.name}")
+            
+            # Set the cron expression
+            cron_job.setall(job.cron_expression)
+            
+            # Enable/disable the job
+            cron_job.enable(job.enabled)
+            
+            # Write to crontab
+            self.crontab.write()
+            
+            # Verify the job was created successfully
+            for existing_job in self.crontab:
+                if existing_job.comment == job_id:
+                    logger.info(f"Successfully created cron job with ID: {job_id}")
+                    return job_id
+            
+            # If we get here, the job wasn't found in the crontab
+            raise ValueError(f"Job was not found in crontab after creation. Check crontab permissions.")
+            
+        except Exception as e:
+            error_msg = f"Failed to create cron job: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
     
     def update_job(self, job: ScheduledJob) -> bool:
         """

@@ -22,6 +22,7 @@
 """
 
 from typing import List, Optional, Dict, Any
+import uuid
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -77,23 +78,33 @@ class JobService:
         # Generate command based on job type
         command = self._create_command(job_dict)
         
-        # Create job in database first (without cron_job_identifier)
-        new_job = ScheduledJob(**job_dict, command=command, cron_job_identifier="temp")
+        # Create job in database first with a unique temporary identifier
+        temp_id = f"temp_{uuid.uuid4().hex}"
+        new_job = ScheduledJob(**job_dict, command=command, cron_job_identifier=temp_id)
         self.db.add(new_job)
         self.db.commit()
         self.db.refresh(new_job)
         
-        # Now add to crontab and get the identifier
-        cron_job_id = self.cron_service.add_job(new_job)
-        
-        # Update the job with the cron job identifier
-        new_job.cron_job_identifier = cron_job_id
-        
-        # Calculate next run time
-        new_job.next_run = self.cron_service.get_next_run_time(new_job.cron_expression)
-        
-        self.db.commit()
-        self.db.refresh(new_job)
+        try:
+            # Now add to crontab and get the identifier
+            cron_job_id = self.cron_service.add_job(new_job)
+            
+            # Update the job with the cron job identifier
+            new_job.cron_job_identifier = cron_job_id
+            
+            # Calculate next run time
+            new_job.next_run = self.cron_service.get_next_run_time(new_job.cron_expression)
+            
+            self.db.commit()
+            self.db.refresh(new_job)
+        except Exception as e:
+            # If cron job creation fails, delete the job from the database
+            self.db.delete(new_job)
+            self.db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create job: {str(e)}"
+            )
         
         return new_job
     

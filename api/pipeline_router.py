@@ -88,13 +88,14 @@ router = APIRouter(
         },
     },
     dependencies=[Depends(verify_localhost)],  # Apply localhost verification to all routes
+    description="**INTERNAL USE ONLY**: These endpoints are exclusively for internal system use by the scheduler module's cron jobs. They are not intended for external API consumption and are restricted to localhost access only."
 )
 
 @router.post(
     "/{pipeline_id}/play",
     response_model=OperationResponse,
     summary="Start pipeline or entities",
-    description="Start a pipeline or specific entities within a pipeline"
+    description="[INTERNAL USE ONLY] Start a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
 async def play_pipeline(
     pipeline_id: str = Path(..., description="The ID of the pipeline to start"),
@@ -103,6 +104,9 @@ async def play_pipeline(
 ):
     """
     Start a pipeline or specific entities within a pipeline.
+    
+    **INTERNAL USE ONLY**: This endpoint is exclusively for internal system use by the scheduler module's cron jobs.
+    It is not intended for external API consumption and is restricted to localhost access only.
     
     ## Parameters
     - **pipeline_id**: The ID of the pipeline to start
@@ -130,6 +134,7 @@ async def play_pipeline(
     ## Errors
     - **400**: Invalid request parameters
     - **500**: Internal server error during operation
+    - **403**: Forbidden if accessed from non-localhost source
     """
     try:
         manager = PipelineManager()
@@ -166,7 +171,7 @@ async def play_pipeline(
     "/{pipeline_id}/pause",
     response_model=OperationResponse,
     summary="Stop pipeline or entities",
-    description="Stop a pipeline or specific entities within a pipeline"
+    description="[INTERNAL USE ONLY] Stop a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
 async def pause_pipeline(
     pipeline_id: str = Path(..., description="The ID of the pipeline to stop"),
@@ -174,6 +179,9 @@ async def pause_pipeline(
 ):
     """
     Stop a pipeline or specific entities within a pipeline.
+    
+    **INTERNAL USE ONLY**: This endpoint is exclusively for internal system use by the scheduler module's cron jobs.
+    It is not intended for external API consumption and is restricted to localhost access only.
     
     ## Parameters
     - **pipeline_id**: The ID of the pipeline to stop
@@ -200,6 +208,7 @@ async def pause_pipeline(
     ## Errors
     - **400**: Invalid request parameters
     - **500**: Internal server error during operation
+    - **403**: Forbidden if accessed from non-localhost source
     """
     try:
         manager = PipelineManager()
@@ -234,7 +243,7 @@ async def pause_pipeline(
     "/{pipeline_id}/resync",
     response_model=OperationResponse,
     summary="Resync pipeline or entities",
-    description="Create a data snapshot for a pipeline or specific entities within a pipeline"
+    description="[INTERNAL USE ONLY] Create a data snapshot for a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
 async def resync_pipeline(
     pipeline_id: str = Path(..., description="The ID of the pipeline to resync"),
@@ -242,6 +251,9 @@ async def resync_pipeline(
 ):
     """
     Create a data snapshot for a pipeline or specific entities within a pipeline.
+    
+    **INTERNAL USE ONLY**: This endpoint is exclusively for internal system use by the scheduler module's cron jobs.
+    It is not intended for external API consumption and is restricted to localhost access only.
     
     ## Parameters
     - **pipeline_id**: The ID of the pipeline to resync
@@ -268,6 +280,7 @@ async def resync_pipeline(
     ## Errors
     - **400**: Invalid request parameters
     - **500**: Internal server error during operation
+    - **403**: Forbidden if accessed from non-localhost source
     """
     try:
         manager = PipelineManager()
