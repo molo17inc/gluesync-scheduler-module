@@ -75,9 +75,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Import database initialization functions
+from database import Base, engine
+
 # Setup event handlers for Gluesync SDK client initialization and shutdown
 @app.on_event("startup")
 async def startup_event():
+    # Initialize database tables if they don't exist
+    logger.info("Checking and initializing database tables...")
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database tables: {e}")
+        logger.warning("Application may not function correctly without database tables")
+    
     logger.info("Initializing Gluesync SDK client...")
     try:
         # Set a timeout for the initialization to avoid hanging indefinitely

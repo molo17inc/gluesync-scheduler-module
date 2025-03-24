@@ -16,9 +16,9 @@ mkdir -p ./tests/gluesync/data
 # Create license file for SDK from environment variable
 if [ -z "$GLUESYNC_LICENSE_CONTENT" ]; then
     echo "Warning: GLUESYNC_LICENSE_CONTENT environment variable not set, using mock content"
-    echo "mock-license-content" > ./tests/gluesync/data/gs-license.dat
+    echo "mock-license-content" >./tests/gluesync/data/gs-license.dat
 else
-    echo "$GLUESYNC_LICENSE_CONTENT" > ./tests/gluesync/data/gs-license.dat
+    echo "$GLUESYNC_LICENSE_CONTENT" >./tests/gluesync/data/gs-license.dat
 fi
 
 # Copy security config if it exists
@@ -26,7 +26,7 @@ if [ -f security-config.json ]; then
     cp security-config.json ./tests/gluesync/data/security-config.json
 else
     # Create a default empty security config
-    echo '{}' > ./tests/gluesync/data/security-config.json
+    echo '{}' >./tests/gluesync/data/security-config.json
 fi
 
 # Set up environment variables for testing
@@ -38,7 +38,7 @@ export DB_URL=sqlite:///./tests/data/test_scheduler.db
 export DEBUG=True
 export CORE_HUB_URL=http://localhost:8080
 export CRONTAB_USER=$USER
-export HOST=0.0.0.0  # Bind to all interfaces
+export HOST=0.0.0.0 # Bind to all interfaces
 
 # Install specific websockets version first to avoid compatibility issues
 python3 -m pip install websockets==11.0.3 --break-system-packages
