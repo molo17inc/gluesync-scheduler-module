@@ -129,30 +129,27 @@ class CronService:
         job_id_str = str(job.id) if job.id is not None else "Not assigned"
         entity_id_str = str(job.entity_id) if job.entity_id is not None else "N/A"
         
-        # For crontab compatibility, we need to properly escape the command
-        # Avoid multi-line strings with continuation characters as they cause issues in crontab
-        # Use single quotes for the outer command and double quotes where needed inside
+        # For crontab compatibility, create a single-line command with no embedded newlines
+        # Use echo commands with semicolons for newlines in the log file
         
-        # Simplified log header
+        # Create a single line command with escaped special characters
+        # The format will be: echo header && echo job details && echo command info && run curl && echo footer
+        
+        # Format the log text - replace newlines with semicolons that will be interpreted in the echo
+        job_details_text = f"Job ID: {job_id_str}; Job Name: {job.name}; Task Type: {job.task_type}; Pipeline ID: {job.pipeline_id}; Entity ID: {entity_id_str}; With Snapshot: {job.with_snapshot}; Schedule: {job.cron_expression}"
+        
+        # Create each echo command without any newlines
         start_log = f"echo \"=== JOB EXECUTION START: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file}"
-        
-        # Job details log
-        job_details = f"echo \"Job ID: {job_id_str}\nJob Name: {job.name}\nTask Type: {job.task_type}\nPipeline ID: {job.pipeline_id}\nEntity ID: {entity_id_str}\nWith Snapshot: {job.with_snapshot}\nSchedule: {job.cron_expression}\" >> {log_file}"
-        
-        # Command log
+        job_details = f"echo \"{job_details_text}\" >> {log_file}"
         cmd_log = f"echo \"Executing command: {curl_cmd}\" >> {log_file}"
-        
-        # Actual curl execution 
         curl_execution = f"{curl_cmd} -v >> {log_file} 2>&1"
-        
-        # End log
         end_log = f"echo \"=== JOB EXECUTION END: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file}"
         
-        # Combine all parts with && to ensure they run in sequence
+        # Combine all parts with && to ensure they run in sequence - this is ONE line
         cmd = f"{start_log} && {job_details} && {cmd_log} && {curl_execution} && {end_log}"
         
-        # Log the final command for debugging
-        logger.debug(f"Final cron command: {cmd}")
+        # Log the first part of the command for debugging (it might be very long)
+        logger.debug(f"Final cron command (truncated): {cmd[:100]}...")
         
         return cmd
 
@@ -186,9 +183,13 @@ class CronService:
             logger.info(f"  Enabled: {job.enabled}")
             logger.info(f"  Command: {job.command}")
             
-            # Create a new cron job
-            logger.info(f"Creating new cron job with command: {job.command}")
-            cron_job = self.crontab.new(command=job.command, comment=job_id)
+            # Generate a clean command directly (don't use the stored command that might have issues)
+            fresh_command = self._get_job_command(job)
+            logger.info(f"Generated fresh command for crontab (first 100 chars): {fresh_command[:100]}...")
+            
+            # Create a new cron job with the fresh command
+            logger.info(f"Creating new cron job with fresh command")
+            cron_job = self.crontab.new(command=fresh_command, comment=job_id)
             
             # Normalize the cron expression for better compatibility
             original_expression = job.cron_expression
@@ -216,6 +217,22 @@ class CronService:
             logger.info(f"Setting job enabled: {job.enabled}")
             cron_job.enable(job.enabled)
             
+            # Inspect crontab content before writing
+            logger.info(f"Inspecting crontab content before writing...")
+            try:
+                # Render the crontab to a string to verify its content
+                crontab_content = self.crontab.render()
+                logger.info(f"Preview of crontab content to be written:")
+                for i, line in enumerate(crontab_content.strip().split('\n')):
+                    # Only log the first 5 lines to avoid flooding logs
+                    if i < 5:
+                        logger.info(f"Line {i+1}: {line}")
+                    else:
+                        logger.info(f"... {len(crontab_content.strip().split('\n')) - 5} more lines ...")
+                        break
+            except Exception as e:
+                logger.warning(f"Could not preview crontab content: {str(e)}")
+            
             # Write to crontab
             logger.info(f"Writing job to crontab...")
             try:
@@ -223,6 +240,9 @@ class CronService:
                 logger.info(f"Successfully wrote job to crontab")
             except Exception as we:
                 logger.error(f"Failed to write to crontab: {str(we)}")
+                # Check if the error is related to a bad minute format
+                if "bad minute" in str(we):
+                    logger.error("This is likely due to a formatting issue in the cron command. Check for embedded newlines.")
                 raise ValueError(f"Failed to write to crontab: {str(we)}")
             
             # Verify the job was created successfully
@@ -385,16 +405,55 @@ class CronService:
             bool: True if valid, False otherwise
         """
         try:
-            # Try to parse the cron expression with croniter
-            croniter(cron_expression)
+            # First test with croniter library
+            logger.info(f"Validating cron expression with croniter: '{cron_expression}'")
+            try:
+                croniter(cron_expression)
+                logger.info("Cron expression is valid according to croniter")
+            except Exception as ce:
+                logger.error(f"Cron expression invalid according to croniter: {str(ce)}")
+                return False
             
             # Normalize the expression for better compatibility
             normalized_expression = self._normalize_cron_expression(cron_expression)
+            logger.info(f"Using normalized expression for further validation: '{normalized_expression}'")
             
-            # Test it with the crontab library as well
-            test_job = self.crontab.new(command="echo test")
-            test_job.setall(normalized_expression)
-            return True
+            # Test with python-crontab library
+            try:
+                test_job = self.crontab.new(command="echo test")
+                test_job.setall(normalized_expression)
+                logger.info("Cron expression is valid according to python-crontab")
+            except Exception as ce:
+                logger.error(f"Cron expression invalid according to python-crontab: {str(ce)}")
+                return False
+                
+            # Extra validation - create a temporary crontab entry and validate without writing
+            logger.info("Performing extra validation with temporary crontab entry")
+            try:
+                # Create a simple test job
+                test_cron = CronTab(tab="")
+                test_job = test_cron.new(command="echo test", comment="validator_test")
+                test_job.setall(normalized_expression)
+                
+                # Render to string to check for crontab syntax issues
+                rendered = test_cron.render()
+                logger.info(f"Successfully rendered test crontab entry: {rendered.strip()}")
+                
+                # Check that the first part has 5 components (valid cron syntax)
+                line_parts = rendered.strip().split()
+                if len(line_parts) < 5:
+                    logger.error(f"Rendered crontab entry has invalid format: '{rendered.strip()}'")
+                    return False
+                    
+                # Verify each part of the cron expression
+                minute, hour, dom, month, dow = line_parts[:5]
+                logger.info(f"Verified cron parts - minute: '{minute}', hour: '{hour}', dom: '{dom}', month: '{month}', dow: '{dow}'")
+                
+                return True
+            except Exception as e:
+                logger.error(f"Failed during extra validation: {str(e)}")
+                return False
+                
         except Exception as e:
-            logger.error(f"Invalid cron expression '{cron_expression}': {str(e)}")
+            logger.error(f"Error validating cron expression '{cron_expression}': {str(e)}")
             return False
