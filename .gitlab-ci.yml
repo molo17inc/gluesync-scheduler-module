@@ -129,9 +129,19 @@ deploy:
       DEFAULT_NAME=${DOCKER_REGISTRY}/${APP_NAME}
       ADDITIONAL_TAG="${DEFAULT_NAME}:${TAGPART}"
 
+    # Set up Docker Buildx for multi-platform builds
     - docker login -u danieleangeli -p "$CI_REGISTRY_PASSWORD"
-    - docker build -t $DEFAULT_NAME:latest .
-    - docker tag $DEFAULT_NAME:latest "$ADDITIONAL_TAG"
-    - docker push "$ADDITIONAL_TAG"
+    # Install QEMU for multi-architecture builds
+    - docker run --privileged --rm tonistiigi/binfmt --install all
+    # Create and use a new builder instance
+    - docker buildx create --name multiarch-builder --use
+    - docker buildx inspect --bootstrap
+    
+    # Build and push multi-platform images in one command
+    - |
+      docker buildx build --platform linux/amd64,linux/arm64 \
+        --tag $DEFAULT_NAME:latest \
+        --tag "$ADDITIONAL_TAG" \
+        --push .
   rules:
     - if: $CI_COMMIT_TAG
