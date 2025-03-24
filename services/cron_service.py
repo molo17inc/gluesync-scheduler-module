@@ -65,34 +65,39 @@ class CronService:
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play?entity_ids={job.entity_id}"
             if job.with_snapshot:
                 endpoint += "&with_snapshot=true"
-            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            # Use double quotes for the URL to avoid issues with nested quotes in crontab
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
             
         elif job.task_type == TaskType.ENTITY_STOP:
             # Call the pause endpoint with entity ID
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause?entity_ids={job.entity_id}"
-            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
             
         elif job.task_type == TaskType.PIPELINE_START:
             # Call the play endpoint without entity ID (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
             if job.with_snapshot:
                 endpoint += "?with_snapshot=true"
-            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
             
         elif job.task_type == TaskType.PIPELINE_STOP:
             # Call the pause endpoint without entity ID (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
             
         elif job.task_type == TaskType.ENTITY_SNAPSHOT:
             # Call the resync endpoint with entity ID
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync?entity_ids={job.entity_id}"
-            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
             
         elif job.task_type == TaskType.PIPELINE_SNAPSHOT:
             # Call the resync endpoint without entity ID (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
+            
+        # Log the endpoint and curl command for debugging
+        logger.debug(f"Using endpoint: {endpoint}")
+        logger.debug(f"Generated curl command: {cmd}")
         
         # Add logging with enhanced details
         log_dir = os.path.join(self.base_path, "logs")
@@ -124,11 +129,30 @@ class CronService:
         job_id_str = str(job.id) if job.id is not None else "Not assigned"
         entity_id_str = str(job.entity_id) if job.entity_id is not None else "N/A"
         
-        cmd = f"echo '\n=== JOB EXECUTION START: '\`{timestamp_cmd}\`' ===\n' >> {log_file} && \
-               echo 'Job ID: {job_id_str}\nJob Name: {job.name}\nTask Type: {job.task_type}\nPipeline ID: {job.pipeline_id}\nEntity ID: {entity_id_str}\nWith Snapshot: {job.with_snapshot}\nSchedule: {job.cron_expression}\n' >> {log_file} && \
-               echo 'Executing command: {curl_cmd}\n' >> {log_file} && \
-               {curl_cmd} -v >> {log_file} 2>&1 && \
-               echo '\n=== JOB EXECUTION END: '\`{timestamp_cmd}\`' ===\n' >> {log_file}"
+        # For crontab compatibility, we need to properly escape the command
+        # Avoid multi-line strings with continuation characters as they cause issues in crontab
+        # Use single quotes for the outer command and double quotes where needed inside
+        
+        # Simplified log header
+        start_log = f"echo \"=== JOB EXECUTION START: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file}"
+        
+        # Job details log
+        job_details = f"echo \"Job ID: {job_id_str}\nJob Name: {job.name}\nTask Type: {job.task_type}\nPipeline ID: {job.pipeline_id}\nEntity ID: {entity_id_str}\nWith Snapshot: {job.with_snapshot}\nSchedule: {job.cron_expression}\" >> {log_file}"
+        
+        # Command log
+        cmd_log = f"echo \"Executing command: {curl_cmd}\" >> {log_file}"
+        
+        # Actual curl execution 
+        curl_execution = f"{curl_cmd} -v >> {log_file} 2>&1"
+        
+        # End log
+        end_log = f"echo \"=== JOB EXECUTION END: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file}"
+        
+        # Combine all parts with && to ensure they run in sequence
+        cmd = f"{start_log} && {job_details} && {cmd_log} && {curl_execution} && {end_log}"
+        
+        # Log the final command for debugging
+        logger.debug(f"Final cron command: {cmd}")
         
         return cmd
 
