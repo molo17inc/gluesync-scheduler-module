@@ -223,12 +223,14 @@ class CronService:
                 # Render the crontab to a string to verify its content
                 crontab_content = self.crontab.render()
                 logger.info(f"Preview of crontab content to be written:")
-                for i, line in enumerate(crontab_content.strip().split('\n')):
+                lines = crontab_content.strip().split('\n')
+                for i, line in enumerate(lines):
                     # Only log the first 5 lines to avoid flooding logs
                     if i < 5:
                         logger.info(f"Line {i+1}: {line}")
                     else:
-                        logger.info(f"... {len(crontab_content.strip().split('\n')) - 5} more lines ...")
+                        remaining_lines = len(lines) - 5
+                        logger.info(f"... {remaining_lines} more lines ...")
                         break
             except Exception as e:
                 logger.warning(f"Could not preview crontab content: {str(e)}")
