@@ -40,6 +40,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy the project files including the submodule
 COPY . .
 
+# Make entrypoint script executable
+RUN chmod +x /app/entrypoint.sh
+
 # Install specific websockets version first to avoid compatibility issues
 RUN pip install websockets==11.0.3
 
@@ -51,6 +54,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose the port the app runs on
 EXPOSE 1717
+
+# Set entrypoint to ensure cron service starts
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Command to run the application
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "1717"]

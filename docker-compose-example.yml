@@ -11,14 +11,15 @@ services:
     volumes:
       - ./gs-license.dat:/opt/gluesync/data/gs-license.dat
       - ./security-config.json:/opt/gluesync/data/security-config.json
+      - ./logs:/app/logs
     ports:
-      - "1718:1718"
-    command: uvicorn app:app --host 0.0.0.0 --port 1718
+      - "1717:1717"
+    command: uvicorn app:app --host 0.0.0.0 --port 1717
     environment:
       - CORE_HUB_URL=
       - ENTITY_START_TIMEOUT=2
       - HOST=0.0.0.0
-      - PORT=1718
+      - PORT=1717
       - DEBUG=False
       - DB_URL=sqlite:///./scheduler.db
       - ALLOWED_ORIGINS=*
