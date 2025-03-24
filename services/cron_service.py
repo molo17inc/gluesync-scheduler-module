@@ -94,7 +94,7 @@ class CronService:
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
             cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
         
-        # Add logging
+        # Add logging with enhanced details
         log_dir = os.path.join(self.base_path, "logs")
         os.makedirs(log_dir, exist_ok=True)
         
@@ -108,7 +108,21 @@ class CronService:
             log_identifier = f"job_{safe_name}"
             
         log_file = os.path.join(log_dir, f"{log_identifier}.log")
-        cmd += f" >> {log_file} 2>&1"
+        
+        # Enhanced logging with timestamps, request details, and response
+        timestamp_cmd = "date '+%Y-%m-%d %H:%M:%S'"
+        
+        # Create a more detailed logging command that captures:
+        # 1. Timestamp when job starts
+        # 2. The job details (type, pipeline, entity)
+        # 3. The actual curl command being executed
+        # 4. The response from the API with proper formatting
+        # 5. Timestamp when job completes
+        cmd = f"echo '\n=== JOB EXECUTION START: '\`{timestamp_cmd}\`' ===\n' >> {log_file} && \
+               echo 'Job ID: {job.id or "Not assigned"}\nJob Name: {job.name}\nTask Type: {job.task_type}\nPipeline ID: {job.pipeline_id}\nEntity ID: {job.entity_id or "N/A"}\nWith Snapshot: {job.with_snapshot}\nSchedule: {job.schedule}\n' >> {log_file} && \
+               echo 'Executing command: {cmd}\n' >> {log_file} && \
+               {cmd} -v >> {log_file} 2>&1 && \
+               echo '\n=== JOB EXECUTION END: '\`{timestamp_cmd}\`' ===\n' >> {log_file}"
         
         return cmd
 
