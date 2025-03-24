@@ -32,7 +32,7 @@ class JobBase(BaseModel):
     """Base model for job data with common fields"""
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
-    task_type: TaskType = Field(..., description="Type of task to perform (ENTITY_START, ENTITY_STOP, PIPELINE_START, PIPELINE_STOP, ENTITY_SNAPSHOT)")
+    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline")
     cron_expression: str = Field(..., description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight)", example="0 0 * * *")
     pipeline_id: str = Field(..., description="ID of the pipeline to operate on", example="pipeline-123")
     entity_id: Optional[str] = Field(None, description="ID of the entity to operate on (required for entity operations)", example="entity-456")

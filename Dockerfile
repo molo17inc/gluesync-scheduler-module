@@ -22,7 +22,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     # CORS settings \
     ALLOWED_ORIGINS=* \
     # Scheduler settings \
-    CRONTAB_USER= \
+    CRONTAB_USER=root \
     # Gluesync SDK settings using default paths \
     GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat \
     GLUESYNC_USE_SSL=False \

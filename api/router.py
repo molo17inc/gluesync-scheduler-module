@@ -53,7 +53,7 @@ router = APIRouter(
 def list_jobs(
     skip: int = Query(0, ge=0, description="Number of records to skip for pagination"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    task_type: Optional[TaskType] = Query(None, description="Filter by task type (ENTITY_START, ENTITY_STOP, PIPELINE_START, PIPELINE_STOP, ENTITY_SNAPSHOT)"),
+    task_type: Optional[TaskType] = Query(None, description="Filter by task type (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline"),
     enabled: Optional[bool] = Query(None, description="Filter by enabled status (true/false)"),
     db: Session = Depends(get_db)
 ):
