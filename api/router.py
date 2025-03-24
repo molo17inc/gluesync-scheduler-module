@@ -155,10 +155,14 @@ def get_job(job_id: int = Path(..., description="The ID of the scheduled job to 
 
 @router.post("/", response_model=Job, status_code=status.HTTP_201_CREATED, summary="Create a new job", description="Create a new scheduled job with the specified parameters")
 def create_job(job_data: JobCreate = Body(..., description="Job data to create", example={
-    "name": "Daily entity backup",
-    "description": "Create a daily snapshot of critical entities",
+    "name": "Monday-Wednesday-Friday Job",
+    "description": "Runs on specific days at 8:30 AM",
     "task_type": "ENTITY_SNAPSHOT",
-    "cron_expression": "0 0 * * *",
+    "schedule": {
+        "days_of_week": ["monday", "wednesday", "friday"],
+        "hour": 8,
+        "minute": 30
+    },
     "pipeline_id": "pipeline-123",
     "entity_id": "entity-456",
     "with_snapshot": True,
@@ -171,7 +175,11 @@ def create_job(job_data: JobCreate = Body(..., description="Job data to create",
     - **name**: Name of the job (required)
     - **description**: Description of the job (optional)
     - **task_type**: Type of task to perform (required)
-    - **cron_expression**: Cron expression for scheduling (required)
+    - **schedule**: User-friendly schedule configuration (optional, but either schedule or cron_expression must be provided)
+      - **days_of_week**: Array of days when the job should run (e.g., ["monday", "wednesday", "friday"])
+      - **hour**: Hour of the day (0-23)
+      - **minute**: Minute of the hour (0-59)
+    - **cron_expression**: Cron expression for scheduling (optional if schedule is provided)
     - **pipeline_id**: ID of the pipeline to operate on (required)
     - **entity_id**: ID of the entity to operate on (optional, required for entity operations)
     - **with_snapshot**: Whether to include snapshot (optional, default: false)
@@ -181,6 +189,24 @@ def create_job(job_data: JobCreate = Body(..., description="Job data to create",
     The created job object with all details including the generated ID
     
     ## Example Request
+    ```json
+    {
+      "name": "Monday-Wednesday-Friday Job",
+      "description": "Runs on specific days at 8:30 AM",
+      "task_type": "ENTITY_SNAPSHOT",
+      "schedule": {
+        "days_of_week": ["monday", "wednesday", "friday"],
+        "hour": 8,
+        "minute": 30
+      },
+      "pipeline_id": "pipeline-123",
+      "entity_id": "entity-456",
+      "with_snapshot": true,
+      "enabled": true
+    }
+    ```
+    
+    ## Alternative Example with Cron Expression
     ```json
     {
       "name": "Daily entity backup",
@@ -214,9 +240,13 @@ def create_job(job_data: JobCreate = Body(..., description="Job data to create",
 @router.put("/{job_id}", response_model=Job, summary="Update an existing job", description="Update an existing scheduled job with the specified parameters")
 def update_job(job_id: int = Path(..., description="The ID of the job to update"), 
               job_data: JobUpdate = Body(..., description="Job data to update", example={
-                  "name": "Updated daily entity backup",
-                  "description": "Updated description",
-                  "cron_expression": "0 0 * * *",
+                  "name": "Updated job schedule",
+                  "description": "Now runs on weekends at midnight",
+                  "schedule": {
+                      "days_of_week": ["saturday", "sunday"],
+                      "hour": 0,
+                      "minute": 0
+                  },
                   "enabled": True
               }), 
               db: Session = Depends(get_db)):
@@ -230,7 +260,11 @@ def update_job(job_id: int = Path(..., description="The ID of the job to update"
     All fields are optional. Only specified fields will be updated:
     - **name**: Updated name of the job
     - **description**: Updated description of the job
-    - **cron_expression**: Updated cron expression for scheduling
+    - **schedule**: Updated user-friendly schedule configuration
+      - **days_of_week**: Array of days when the job should run (e.g., ["monday", "wednesday", "friday"])
+      - **hour**: Hour of the day (0-23)
+      - **minute**: Minute of the hour (0-59)
+    - **cron_expression**: Updated cron expression for scheduling (not required if schedule is provided)
     - **with_snapshot**: Updated snapshot setting
     - **enabled**: Updated enabled status
     
@@ -238,6 +272,20 @@ def update_job(job_id: int = Path(..., description="The ID of the job to update"
     The updated job object with all details
     
     ## Example Request
+    ```json
+    {
+      "name": "Updated job schedule",
+      "description": "Now runs on weekends at midnight",
+      "schedule": {
+        "days_of_week": ["saturday", "sunday"],
+        "hour": 0,
+        "minute": 0
+      },
+      "enabled": true
+    }
+    ```
+    
+    ## Alternative Example with Cron Expression
     ```json
     {
       "name": "Updated daily entity backup",
