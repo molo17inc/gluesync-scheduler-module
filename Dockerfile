@@ -78,7 +78,6 @@ COPY ./play_pause.py .
 COPY ./gluesync_sdk_client.py .
 COPY ./api ./api
 COPY ./services ./services
-COPY ./migrations ./migrations
 
 # Create logs directory
 RUN mkdir -p /app/logs
