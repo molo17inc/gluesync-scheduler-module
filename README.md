@@ -8,7 +8,7 @@ A backend service that provides a set of REST APIs for scheduling and managing c
 ## Features
 
 - **Comprehensive REST API**: Full CRUD operations for scheduled jobs
-- **Flexible Job Scheduling**: Based on standard cron expressions
+- **Flexible Job Scheduling**: Choose between user-friendly schedule format or standard cron expressions
 - **Multiple Task Types**:
   - Start/stop entities
   - Start/stop entire pipelines
@@ -107,7 +107,7 @@ You can set these in a `.env` file in the project root.
 
 To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with Postman, follow these steps:
 
-### Prerequisites
+### Setup Prerequisites
 
 - Ensure Docker is installed on your machine.
 - Ensure Python is installed on your machine.
@@ -132,7 +132,7 @@ To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with
 
 ### Running the Application
 
-2. **Build and Run the Docker Container**:
+1. **Build and Run the Docker Container**:
 
    Use Docker to build and run the project with the following commands:
 
@@ -145,7 +145,7 @@ To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with
 
 ### Testing the API with Postman
 
-3. **Test with Postman**:
+1. **Test with Postman**:
 
    Open Postman and create a new request.
 
@@ -155,7 +155,7 @@ To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with
 
    Send the request and observe the response.
 
-4. **Verify Logs and Outputs**:
+2. **Verify Logs and Outputs**:
 
    Check the terminal for logs to ensure the application is running correctly.
 
@@ -187,9 +187,60 @@ http://localhost:1717/redoc
 | `/api/jobs/{job_id}` | `PUT` | Update an existing job |
 | `/api/jobs/{job_id}` | `DELETE` | Delete a job |
 
-## Cron Expression Format
+## Scheduling Options
 
-The scheduler uses standard cron expressions:
+### User-Friendly Schedule Format
+
+The scheduler supports a user-friendly schedule format that doesn't require knowledge of cron expressions:
+
+```json
+{
+  "schedule": {
+    "days_of_week": ["monday", "wednesday", "friday"],
+    "hour": 8,
+    "minute": 30
+  }
+}
+```
+
+Parameters:
+
+- `days_of_week`: Array of days when the job should run. Valid values are: "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday". An empty array means every day.
+- `hour`: Hour of the day (0-23)
+- `minute`: Minute of the hour (0-59)
+
+Examples:
+
+- Every day at 8:30 AM: `{"days_of_week": [], "hour": 8, "minute": 30}`
+- Every Monday, Wednesday, and Friday at 8:30 AM: `{"days_of_week": ["monday", "wednesday", "friday"], "hour": 8, "minute": 30}`
+- Every weekend at midnight: `{"days_of_week": ["saturday", "sunday"], "hour": 0, "minute": 0}`
+
+#### Example Job Creation Request
+
+```json
+POST /api/jobs
+
+{
+  "name": "Monday-Wednesday-Friday Job",
+  "description": "Runs on specific days at 8:30 AM",
+  "task_type": "entity_snapshot",
+  "schedule": {
+    "days_of_week": ["monday", "wednesday", "friday"],
+    "hour": 8,
+    "minute": 30
+  },
+  "pipeline_id": "pipeline-123",
+  "entity_id": "entity-456",
+  "with_snapshot": true,
+  "enabled": true
+}
+```
+
+This will automatically be converted to the cron expression `30 8 * * 1,3,5` internally.
+
+### Cron Expression Format
+
+The scheduler also supports standard cron expressions for more advanced scheduling needs:
 
 ```plaintext
 ┌───────────── minute (0 - 59)
