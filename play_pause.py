@@ -26,6 +26,7 @@ import json
 import time
 import argparse
 import logging
+import asyncio
 from typing import Dict, List, Optional, Any, Union
 
 import requests
@@ -46,8 +47,23 @@ class CoreHubClient:
         self.entity_start_timeout = settings.ENTITY_START_TIMEOUT  # seconds to wait between entity operations
         self.token = None
         
-        # Try to get token from gluesync SDK client if available
+        # Initialize the SDK client if running as standalone script
+        if __name__ == "__main__":
+            # Run the async initialization in a synchronous context
+            asyncio.run(self._initialize_sdk())
+            
+        # Try to get token from gluesync SDK client
         self._try_sdk_token()
+        
+    async def _initialize_sdk(self):
+        """Initialize the SDK client if not already initialized"""
+        try:
+            logger.info("Initializing Gluesync SDK client...")
+            await gluesync_sdk_client.initialize()
+            logger.info("Gluesync SDK client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Gluesync SDK client: {e}")
+            logger.warning("Will attempt to continue without SDK initialization")
     
     def _try_sdk_token(self):
         """Try to get token from gluesync SDK client if it's initialized"""
@@ -56,6 +72,9 @@ class CoreHubClient:
                 self.token = gluesync_sdk_client.token
                 logger.info("Using token from gluesync SDK client")
                 return True
+            else:
+                logger.warning("SDK client is not initialized or token is not available")
+                logger.info(f"SDK initialized: {gluesync_sdk_client.is_initialized}, Token available: {gluesync_sdk_client.token is not None}")
         except Exception as e:
             logger.warning(f"Could not get token from gluesync SDK client: {e}")
         return False
@@ -73,11 +92,24 @@ class CoreHubClient:
         Returns:
             Response data as dictionary or None if request failed
         """
+        # Check if we have a valid base URL
+        if not self.base_url:
+            # Try to update from SDK if available
+            if gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
+                self.base_url = gluesync_sdk_client.corehub_url
+                settings.update_corehub_url(self.base_url)
+                logger.info(f"Updated CoreHub URL from SDK: {self.base_url}")
+            else:
+                logger.error("CoreHub URL is not set and could not be obtained from SDK")
+                return None
+                
         # Try to get the SDK token first if we don't have one yet
         if not self.token:
-            self._try_sdk_token()
+            if not self._try_sdk_token():
+                logger.error("Authentication requires SDK token - ensure the gluesync_sdk_client is properly initialized")
+                return None
             
-        url = f"{self.base_url}{path}"
+        url = f"{self.base_url}/api{path}"
         headers = {
             'Authorization': f'Bearer {self.token}' if self.token else None,
             'Content-Type': 'application/json'
@@ -270,6 +302,206 @@ class PipelineManager:
         except Exception as e:
             print(f"An error occurred: {str(e)}")
     
+    # API-friendly methods for pipeline operations
+    def play_pipeline(self, pipeline_id: str, with_snapshot: bool = False) -> bool:
+        """Start all entities in a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            with_snapshot: Start entities with snapshot
+            
+        Returns:
+            bool: True if operation was successful, False otherwise
+        """
+        try:
+            self.client.authenticate()
+            logger.info(f"Starting pipeline {pipeline_id} with snapshot={with_snapshot}")
+            entities = self.client.get_entities(pipeline_id)
+            
+            if not entities:
+                logger.warning(f"No entities found for pipeline {pipeline_id}")
+                return False
+                
+            for i, entity in enumerate(entities):
+                try:
+                    self.client.play_entity(pipeline_id, entity['entityId'], with_snapshot)
+                    logger.info(f"Started entity {entity['entityId']} in pipeline {pipeline_id}")
+                    
+                    # Wait between entity operations, except for the last one
+                    if i < len(entities) - 1:
+                        logger.debug(f"Waiting for {self.client.entity_start_timeout} seconds before the next action...")
+                        time.sleep(self.client.entity_start_timeout)
+                except Exception as e:
+                    logger.error(f"Error starting entity {entity['entityId']}: {str(e)}")
+                    return False
+            return True
+        except Exception as e:
+            logger.error(f"Error starting pipeline {pipeline_id}: {str(e)}")
+            return False
+    
+    def play_entities(self, pipeline_id: str, entity_ids: List[str], with_snapshot: bool = False) -> bool:
+        """Start specific entities in a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            entity_ids: List of entity IDs to start
+            with_snapshot: Start entities with snapshot
+            
+        Returns:
+            bool: True if all operations were successful, False otherwise
+        """
+        try:
+            self.client.authenticate()
+            logger.info(f"Starting entities {entity_ids} in pipeline {pipeline_id} with snapshot={with_snapshot}")
+            
+            entities = self.client.get_entities(pipeline_id)
+            if not entities:
+                logger.warning(f"No entities found for pipeline {pipeline_id}")
+                return False
+                
+            target_entities = [entity for entity in entities if entity['entityId'] in entity_ids]
+            if not target_entities:
+                logger.warning(f"Entities {', '.join(entity_ids)} not found in pipeline {pipeline_id}")
+                return False
+                
+            for i, entity in enumerate(target_entities):
+                try:
+                    self.client.play_entity(pipeline_id, entity['entityId'], with_snapshot)
+                    logger.info(f"Started entity {entity['entityId']} in pipeline {pipeline_id}")
+                    
+                    # Wait between entity operations, except for the last one
+                    if i < len(target_entities) - 1:
+                        logger.debug(f"Waiting for {self.client.entity_start_timeout} seconds before the next action...")
+                        time.sleep(self.client.entity_start_timeout)
+                except Exception as e:
+                    logger.error(f"Error starting entity {entity['entityId']}: {str(e)}")
+                    return False
+            return True
+        except Exception as e:
+            logger.error(f"Error starting entities in pipeline {pipeline_id}: {str(e)}")
+            return False
+    
+    def pause_pipeline(self, pipeline_id: str) -> bool:
+        """Stop all entities in a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            
+        Returns:
+            bool: True if operation was successful, False otherwise
+        """
+        try:
+            self.client.authenticate()
+            logger.info(f"Stopping pipeline {pipeline_id}")
+            
+            entities = self.client.get_entities(pipeline_id)
+            if not entities:
+                logger.warning(f"No entities found for pipeline {pipeline_id}")
+                return False
+                
+            for entity in entities:
+                try:
+                    self.client.pause_entity(pipeline_id, entity['entityId'])
+                    logger.info(f"Stopped entity {entity['entityId']} in pipeline {pipeline_id}")
+                except Exception as e:
+                    logger.error(f"Error stopping entity {entity['entityId']}: {str(e)}")
+                    return False
+            return True
+        except Exception as e:
+            logger.error(f"Error stopping pipeline {pipeline_id}: {str(e)}")
+            return False
+    
+    def pause_entities(self, pipeline_id: str, entity_ids: List[str]) -> bool:
+        """Stop specific entities in a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            entity_ids: List of entity IDs to stop
+            
+        Returns:
+            bool: True if all operations were successful, False otherwise
+        """
+        try:
+            self.client.authenticate()
+            logger.info(f"Stopping entities {entity_ids} in pipeline {pipeline_id}")
+            
+            entities = self.client.get_entities(pipeline_id)
+            if not entities:
+                logger.warning(f"No entities found for pipeline {pipeline_id}")
+                return False
+                
+            target_entities = [entity for entity in entities if entity['entityId'] in entity_ids]
+            if not target_entities:
+                logger.warning(f"Entities {', '.join(entity_ids)} not found in pipeline {pipeline_id}")
+                return False
+                
+            for entity in target_entities:
+                try:
+                    self.client.pause_entity(pipeline_id, entity['entityId'])
+                    logger.info(f"Stopped entity {entity['entityId']} in pipeline {pipeline_id}")
+                except Exception as e:
+                    logger.error(f"Error stopping entity {entity['entityId']}: {str(e)}")
+                    return False
+            return True
+        except Exception as e:
+            logger.error(f"Error stopping entities in pipeline {pipeline_id}: {str(e)}")
+            return False
+    
+    def resync_pipeline(self, pipeline_id: str) -> bool:
+        """Resync all entities in a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            
+        Returns:
+            bool: True if operation was successful, False otherwise
+        """
+        try:
+            self.client.authenticate()
+            logger.info(f"Resyncing pipeline {pipeline_id}")
+            
+            result = self.client.resync_pipeline(pipeline_id)
+            if result:
+                logger.info(f"Successfully resynced pipeline {pipeline_id}")
+                return True
+            else:
+                logger.error(f"Failed to resync pipeline {pipeline_id}")
+                return False
+        except Exception as e:
+            logger.error(f"Error resyncing pipeline {pipeline_id}: {str(e)}")
+            return False
+    
+    def resync_entities(self, pipeline_id: str, entity_ids: List[str]) -> bool:
+        """Resync specific entities in a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            entity_ids: List of entity IDs to resync
+            
+        Returns:
+            bool: True if all operations were successful, False otherwise
+        """
+        try:
+            self.client.authenticate()
+            logger.info(f"Resyncing entities {entity_ids} in pipeline {pipeline_id}")
+            
+            success = True
+            for entity_id in entity_ids:
+                try:
+                    result = self.client.resync_pipeline(pipeline_id, entity_id)
+                    if result:
+                        logger.info(f"Successfully resynced entity {entity_id} in pipeline {pipeline_id}")
+                    else:
+                        logger.error(f"Failed to resync entity {entity_id} in pipeline {pipeline_id}")
+                        success = False
+                except Exception as e:
+                    logger.error(f"Error resyncing entity {entity_id}: {str(e)}")
+                    success = False
+            return success
+        except Exception as e:
+            logger.error(f"Error resyncing entities in pipeline {pipeline_id}: {str(e)}")
+            return False
+    
     def _handle_list_action(self, pipeline_id: Optional[str]) -> None:
         """Handle the list action
         
@@ -357,6 +589,16 @@ def main():
         python play_pause.py pause --pipeline pipeline-123 --entity entity-456
         python play_pause.py resync --pipeline pipeline-123
     """
+    # Configure more verbose logging for standalone execution
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "play_pause.log"))
+        ]
+    )
+    
     # Create argument parser
     parser = argparse.ArgumentParser(
         description="Gluesync Pipeline Management Tool",
@@ -387,9 +629,25 @@ def main():
     # Parse arguments
     args = parser.parse_args()
     
-    # Execute the requested action
-    manager = PipelineManager()
-    manager.execute(args.action, args.pipeline, args.entity, args.snapshot)
+    try:
+        # Log environment information for debugging
+        logger.info("Starting play_pause.py script")
+        logger.info(f"Running with CoreHub URL: {settings.CORE_HUB_URL}")
+        logger.info(f"License file path: {settings.GLUESYNC_LICENSE_FILE}")
+        logger.info(f"Security config path: {settings.GLUESYNC_SECURITY_CONFIG}")
+        logger.info(f"SDK module tag: {settings.GLUESYNC_MODULE_TAG}")
+        logger.info(f"Using SSL: {settings.GLUESYNC_USE_SSL}")
+        
+        # Make sure logs directory exists
+        logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        
+        # Execute the requested action
+        manager = PipelineManager()
+        manager.execute(args.action, args.pipeline, args.entity, args.snapshot)
+        
+    except Exception as e:
+        logger.error(f"An error occurred in main execution: {e}", exc_info=True)
 
 if __name__ == "__main__":
     main()

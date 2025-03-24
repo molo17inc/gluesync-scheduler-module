@@ -24,12 +24,18 @@
 import os
 import sys
 import uuid
+import json
+import requests
 from datetime import datetime
 from crontab import CronTab
 from croniter import croniter
+import logging
 
 from config import settings
 from models import ScheduledJob, TaskType
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 class CronService:
     def __init__(self):
@@ -48,33 +54,60 @@ class CronService:
         Returns:
             str: Command to be executed by cron
         """
-        script_path = os.path.join(self.base_path, "play_pause.py")
+        # Base URL for API calls (using curl to make HTTP requests)
+        api_host = settings.HOST
+        api_port = settings.PORT
+        api_base_url = f"http://{api_host}:{api_port}/api"
         
-        # Base command with python executable
-        cmd = f"{self.python_executable} {script_path}"
-        
-        # Action based on task type
+        # Create a curl command to call the appropriate API endpoint
         if job.task_type == TaskType.ENTITY_START:
-            cmd += f" play --pipeline {job.pipeline_id} --entity {job.entity_id}"
+            # Call the play endpoint with entity ID
+            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play?entity_ids={job.entity_id}"
             if job.with_snapshot:
-                cmd += " --with-snapshot"
+                endpoint += "&with_snapshot=true"
+            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            
         elif job.task_type == TaskType.ENTITY_STOP:
-            cmd += f" pause --pipeline {job.pipeline_id} --entity {job.entity_id}"
+            # Call the pause endpoint with entity ID
+            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause?entity_ids={job.entity_id}"
+            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            
         elif job.task_type == TaskType.PIPELINE_START:
-            cmd += f" play --pipeline {job.pipeline_id}"
+            # Call the play endpoint without entity ID (entire pipeline)
+            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
             if job.with_snapshot:
-                cmd += " --with-snapshot"
+                endpoint += "?with_snapshot=true"
+            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            
         elif job.task_type == TaskType.PIPELINE_STOP:
-            cmd += f" pause --pipeline {job.pipeline_id}"
+            # Call the pause endpoint without entity ID (entire pipeline)
+            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
+            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            
         elif job.task_type == TaskType.ENTITY_SNAPSHOT:
-            cmd += f" resync --pipeline {job.pipeline_id} --entity {job.entity_id}"
+            # Call the resync endpoint with entity ID
+            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync?entity_ids={job.entity_id}"
+            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
+            
         elif job.task_type == TaskType.PIPELINE_SNAPSHOT:
-            cmd += f" resync --pipeline {job.pipeline_id}"
+            # Call the resync endpoint without entity ID (entire pipeline)
+            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
+            cmd = f"curl -X POST '{endpoint}' -H 'Content-Type: application/json'"
         
         # Add logging
         log_dir = os.path.join(self.base_path, "logs")
         os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f"job_{job.id}.log")
+        
+        # Use job.id if available, otherwise use a sanitized version of the job name
+        # This handles the case where the job hasn't been committed to the database yet
+        if job.id is not None:
+            log_identifier = f"job_{job.id}"
+        else:
+            # Create a safe identifier from the job name (remove spaces and special chars)
+            safe_name = ''.join(c if c.isalnum() else '_' for c in job.name)
+            log_identifier = f"job_{safe_name}"
+            
+        log_file = os.path.join(log_dir, f"{log_identifier}.log")
         cmd += f" >> {log_file} 2>&1"
         
         return cmd

@@ -28,6 +28,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.router import router
+from api.pipeline_router import router as pipeline_router
 from config import settings
 from gluesync_sdk_client import gluesync_sdk_client
 
@@ -138,8 +139,9 @@ async def catch_exceptions_middleware(request: Request, call_next):
         # Re-raise to let FastAPI handle the error response
         raise
 
-# Include the API router
+# Include the API routers
 app.include_router(router, prefix="/api")
+app.include_router(pipeline_router, prefix="/api")
 
 if __name__ == "__main__":
     uvicorn.run(
