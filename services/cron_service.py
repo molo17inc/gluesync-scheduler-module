@@ -152,11 +152,18 @@ class CronService:
             # Create a new cron job
             cron_job = self.crontab.new(command=job.command, comment=job_id)
             
+            # Normalize the cron expression for better compatibility
+            original_expression = job.cron_expression
+            normalized_expression = self._normalize_cron_expression(original_expression)
+            
             # Log the cron expression being used
-            logger.info(f"Setting cron expression: '{job.cron_expression}' for job: {job.name}")
+            if original_expression != normalized_expression:
+                logger.info(f"Using normalized cron expression: '{normalized_expression}' (was: '{original_expression}') for job: {job.name}")
+            else:
+                logger.info(f"Setting cron expression: '{normalized_expression}' for job: {job.name}")
             
             # Set the cron expression
-            cron_job.setall(job.cron_expression)
+            cron_job.setall(normalized_expression)
             
             # Enable/disable the job
             cron_job.enable(job.enabled)
@@ -240,6 +247,44 @@ class CronService:
         cron = croniter(cron_expression, datetime.now())
         return cron.get_next(datetime)
     
+    def _normalize_cron_expression(self, cron_expression: str) -> str:
+        """
+        Normalize a cron expression to ensure compatibility with various crontab implementations
+        
+        Args:
+            cron_expression: A cron expression to normalize
+            
+        Returns:
+            str: The normalized cron expression
+        """
+        try:
+            # Normalize the cron expression to ensure compatibility
+            # Some crontab implementations are more strict about format
+            parts = cron_expression.split()
+            if len(parts) == 5:
+                # Standard cron expression with 5 parts
+                minute, hour, day_of_month, month, day_of_week = parts
+                
+                # Ensure */1 is converted to * for better compatibility
+                if minute == "*/1":
+                    minute = "*"
+                if hour == "*/1":
+                    hour = "*"
+                if day_of_month == "*/1":
+                    day_of_month = "*"
+                if month == "*/1":
+                    month = "*"
+                if day_of_week == "*/1":
+                    day_of_week = "*"
+                    
+                # Reconstruct the normalized expression
+                normalized_expression = f"{minute} {hour} {day_of_month} {month} {day_of_week}"
+                return normalized_expression
+            return cron_expression
+        except Exception as e:
+            logger.warning(f"Failed to normalize cron expression '{cron_expression}': {str(e)}")
+            return cron_expression
+            
     def validate_cron_expression(self, cron_expression: str) -> bool:
         """
         Validate if a cron expression is valid
@@ -251,11 +296,16 @@ class CronService:
             bool: True if valid, False otherwise
         """
         try:
-            # Try to parse the cron expression
+            # Try to parse the cron expression with croniter
             croniter(cron_expression)
+            
+            # Normalize the expression for better compatibility
+            normalized_expression = self._normalize_cron_expression(cron_expression)
+            
             # Test it with the crontab library as well
             test_job = self.crontab.new(command="echo test")
-            test_job.setall(cron_expression)
+            test_job.setall(normalized_expression)
             return True
-        except (ValueError, KeyError):
+        except Exception as e:
+            logger.error(f"Invalid cron expression '{cron_expression}': {str(e)}")
             return False
