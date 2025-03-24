@@ -1,3 +1,34 @@
+# Build stage for SDK installation
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Set environment variables for Python and dependency installation
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    python3-dev \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy only the SDK submodule
+COPY ./gluesync-sdk ./gluesync-sdk
+
+# Install specific websockets version first to avoid compatibility issues
+RUN pip install websockets==11.0.3
+
+# Install the SDK from the submodule and create a wheel
+RUN pip install wheel && \
+    cd ./gluesync-sdk && \
+    pip wheel -w /wheels .
+
+# Final stage
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -5,11 +36,9 @@ WORKDIR /app
 # Create Gluesync default directories
 RUN mkdir -p /opt/gluesync/data
 
-# Set environment variables for Python, dependency installation, and the application
+# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     # Core Hub settings \
     CORE_HUB_URL= \
     ENTITY_START_TIMEOUT=2 \
@@ -28,17 +57,31 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     GLUESYNC_USE_SSL=False \
     GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
 
-# Install system dependencies
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libc6-dev \
-    python3-dev \
     cron \
+    curl \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy the project files including the submodule
-COPY . .
+# Copy wheels from builder stage
+COPY --from=builder /wheels /wheels
+
+# Copy only necessary application files
+COPY ./requirements.txt .
+COPY ./entrypoint.sh .
+COPY ./app.py .
+COPY ./config.py .
+COPY ./models.py .
+COPY ./schemas.py .
+COPY ./play_pause.py .
+COPY ./gluesync_sdk_client.py .
+COPY ./api ./api
+COPY ./services ./services
+COPY ./migrations ./migrations
+
+# Create logs directory
+RUN mkdir -p /app/logs
 
 # Make entrypoint script executable
 RUN chmod +x /app/entrypoint.sh
@@ -46,8 +89,8 @@ RUN chmod +x /app/entrypoint.sh
 # Install specific websockets version first to avoid compatibility issues
 RUN pip install websockets==11.0.3
 
-# Install the SDK from the submodule first
-RUN pip install -e ./gluesync-sdk
+# Install the SDK from the wheel
+RUN pip install /wheels/*
 
 # Install other Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
