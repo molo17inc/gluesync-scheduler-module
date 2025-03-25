@@ -58,7 +58,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     # Gluesync SDK settings using default paths \
     GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat \
     SSL_ENABLED=False \
-    GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
+    GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json \
+    SSL_SKIP_VERIFY=True
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
