@@ -109,7 +109,7 @@ class CoreHubClient:
                 logger.error("Authentication requires SDK token - ensure the gluesync_sdk_client is properly initialized")
                 return None
             
-        url = f"{self.base_url}/api{path}"
+        url = f"{self.base_url}{path}"
         headers = {
             'Authorization': f'Bearer {self.token}' if self.token else None,
             'Content-Type': 'application/json'
