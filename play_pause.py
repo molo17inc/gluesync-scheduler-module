@@ -643,7 +643,7 @@ def main():
         logger.info(f"License file path: {settings.GLUESYNC_LICENSE_FILE}")
         logger.info(f"Security config path: {settings.GLUESYNC_SECURITY_CONFIG}")
         logger.info(f"SDK module tag: {settings.GLUESYNC_MODULE_TAG}")
-        logger.info(f"Using SSL: {settings.GLUESYNC_USE_SSL}")
+        logger.info(f"Using SSL: {settings.SSL_ENABLED}")
         
         # Make sure logs directory exists
         logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")

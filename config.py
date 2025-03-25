@@ -66,7 +66,7 @@ class Settings:
     GLUESYNC_LICENSE_FILE = os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')
     # Module tag is hardcoded and cannot be changed externally
     GLUESYNC_MODULE_TAG = 'chronos-module'
-    GLUESYNC_USE_SSL = os.getenv('GLUESYNC_USE_SSL', 'False').lower() in ('true', '1', 'yes')
+    SSL_ENABLED = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 'yes')
     GLUESYNC_SECURITY_CONFIG = os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')
     # Legacy settings (kept for backward compatibility but not used)
     GLUESYNC_KEYSTORE_PATH = os.getenv('GLUESYNC_KEYSTORE_PATH', None)

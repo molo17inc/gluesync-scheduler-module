@@ -141,7 +141,7 @@ class GluesyncSDKClient:
             logger.warning(f"License file not found at {license_file_path}, will attempt to proceed without it")
         
         # SSL configuration
-        use_ssl = settings.GLUESYNC_USE_SSL
+        use_ssl = settings.SSL_ENABLED
         if settings.CORE_HUB_URL and parsed_url and parsed_url.scheme == "https":
             use_ssl = True
         

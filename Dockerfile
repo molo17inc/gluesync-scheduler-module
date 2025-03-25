@@ -57,7 +57,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CRONTAB_USER=root \
     # Gluesync SDK settings using default paths \
     GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat \
-    GLUESYNC_USE_SSL=False \
+    SSL_ENABLED=False \
     GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
 
 # Install runtime dependencies

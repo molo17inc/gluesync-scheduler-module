@@ -95,7 +95,7 @@ Additional environment variables for the Gluesync SDK integration:
 | Variable | Description | Default |
 |----------|-------------|----------|
 | `GLUESYNC_LICENSE_FILE` | Path to the Gluesync license file | `gs-license.dat` |
-| `GLUESYNC_USE_SSL` | Whether to use SSL for CoreHub connection | `False` |
+| `SSL_ENABLED` | Whether to use SSL for CoreHub connection | `False` |
 | `GLUESYNC_KEYSTORE_PATH` | Path to JKS keystore file for SSL | `None` |
 | `GLUESYNC_KEYSTORE_PASSWORD` | Password for JKS keystore | `None` |
 
@@ -121,7 +121,7 @@ To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with
    ```text
    GLUESYNC_LICENSE_FILE=gs-license.dat
    GLUESYNC_MODULE_TAG=scheduler-module
-   GLUESYNC_USE_SSL=False
+   SSL_ENABLED=False
    GLUESYNC_SECURITY_CONFIG=/path/to/security-config.json
    DB_URL=sqlite:///./data/test_scheduler.db
    DEBUG=True
