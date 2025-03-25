@@ -161,7 +161,7 @@ class GluesyncSDKClient:
             port=port if port is not None else 1717,  # Use default port 1717 if None
             license_file_path=license_file_path,
             module_tag=settings.GLUESYNC_MODULE_TAG,
-            ssl=use_ssl,
+            use_ssl=use_ssl,
             security_config=security_config,
             verify_ssl=not settings.SSL_SKIP_VERIFY,  # Skip SSL verification if requested
         )
