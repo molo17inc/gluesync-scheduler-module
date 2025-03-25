@@ -65,6 +65,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cron \
     curl \
+    openssl \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -106,4 +107,5 @@ EXPOSE 1717
 ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Command to run the application
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "1717"]
+# Use python directly to ensure our SSL extraction code runs
+CMD ["python", "app.py"]
