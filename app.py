@@ -140,23 +140,31 @@ async def shutdown_event():
 # Middleware to redirect HTTP to HTTPS when SSL_ENABLED is true
 class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Check if the request is HTTP and SSL is enabled
-        if request.url.scheme == "http" and settings.SSL_ENABLED:
-            # Get the host from request headers or use the default
-            host = request.headers.get("host", f"{settings.HOST}:{settings.PORT}")
-            if ':' in host:
-                host_parts = host.split(':')
-                # Keep the hostname but update the port for HTTPS
-                host = f"{host_parts[0]}:{settings.PORT}"
-            
-            # Create the HTTPS URL
-            https_url = f"https://{host}{request.url.path}"
-            if request.url.query:
-                https_url += f"?{request.url.query}"
-            
-            logger.info(f"Redirecting HTTP request to HTTPS: {https_url}")
-            return RedirectResponse(url=https_url, status_code=307)
-            
+        # Check if the request is using HTTP and SSL is enabled
+        is_http = request.url.scheme == "http" or request.headers.get("x-forwarded-proto") == "http"
+        
+        if is_http and settings.SSL_ENABLED:
+            try:
+                # Get the host from request headers or use the default
+                host = request.headers.get("host", f"{settings.HOST}:{settings.PORT}")
+                
+                # Extract hostname without port if it has one
+                hostname = host.split(':')[0] if ':' in host else host
+                
+                # Create the HTTPS URL with explicit port (important for local testing)
+                https_url = f"https://{hostname}:{settings.PORT}{request.url.path}"
+                
+                # Include query parameters if any
+                if request.url.query:
+                    https_url += f"?{request.url.query}"
+                
+                logger.info(f"Redirecting HTTP request to HTTPS: {https_url}")
+                return RedirectResponse(url=https_url, status_code=307)
+            except Exception as e:
+                logger.error(f"Error in HTTPS redirect middleware: {e}")
+                # Fall through to normal processing if redirect fails
+                
+        # Process normally for HTTPS requests or if redirect failed
         return await call_next(request)
 
 # Middleware to catch any uncaught exceptions
@@ -338,19 +346,42 @@ if __name__ == "__main__":
             
             # Create an SSL context with the proper settings
             ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            
+            # Configure TLS options to be more permissive for different clients
+            # Set minimum TLS version to TLS 1.0 to support more clients
+            try:
+                ssl_context.minimum_version = ssl.TLSVersion.TLSv1
+                ssl_context.maximum_version = ssl.TLSVersion.TLSv1_3
+            except AttributeError:
+                # Fallback for older Python versions
+                ssl_context.options &= ~ssl.OP_NO_TLSv1
+                ssl_context.options &= ~ssl.OP_NO_TLSv1_1
+                ssl_context.options |= ssl.OP_NO_SSLv2
+                ssl_context.options |= ssl.OP_NO_SSLv3
+            
+            # Load the certificate chain
             ssl_context.load_cert_chain(
                 certfile=ssl_config["ssl_certfile"],
                 keyfile=ssl_config["ssl_keyfile"]
             )
             
+            # Enable most cipher suites for broader compatibility
+            ssl_context.set_ciphers('DEFAULT')
+            
             # Update ssl_config to use our context instead of individual files
             ssl_config = {"ssl": ssl_context}
             
+            # Start server with more useful debug information
+            logger.info(f"Available SSL/TLS versions: {dir(ssl)}")
+            logger.info(f"SSL protocol: {ssl_context.protocol}")
+            
+            # Add log level configuration for more verbose outputs
             uvicorn.run(
                 "app:app",
                 host=settings.HOST,
                 port=settings.PORT,
                 reload=settings.DEBUG,
+                log_level="debug" if settings.DEBUG else "info",
                 **ssl_config
             )
         else:
