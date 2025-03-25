@@ -23,9 +23,14 @@
 
 import asyncio
 import logging
+import os
+import ssl
+import json
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from api.router import router
 from api.pipeline_router import router as pipeline_router
@@ -132,6 +137,28 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error during Gluesync SDK client shutdown: {e}")
 
+# Middleware to redirect HTTP to HTTPS when SSL_ENABLED is true
+class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Check if the request is HTTP and SSL is enabled
+        if request.url.scheme == "http" and settings.SSL_ENABLED:
+            # Get the host from request headers or use the default
+            host = request.headers.get("host", f"{settings.HOST}:{settings.PORT}")
+            if ':' in host:
+                host_parts = host.split(':')
+                # Keep the hostname but update the port for HTTPS
+                host = f"{host_parts[0]}:{settings.PORT}"
+            
+            # Create the HTTPS URL
+            https_url = f"https://{host}{request.url.path}"
+            if request.url.query:
+                https_url += f"?{request.url.query}"
+            
+            logger.info(f"Redirecting HTTP request to HTTPS: {https_url}")
+            return RedirectResponse(url=https_url, status_code=307)
+            
+        return await call_next(request)
+
 # Middleware to catch any uncaught exceptions
 @app.middleware("http")
 async def catch_exceptions_middleware(request: Request, call_next):
@@ -146,10 +173,176 @@ async def catch_exceptions_middleware(request: Request, call_next):
 app.include_router(router, prefix="/api")
 app.include_router(pipeline_router, prefix="/api")
 
+# Add HTTPS redirect middleware if SSL is enabled
+if settings.SSL_ENABLED:
+    app.add_middleware(HTTPSRedirectMiddleware)
+    logger.info("HTTPS redirect middleware added")
+
 if __name__ == "__main__":
-    uvicorn.run(
-        "app:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
-    )
+    if settings.SSL_ENABLED:
+        # Load security configuration for SSL
+        ssl_config = {}
+        
+        # Check if security config file exists
+        if os.path.exists(settings.GLUESYNC_SECURITY_CONFIG):
+            logger.info(f"Using security config from: {settings.GLUESYNC_SECURITY_CONFIG}")
+            
+            try:
+                # Load security config JSON file
+                with open(settings.GLUESYNC_SECURITY_CONFIG, 'r') as config_file:
+                    security_config = json.load(config_file)
+                
+                # Extract SSL configuration
+                if 'ssl' in security_config:
+                    ssl_settings = security_config['ssl']
+                    # Note: Despite the variable name 'jks_path', this is actually a PKCS12 file
+                    p12_path = ssl_settings.get('sslCertificatePath')
+                    cert_password = ssl_settings.get('certificatePassword')
+                    
+                    logger.info(f"Found PKCS12 certificate path in security config: {p12_path}")
+                    
+                    # Fallback to environment variables if not specified in config
+                    p12_path = os.getenv('SSL_P12_PATH', p12_path)
+                    cert_password = os.getenv('SSL_CERT_PASSWORD', cert_password)
+                    
+                    # Use the variable name jks_path for compatibility with existing code
+                    jks_path = p12_path
+                    
+                    # Check if certificate file exists (actually a PKCS12 file despite .jks extension)
+                    if jks_path and os.path.exists(jks_path):
+                        # The file is a PKCS12 certificate despite the .jks extension
+                        # We'll need to extract the certificate and key for use with Uvicorn
+                        
+                        # First check if PEM certificate and key files are available from environment variables
+                        cert_file = os.getenv('SSL_CERT_FILE')
+                        key_file = os.getenv('SSL_KEY_FILE')
+                        
+                        if cert_file and key_file and os.path.exists(cert_file) and os.path.exists(key_file):
+                            # Use PEM files if available from environment variables
+                            ssl_config = {
+                                "ssl_certfile": cert_file,
+                                "ssl_keyfile": key_file
+                            }
+                            logger.info(f"SSL enabled with PEM certificate from env vars: {cert_file} and key: {key_file}")
+                        else:
+                            # Extract PEM certificate and key from PKCS12 file
+                            try:
+                                import tempfile
+                                import subprocess
+                                
+                                # Create temporary directory for extraction
+                                temp_dir = tempfile.mkdtemp()
+                                temp_cert = os.path.join(temp_dir, "cert.pem")
+                                temp_key = os.path.join(temp_dir, "key.pem")
+                                
+                                # Extract certificate from PKCS12
+                                openssl_cert_cmd = [
+                                    "openssl", "pkcs12", 
+                                    "-in", jks_path, 
+                                    "-passin", f"pass:{cert_password}",
+                                    "-nokeys", "-out", temp_cert
+                                ]
+                                logger.info(f"Extracting certificate from PKCS12: {' '.join(openssl_cert_cmd)}")
+                                subprocess.run(openssl_cert_cmd, check=True, capture_output=True)
+                                
+                                # Extract key from PKCS12
+                                openssl_key_cmd = [
+                                    "openssl", "pkcs12", 
+                                    "-in", jks_path, 
+                                    "-passin", f"pass:{cert_password}",
+                                    "-nocerts", "-out", temp_key,
+                                    "-passout", "pass:"
+                                ]
+                                logger.info(f"Extracting key from PKCS12: {' '.join(openssl_key_cmd)}")
+                                subprocess.run(openssl_key_cmd, check=True, capture_output=True)
+                                
+                                # Use the extracted files for SSL configuration
+                                ssl_config = {
+                                    "ssl_certfile": temp_cert,
+                                    "ssl_keyfile": temp_key
+                                }
+                                logger.info(f"Successfully extracted certificate and key from PKCS12. Using certificate: {temp_cert} and key: {temp_key}")
+                                
+                                # Register cleanup function to remove temp files on shutdown
+                                @app.on_event("shutdown")
+                                async def cleanup_temp_ssl_files():
+                                    import shutil
+                                    try:
+                                        if os.path.exists(temp_dir):
+                                            shutil.rmtree(temp_dir)
+                                            logger.info(f"Removed temporary SSL extraction files at {temp_dir}")
+                                    except Exception as e:
+                                        logger.error(f"Failed to remove temporary SSL files: {e}")
+                                        
+                            except Exception as e:
+                                logger.error(f"Failed to extract certificate and key from PKCS12: {e}")
+                                logger.warning(f"Found PKCS12 file at {jks_path} but extraction failed")
+                                logger.warning("Please manually extract PEM files or provide SSL_CERT_FILE and SSL_KEY_FILE")
+                                logger.warning("Starting without SSL despite SSL_ENABLED=True")
+                                settings.SSL_ENABLED = False
+                    else:
+                        logger.error(f"SSL is enabled but PKCS12 certificate file not found: {jks_path}")
+                        
+                        # Check for direct PEM files as fallback
+                        cert_file = os.getenv('SSL_CERT_FILE')
+                        key_file = os.getenv('SSL_KEY_FILE')
+                        
+                        if cert_file and key_file and os.path.exists(cert_file) and os.path.exists(key_file):
+                            ssl_config = {
+                                "ssl_certfile": cert_file,
+                                "ssl_keyfile": key_file
+                            }
+                            logger.info(f"SSL enabled with fallback PEM certificate: {cert_file} and key: {key_file}")
+                        else:
+                            logger.warning("Starting without SSL despite SSL_ENABLED=True")
+                            settings.SSL_ENABLED = False
+                else:
+                    logger.error("SSL section not found in security-config.json")
+                    logger.warning("Starting without SSL despite SSL_ENABLED=True")
+                    settings.SSL_ENABLED = False
+            except Exception as e:
+                logger.error(f"Error parsing security-config.json: {e}")
+                logger.warning("Starting without SSL despite SSL_ENABLED=True")
+                settings.SSL_ENABLED = False
+        else:
+            logger.error(f"SSL is enabled but security config file not found: {settings.GLUESYNC_SECURITY_CONFIG}")
+            
+            # Check for direct PEM files as fallback
+            cert_file = os.getenv('SSL_CERT_FILE')
+            key_file = os.getenv('SSL_KEY_FILE')
+            
+            if cert_file and key_file and os.path.exists(cert_file) and os.path.exists(key_file):
+                ssl_config = {
+                    "ssl_certfile": cert_file,
+                    "ssl_keyfile": key_file
+                }
+                logger.info(f"SSL enabled with fallback PEM certificate: {cert_file} and key: {key_file}")
+            else:
+                logger.warning("Starting without SSL despite SSL_ENABLED=True")
+                settings.SSL_ENABLED = False
+        
+        if settings.SSL_ENABLED:
+            logger.info(f"Starting HTTPS server at https://{settings.HOST}:{settings.PORT}")
+            uvicorn.run(
+                "app:app",
+                host=settings.HOST,
+                port=settings.PORT,
+                reload=settings.DEBUG,
+                **ssl_config
+            )
+        else:
+            logger.info(f"Starting HTTP server at http://{settings.HOST}:{settings.PORT}")
+            uvicorn.run(
+                "app:app",
+                host=settings.HOST,
+                port=settings.PORT,
+                reload=settings.DEBUG,
+            )
+    else:
+        logger.info(f"Starting HTTP server at http://{settings.HOST}:{settings.PORT}")
+        uvicorn.run(
+            "app:app",
+            host=settings.HOST,
+            port=settings.PORT,
+            reload=settings.DEBUG,
+        )
