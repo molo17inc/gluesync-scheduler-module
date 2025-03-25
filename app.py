@@ -221,7 +221,9 @@ if __name__ == "__main__":
                             # Use PEM files if available from environment variables
                             ssl_config = {
                                 "ssl_certfile": cert_file,
-                                "ssl_keyfile": key_file
+                                "ssl_keyfile": key_file,
+                                # Add more SSL config options to improve browser compatibility
+                                "ssl_version": ssl.PROTOCOL_TLS_SERVER
                             }
                             logger.info(f"SSL enabled with PEM certificate from env vars: {cert_file} and key: {key_file}")
                         else:
@@ -259,7 +261,9 @@ if __name__ == "__main__":
                                 # Use the extracted files for SSL configuration
                                 ssl_config = {
                                     "ssl_certfile": temp_cert,
-                                    "ssl_keyfile": temp_key
+                                    "ssl_keyfile": temp_key,
+                                    # Add more SSL config options to improve browser compatibility
+                                    "ssl_version": ssl.PROTOCOL_TLS_SERVER
                                 }
                                 logger.info(f"Successfully extracted certificate and key from PKCS12. Using certificate: {temp_cert} and key: {temp_key}")
                                 
@@ -290,7 +294,9 @@ if __name__ == "__main__":
                         if cert_file and key_file and os.path.exists(cert_file) and os.path.exists(key_file):
                             ssl_config = {
                                 "ssl_certfile": cert_file,
-                                "ssl_keyfile": key_file
+                                "ssl_keyfile": key_file,
+                                # Add more SSL config options to improve browser compatibility
+                                "ssl_version": ssl.PROTOCOL_TLS_SERVER
                             }
                             logger.info(f"SSL enabled with fallback PEM certificate: {cert_file} and key: {key_file}")
                         else:
@@ -323,6 +329,23 @@ if __name__ == "__main__":
         
         if settings.SSL_ENABLED:
             logger.info(f"Starting HTTPS server at https://{settings.HOST}:{settings.PORT}")
+            
+            # Add warning for development environment
+            if settings.SSL_SKIP_VERIFY:
+                logger.warning("SSL certificate verification is DISABLED - users may see browser warnings")
+                logger.warning("To connect in Chrome, you may need to type 'thisisunsafe' while the browser window is active")
+                logger.warning("For Firefox, you may need to add a security exception")
+            
+            # Create an SSL context with the proper settings
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ssl_context.load_cert_chain(
+                certfile=ssl_config["ssl_certfile"],
+                keyfile=ssl_config["ssl_keyfile"]
+            )
+            
+            # Update ssl_config to use our context instead of individual files
+            ssl_config = {"ssl": ssl_context}
+            
             uvicorn.run(
                 "app:app",
                 host=settings.HOST,
