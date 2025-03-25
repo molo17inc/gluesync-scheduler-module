@@ -130,15 +130,18 @@ class CoreHubClient:
             logger.debug(f"Response status code: {response.status_code}")
             logger.debug(f"Response content: {response.text}")
 
+        # Check if the response status code is in the 2XX range
         if response.status_code < 200 or response.status_code >= 300:
             logger.error(f"Request to {url} failed with status code {response.status_code}: {response.text}")
             return None
 
+        # Success if status code is in 2XX range
         try:
+            # Try to parse JSON but don't fail if not JSON
             return response.json()
         except json.JSONDecodeError:
-            logger.error(f"Failed to parse JSON response: {response.text}")
-            return None
+            logger.info(f"No JSON response but status code {response.status_code} indicates success")
+            return {'success': True, 'status_code': response.status_code}
 
     def authenticate(self) -> None:
         """Authenticate with the Core Hub API and store the token"""
