@@ -251,19 +251,20 @@ class CoreHubClient:
         )
         print(f"Resynced entity: {entity_id}")
     
-    def resync_pipeline(self, pipeline_id: str, entity_id: Optional[str] = None) -> Dict[str, Any]:
+    def resync_pipeline(self, pipeline_id: str, entity_id: Optional[str] = None, snapshot_write_method: str = 'UPSERT') -> Dict[str, Any]:
         """Trigger a one-time snapshot sync for a pipeline or specific entity
         
         Args:
             pipeline_id: ID of the pipeline
             entity_id: Optional ID of the entity
+            snapshot_write_method: Write method for the snapshot (default: UPSERT)
             
         Returns:
             Response data from the API
         """
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         params = {
-            'snapshotWriteMethod': 'UPSERT'
+            'snapshotWriteMethod': snapshot_write_method
         }
         if entity_id:
             params['entity'] = entity_id
@@ -447,52 +448,55 @@ class PipelineManager:
             logger.error(f"Error stopping entities in pipeline {pipeline_id}: {str(e)}")
             return False
     
-    def resync_pipeline(self, pipeline_id: str) -> bool:
-        """Resync all entities in a pipeline
+    def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
+        """Trigger a one-time snapshot for all entities in a pipeline
         
         Args:
             pipeline_id: Pipeline ID
+            snapshot_write_method: Write method for the snapshot (default: UPSERT)
             
         Returns:
             bool: True if operation was successful, False otherwise
         """
         try:
             self.client.authenticate()
-            logger.info(f"Resyncing pipeline {pipeline_id}")
+            logger.info(f"Triggering one-time snapshot for pipeline {pipeline_id} with method {snapshot_write_method}")
             
-            result = self.client.resync_pipeline(pipeline_id)
+            # Pass the snapshot_write_method to the client
+            result = self.client.resync_pipeline(pipeline_id, snapshot_write_method=snapshot_write_method)
             if result:
-                logger.info(f"Successfully resynced pipeline {pipeline_id}")
+                logger.info(f"Successfully triggered one-time snapshot for pipeline {pipeline_id}")
                 return True
             else:
-                logger.error(f"Failed to resync pipeline {pipeline_id}")
+                logger.error(f"Failed to trigger one-time snapshot for pipeline {pipeline_id}")
                 return False
         except Exception as e:
-            logger.error(f"Error resyncing pipeline {pipeline_id}: {str(e)}")
+            logger.error(f"Error triggering one-time snapshot for pipeline {pipeline_id}: {str(e)}")
             return False
     
-    def resync_entities(self, pipeline_id: str, entity_ids: List[str]) -> bool:
-        """Resync specific entities in a pipeline
+    def resync_entities(self, pipeline_id: str, entity_ids: List[str], snapshot_write_method: str = 'UPSERT') -> bool:
+        """Trigger a one-time snapshot for specific entities in a pipeline
         
         Args:
             pipeline_id: Pipeline ID
             entity_ids: List of entity IDs to resync
+            snapshot_write_method: Write method for the snapshot (default: UPSERT)
             
         Returns:
             bool: True if all operations were successful, False otherwise
         """
         try:
             self.client.authenticate()
-            logger.info(f"Resyncing entities {entity_ids} in pipeline {pipeline_id}")
+            logger.info(f"Triggering one-time snapshot for entities {entity_ids} in pipeline {pipeline_id} with method {snapshot_write_method}")
             
             success = True
             for entity_id in entity_ids:
                 try:
-                    result = self.client.resync_pipeline(pipeline_id, entity_id)
+                    result = self.client.resync_pipeline(pipeline_id, entity_id, snapshot_write_method=snapshot_write_method)
                     if result:
-                        logger.info(f"Successfully resynced entity {entity_id} in pipeline {pipeline_id}")
+                        logger.info(f"Successfully triggered one-time snapshot for entity {entity_id} in pipeline {pipeline_id}")
                     else:
-                        logger.error(f"Failed to resync entity {entity_id} in pipeline {pipeline_id}")
+                        logger.error(f"Failed to trigger one-time snapshot for entity {entity_id} in pipeline {pipeline_id}")
                         success = False
                 except Exception as e:
                     logger.error(f"Error resyncing entity {entity_id}: {str(e)}")

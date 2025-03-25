@@ -249,7 +249,8 @@ async def pause_pipeline(
 )
 async def resync_pipeline(
     pipeline_id: str = Path(..., description="The ID of the pipeline to resync"),
-    entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to resync. If not provided, all entities in the pipeline will be resynced.")
+    entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to resync. If not provided, all entities in the pipeline will be resynced."),
+    snapshot_write_method: str = Query("UPSERT", description="The write method for the snapshot, default is UPSERT.")
 ):
     """
     Create a data snapshot for a pipeline or specific entities within a pipeline.
@@ -260,6 +261,7 @@ async def resync_pipeline(
     ## Parameters
     - **pipeline_id**: The ID of the pipeline to resync
     - **entity_ids**: Optional list of entity IDs to resync. If not provided, all entities in the pipeline will be resynced.
+    - **snapshot_write_method**: The write method for the snapshot, default is UPSERT.
     
     ## Returns
     A JSON object containing:
@@ -271,10 +273,11 @@ async def resync_pipeline(
     ```json
     {
       "success": true,
-      "message": "Pipeline resynced successfully",
+      "message": "Pipeline one-time snapshot triggered successfully",
       "details": {
         "pipeline_id": "pipeline-123",
-        "entities_resynced": ["entity-456", "entity-789"]
+        "entities_resynced": ["entity-456", "entity-789"],
+        "snapshot_write_method": "UPSERT"
       }
     }
     ```
@@ -288,23 +291,25 @@ async def resync_pipeline(
         manager = PipelineManager()
         if entity_ids:
             # Resync specific entities
-            result = manager.resync_entities(pipeline_id, entity_ids)
+            result = manager.resync_entities(pipeline_id, entity_ids, snapshot_write_method)
             return {
                 "success": True,
-                "message": f"Resynced {len(entity_ids)} entities in pipeline {pipeline_id}",
+                "message": f"Triggered one-time snapshot for {len(entity_ids)} entities in pipeline {pipeline_id}",
                 "details": {
                     "pipeline_id": pipeline_id,
-                    "entities_resynced": entity_ids
+                    "entities_resynced": entity_ids,
+                    "snapshot_write_method": snapshot_write_method
                 }
             }
         else:
             # Resync entire pipeline
-            result = manager.resync_pipeline(pipeline_id)
+            result = manager.resync_pipeline(pipeline_id, snapshot_write_method)
             return {
                 "success": True,
-                "message": f"Resynced pipeline {pipeline_id}",
+                "message": f"Triggered one-time snapshot for pipeline {pipeline_id}",
                 "details": {
-                    "pipeline_id": pipeline_id
+                    "pipeline_id": pipeline_id,
+                    "snapshot_write_method": snapshot_write_method
                 }
             }
     except Exception as e:
