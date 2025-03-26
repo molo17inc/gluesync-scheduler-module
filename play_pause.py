@@ -123,7 +123,17 @@ class CoreHubClient:
             logger.debug(f"Body: {body}")
             logger.debug(f"Params: {params}")
 
-        response = requests.request(method, url, headers=headers, json=body, params=params)
+        # Skip SSL verification if SSL_SKIP_VERIFY is enabled
+        verify = not settings.SSL_SKIP_VERIFY
+        logger.info(f"Making request with SSL verification {'disabled' if not verify else 'enabled'}")
+        
+        try:
+            response = requests.request(method, url, headers=headers, json=body, params=params, verify=verify)
+        except requests.exceptions.SSLError as e:
+            logger.error(f"SSL Error connecting to {url}: {str(e)}")
+            if verify:
+                logger.warning("Consider setting SSL_SKIP_VERIFY=True if using self-signed certificates")
+            raise
 
         # Log response details if in debug mode
         if settings.DEBUG:
@@ -501,6 +511,10 @@ class PipelineManager:
                     else:
                         logger.error(f"Failed to trigger one-time snapshot for entity {entity_id} in pipeline {pipeline_id}")
                         success = False
+                except requests.exceptions.SSLError as e:
+                    logger.error(f"SSL Error resyncing entity {entity_id}: {str(e)}")
+                    logger.warning(f"SSL verification is {'disabled' if settings.SSL_SKIP_VERIFY else 'enabled'}. Set SSL_SKIP_VERIFY=True if using self-signed certificates.")
+                    success = False
                 except Exception as e:
                     logger.error(f"Error resyncing entity {entity_id}: {str(e)}")
                     success = False
