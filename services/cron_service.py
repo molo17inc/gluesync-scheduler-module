@@ -58,9 +58,12 @@ class CronService:
         api_host = settings.HOST
         api_port = settings.PORT
         
-        # Always use HTTP for localhost/internal connections (even when SSL is enabled)
-        # This ensures cron jobs can still access the API when SSL is enabled
-        api_base_url = f"http://{api_host}:{api_port}/api"
+        # Use HTTPS when SSL is enabled, otherwise use HTTP
+        protocol = "https" if settings.SSL_ENABLED else "http"
+        api_base_url = f"{protocol}://{api_host}:{api_port}/api"
+        
+        # Add SSL verification options when using HTTPS
+        ssl_options = "-k" if settings.SSL_ENABLED else ""
         
         # Create a curl command to call the appropriate API endpoint
         if job.task_type == TaskType.ENTITY_START:
@@ -69,34 +72,34 @@ class CronService:
             if job.with_snapshot:
                 endpoint += "&with_snapshot=true"
             # Use double quotes for the URL to avoid issues with nested quotes in crontab
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.ENTITY_STOP:
             # Call the pause endpoint with entity ID
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause?entity_ids={job.entity_id}"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_START:
             # Call the play endpoint without entity ID (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
             if job.with_snapshot:
                 endpoint += "?with_snapshot=true"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_STOP:
             # Call the pause endpoint without entity ID (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.ENTITY_SNAPSHOT:
             # Call the resync endpoint with entity ID
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync?entity_ids={job.entity_id}"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_SNAPSHOT:
             # Call the resync endpoint without entity ID (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json"'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         # Log the endpoint and curl command for debugging
         logger.debug(f"Using endpoint: {endpoint}")
