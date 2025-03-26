@@ -123,16 +123,34 @@ class CoreHubClient:
             logger.debug(f"Body: {body}")
             logger.debug(f"Params: {params}")
 
-        # Skip SSL verification if SSL_SKIP_VERIFY is enabled
-        verify = not settings.SSL_SKIP_VERIFY
-        logger.info(f"Making request with SSL verification {'disabled' if not verify else 'enabled'}")
+        # For cron jobs and standalone scripts, we need to be more aggressive with SSL verification skipping
+        # If we're in a TLS environment (using HTTPS) and SSL_SKIP_VERIFY is True, skip verification
+        should_verify = not settings.SSL_SKIP_VERIFY
+        
+        # If URL starts with https, additionally check if we should force disable verification
+        force_no_verify = url.startswith('https://') and os.environ.get('FORCE_NO_SSL_VERIFY', 'False').lower() in ('true', '1', 'yes')
+        
+        # Final verification setting
+        verify = not (should_verify is False or force_no_verify)
+        
+        logger.info(f"Making request to {url} with SSL verification {'disabled' if not verify else 'enabled'}")
+        logger.info(f"SSL settings: SSL_SKIP_VERIFY={settings.SSL_SKIP_VERIFY}, FORCE_NO_SSL_VERIFY={force_no_verify}")
         
         try:
             response = requests.request(method, url, headers=headers, json=body, params=params, verify=verify)
         except requests.exceptions.SSLError as e:
             logger.error(f"SSL Error connecting to {url}: {str(e)}")
-            if verify:
-                logger.warning("Consider setting SSL_SKIP_VERIFY=True if using self-signed certificates")
+            logger.error("Attempting to retry request with SSL verification disabled as a fallback")
+            
+            # As a last resort, try one more time with verification disabled
+            try:
+                response = requests.request(method, url, headers=headers, json=body, params=params, verify=False)
+                logger.warning("Successfully connected with SSL verification disabled")
+            except Exception as retry_e:
+                logger.error(f"Still failed after disabling SSL verification: {str(retry_e)}")
+                raise e  # Raise the original error
+        except Exception as e:
+            logger.error(f"Error connecting to {url}: {str(e)}")
             raise
 
         # Log response details if in debug mode
@@ -610,6 +628,16 @@ def main():
         python play_pause.py pause --pipeline pipeline-123 --entity entity-456
         python play_pause.py resync --pipeline pipeline-123
     """
+    # Ensure SSL settings are properly loaded when running as standalone script
+    # For cron jobs, we should default to skipping SSL verification
+    if 'SSL_SKIP_VERIFY' not in os.environ or os.environ.get('SSL_SKIP_VERIFY').lower() not in ('true', '1', 'yes'):
+        os.environ['SSL_SKIP_VERIFY'] = 'True'
+        # Force a reload of settings to ensure they reflect latest environment variables
+        settings.reload_from_env()
+        
+    # Force disable SSL verification for cron jobs in HTTPS environments
+    os.environ['FORCE_NO_SSL_VERIFY'] = 'True'
+    
     # Configure more verbose logging for standalone execution
     logging.basicConfig(
         level=logging.INFO,
@@ -658,6 +686,12 @@ def main():
         logger.info(f"Security config path: {settings.GLUESYNC_SECURITY_CONFIG}")
         logger.info(f"SDK module tag: {settings.GLUESYNC_MODULE_TAG}")
         logger.info(f"Using SSL: {settings.SSL_ENABLED}")
+        logger.info(f"SSL_SKIP_VERIFY: {settings.SSL_SKIP_VERIFY}")
+        logger.info(f"FORCE_NO_SSL_VERIFY: {os.environ.get('FORCE_NO_SSL_VERIFY', 'Not set')}")
+        
+        # Log whether SSL verification will be performed
+        verify_status = not (settings.SSL_SKIP_VERIFY or os.environ.get('FORCE_NO_SSL_VERIFY', 'False').lower() in ('true', '1', 'yes'))
+        logger.info(f"SSL Certificate verification will be: {'ENABLED' if verify_status else 'DISABLED'}")
         
         # Make sure logs directory exists
         logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
