@@ -144,8 +144,13 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
         user_agent = request.headers.get("user-agent", "").lower()
         is_browser = "mozilla" in user_agent or "chrome" in user_agent or "safari" in user_agent or "edge" in user_agent
         
-        # Only redirect browsers, not API clients like Postman
-        if request.url.scheme == "http" and settings.SSL_ENABLED and is_browser:
+        # Get client IP from request
+        client = request.client.host if request.client else '0.0.0.0'
+        is_local = client in ('127.0.0.1', 'localhost', '::1', '0.0.0.0')
+        
+        # Only redirect browsers, not API clients or local connections
+        # This allows cron jobs and other internal services to use HTTP even when SSL is enabled
+        if request.url.scheme == "http" and settings.SSL_ENABLED and is_browser and not is_local:
             try:
                 # Get the host from request headers
                 host = request.headers.get("host", f"{settings.HOST}:{settings.PORT}")

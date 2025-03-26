@@ -57,6 +57,9 @@ class CronService:
         # Base URL for API calls (using curl to make HTTP requests)
         api_host = settings.HOST
         api_port = settings.PORT
+        
+        # Always use HTTP for localhost/internal connections (even when SSL is enabled)
+        # This ensures cron jobs can still access the API when SSL is enabled
         api_base_url = f"http://{api_host}:{api_port}/api"
         
         # Create a curl command to call the appropriate API endpoint
