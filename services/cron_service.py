@@ -156,7 +156,19 @@ class CronService:
         # 4. The response from the API with proper formatting
         # 5. Timestamp when job completes
         job_id_str = str(job.id) if job.id is not None else "Not assigned"
-        entity_id_str = str(job.entity_id) if job.entity_id is not None else "N/A"
+        # Handle entity_ids - parse if JSON string, otherwise use raw value
+        entity_ids_str = "N/A"
+        if job.entity_ids is not None:
+            try:
+                # Try to parse as JSON if it's a string
+                if isinstance(job.entity_ids, str):
+                    entity_list = json.loads(job.entity_ids)
+                    entity_ids_str = ", ".join(entity_list)
+                else:
+                    entity_ids_str = str(job.entity_ids)
+            except json.JSONDecodeError:
+                # If not valid JSON, use as is
+                entity_ids_str = str(job.entity_ids)
         
         # For crontab compatibility, create a single-line command with no embedded newlines
         # Use echo commands with semicolons for newlines in the log file
@@ -165,7 +177,7 @@ class CronService:
         # The format will be: echo header && echo job details && echo command info && run curl && echo footer
         
         # Format the log text - replace newlines with semicolons that will be interpreted in the echo
-        job_details_text = f"Job ID: {job_id_str}; Job Name: {job.name}; Task Type: {job.task_type}; Pipeline ID: {job.pipeline_id}; Entity ID: {entity_id_str}; With Snapshot: {job.with_snapshot}; Schedule: {job.cron_expression}"
+        job_details_text = f"Job ID: {job_id_str}; Job Name: {job.name}; Task Type: {job.task_type}; Pipeline ID: {job.pipeline_id}; Entity IDs: {entity_ids_str}; With Snapshot: {job.with_snapshot}; Schedule: {job.cron_expression}"
         
         # Create each echo command without any newlines
         start_log = f"echo \"=== JOB EXECUTION START: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file}"
@@ -207,7 +219,7 @@ class CronService:
             logger.info(f"  Task Type: {job.task_type}")
             logger.info(f"  Cron Expression: '{job.cron_expression}'")
             logger.info(f"  Pipeline ID: {job.pipeline_id}")
-            logger.info(f"  Entity ID: {job.entity_id if job.entity_id else 'N/A'}")
+            logger.info(f"  Entity IDs: {job.entity_ids if job.entity_ids else 'N/A'}")
             logger.info(f"  With Snapshot: {job.with_snapshot}")
             logger.info(f"  Enabled: {job.enabled}")
             logger.info(f"  Command: {job.command}")

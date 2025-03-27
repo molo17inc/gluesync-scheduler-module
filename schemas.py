@@ -101,7 +101,7 @@ class JobCreate(JobBase):
                 "task_type": "ENTITY_SNAPSHOT",
                 "cron_expression": "0 0 * * *",
                 "pipeline_id": "pipeline-123",
-                "entity_id": "entity-456",
+                "entity_ids": ["entity-456", "entity-789"],
                 "with_snapshot": True,
                 "enabled": True
             }
@@ -115,7 +115,7 @@ class JobUpdate(BaseModel):
     schedule: Optional[ScheduleConfig] = Field(None, description="Updated user-friendly schedule configuration")
     cron_expression: Optional[str] = Field(None, description="Updated cron expression. Not required if schedule is provided.", example="0 0 * * *")
     pipeline_id: Optional[str] = Field(None, description="Updated pipeline ID", example="pipeline-123")
-    entity_id: Optional[str] = Field(None, description="Updated entity ID", example="entity-456")
+    entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on", example=["entity-456", "entity-789"])
     with_snapshot: Optional[bool] = Field(None, description="Updated snapshot setting")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     
@@ -154,10 +154,10 @@ class Job(JobBase):
                 "task_type": "ENTITY_SNAPSHOT",
                 "cron_expression": "0 0 * * *",
                 "pipeline_id": "pipeline-123",
-                "entity_id": "entity-456",
+                "entity_ids": ["entity-456", "entity-789"],
                 "with_snapshot": True,
                 "enabled": True,
-                "command": "python play_pause.py resync --pipeline pipeline-123 --entity entity-456",
+                "command": "python3 play_pause.py resync --pipeline pipeline-123 --entity entity-456,entity-789",
                 "cron_job_identifier": "gluesync_job_1",
                 "created_at": "2025-03-20T10:00:00Z",
                 "updated_at": "2025-03-20T10:00:00Z",
@@ -183,10 +183,10 @@ class JobList(BaseModel):
                         "task_type": "ENTITY_SNAPSHOT",
                         "cron_expression": "0 0 * * *",
                         "pipeline_id": "pipeline-123",
-                        "entity_id": "entity-456",
+                        "entity_ids": ["entity-456", "entity-789"],
                         "with_snapshot": True,
                         "enabled": True,
-                        "command": "python play_pause.py resync --pipeline pipeline-123 --entity entity-456",
+                        "command": "python3 play_pause.py resync --pipeline pipeline-123 --entity entity-456,entity-789",
                         "cron_job_identifier": "gluesync_job_1",
                         "created_at": "2025-03-20T10:00:00Z",
                         "updated_at": "2025-03-20T10:00:00Z",

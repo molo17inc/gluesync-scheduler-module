@@ -82,7 +82,7 @@ def list_jobs(
           "task_type": "ENTITY_SNAPSHOT",
           "cron_expression": "0 0 * * *",
           "pipeline_id": "pipeline-123",
-          "entity_id": "entity-456",
+          "entity_ids": ["entity-456", "entity-789"],
           "with_snapshot": true,
           "enabled": true,
           "created_at": "2025-03-20T10:00:00Z",
@@ -127,10 +127,10 @@ def get_job(job_id: int = Path(..., description="The ID of the scheduled job to 
       "task_type": "ENTITY_SNAPSHOT",
       "cron_expression": "0 0 * * *",
       "pipeline_id": "pipeline-123",
-      "entity_id": "entity-456",
+      "entity_ids": ["entity-456", "entity-789"],
       "with_snapshot": true,
       "enabled": true,
-      "command": "python play_pause.py resync --pipeline pipeline-123 --entity entity-456",
+      "command": "python3 play_pause.py resync --pipeline pipeline-123 --entity entity-456,entity-789",
       "cron_job_identifier": "gluesync_job_1",
       "created_at": "2025-03-20T10:00:00Z",
       "updated_at": "2025-03-20T10:00:00Z",
@@ -164,7 +164,7 @@ def create_job(job_data: JobCreate = Body(..., description="Job data to create",
         "minute": 30
     },
     "pipeline_id": "pipeline-123",
-    "entity_id": "entity-456",
+    "entity_ids": ["entity-456", "entity-789"],
     "with_snapshot": True,
     "enabled": True
 }), db: Session = Depends(get_db)):
@@ -181,7 +181,7 @@ def create_job(job_data: JobCreate = Body(..., description="Job data to create",
       - **minute**: Minute of the hour (0-59)
     - **cron_expression**: Cron expression for scheduling (optional if schedule is provided)
     - **pipeline_id**: ID of the pipeline to operate on (required)
-    - **entity_id**: ID of the entity to operate on (optional, required for entity operations)
+    - **entity_ids**: List of entity IDs to operate on (optional, required for entity operations)
     - **with_snapshot**: Whether to include snapshot (optional, default: false)
     - **enabled**: Whether the job is enabled (optional, default: true)
     
@@ -200,7 +200,7 @@ def create_job(job_data: JobCreate = Body(..., description="Job data to create",
         "minute": 30
       },
       "pipeline_id": "pipeline-123",
-      "entity_id": "entity-456",
+      "entity_ids": ["entity-456", "entity-789"],
       "with_snapshot": true,
       "enabled": true
     }
@@ -214,7 +214,7 @@ def create_job(job_data: JobCreate = Body(..., description="Job data to create",
       "task_type": "ENTITY_SNAPSHOT",
       "cron_expression": "0 0 * * *",
       "pipeline_id": "pipeline-123",
-      "entity_id": "entity-456",
+      "entity_ids": ["entity-456", "entity-789"],
       "with_snapshot": true,
       "enabled": true
     }
@@ -265,6 +265,8 @@ def update_job(job_id: int = Path(..., description="The ID of the job to update"
       - **hour**: Hour of the day (0-23)
       - **minute**: Minute of the hour (0-59)
     - **cron_expression**: Updated cron expression for scheduling (not required if schedule is provided)
+    - **pipeline_id**: Updated pipeline ID
+    - **entity_ids**: Updated list of entity IDs to operate on
     - **with_snapshot**: Updated snapshot setting
     - **enabled**: Updated enabled status
     
