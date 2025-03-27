@@ -66,34 +66,57 @@ class CronService:
         ssl_options = "-k" if settings.SSL_ENABLED else ""
         
         # Create a curl command to call the appropriate API endpoint
+        # Parse entity_ids from JSON string if it exists
+        entity_ids_list = []
+        if job.entity_ids:
+            try:
+                entity_ids_list = json.loads(job.entity_ids)
+                logger.info(f"Parsed entity IDs for job {job.id}: {entity_ids_list}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing entity_ids JSON for job {job.id}: {e}")
+        
+        # Convert list to comma-separated string for URL parameters
+        entity_ids_param = ",".join(entity_ids_list) if entity_ids_list else ""
+        
         if job.task_type == TaskType.ENTITY_START:
-            # Call the play endpoint with entity ID
-            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play?entity_ids={job.entity_id}"
-            if job.with_snapshot:
-                endpoint += "&with_snapshot=true"
+            # Call the play endpoint with entity IDs
+            if entity_ids_param:
+                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play?entity_ids={entity_ids_param}"
+                if job.with_snapshot:
+                    endpoint += "&with_snapshot=true"
+            else:
+                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
+                if job.with_snapshot:
+                    endpoint += "?with_snapshot=true"
             # Use double quotes for the URL to avoid issues with nested quotes in crontab
             cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.ENTITY_STOP:
-            # Call the pause endpoint with entity ID
-            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause?entity_ids={job.entity_id}"
+            # Call the pause endpoint with entity IDs
+            if entity_ids_param:
+                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause?entity_ids={entity_ids_param}"
+            else:
+                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
             cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_START:
-            # Call the play endpoint without entity ID (entire pipeline)
+            # Call the play endpoint without entity IDs (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
             if job.with_snapshot:
                 endpoint += "?with_snapshot=true"
             cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_STOP:
-            # Call the pause endpoint without entity ID (entire pipeline)
+            # Call the pause endpoint without entity IDs (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
             cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.ENTITY_SNAPSHOT:
-            # Call the resync endpoint with entity ID
-            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync?entity_ids={job.entity_id}"
+            # Call the resync endpoint with entity IDs
+            if entity_ids_param:
+                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync?entity_ids={entity_ids_param}"
+            else:
+                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
             cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_SNAPSHOT:

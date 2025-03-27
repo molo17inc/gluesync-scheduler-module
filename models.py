@@ -48,7 +48,7 @@ class ScheduledJob(Base):
     task_type = Column(Enum(TaskType), nullable=False)
     cron_expression = Column(String, nullable=False)
     pipeline_id = Column(String, nullable=False)
-    entity_id = Column(String, nullable=True)
+    entity_ids = Column(Text, nullable=True)  # Stored as JSON string of entity IDs
     with_snapshot = Column(Boolean, default=False)
     enabled = Column(Boolean, default=True)
     command = Column(Text, nullable=False)

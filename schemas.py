@@ -77,7 +77,7 @@ class JobBase(BaseModel):
     schedule: Optional[ScheduleConfig] = Field(None, description="User-friendly schedule configuration")
     cron_expression: Optional[str] = Field(None, description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight). Not required if schedule is provided.", example="0 0 * * *")
     pipeline_id: str = Field(..., description="ID of the pipeline to operate on", example="pipeline-123")
-    entity_id: Optional[str] = Field(None, description="ID of the entity to operate on (required for entity operations)", example="entity-456")
+    entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on (required for entity operations)", example=["entity-456", "entity-789"])
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     

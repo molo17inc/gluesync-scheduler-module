@@ -215,6 +215,21 @@ Examples:
 - Every Monday, Wednesday, and Friday at 8:30 AM: `{"days_of_week": ["monday", "wednesday", "friday"], "hour": 8, "minute": 30}`
 - Every weekend at midnight: `{"days_of_week": ["saturday", "sunday"], "hour": 0, "minute": 0}`
 
+### Multi-Entity Support
+
+The scheduler supports operating on multiple entities with a single job. Instead of creating separate jobs for each entity that follows the same schedule, you can specify an array of entity IDs:
+
+```json
+"entity_ids": ["entity-456", "entity-789", "entity-101"]
+```
+
+This is particularly useful for:
+
+- Creating snapshots of multiple related entities at the same time
+- Starting or stopping groups of entities together
+- Ensuring operations across multiple entities are performed in a consistent timeframe
+
+
 #### Example Job Creation Request
 
 ```json
@@ -230,7 +245,7 @@ POST /api/jobs
     "minute": 30
   },
   "pipeline_id": "pipeline-123",
-  "entity_id": "entity-456",
+  "entity_ids": ["entity-456", "entity-789"],
   "with_snapshot": true,
   "enabled": true
 }

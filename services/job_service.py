@@ -23,6 +23,7 @@
 
 from typing import List, Optional, Dict, Any
 import uuid
+import json
 import logging
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -186,6 +187,12 @@ class JobService:
                 detail=f"Job with name '{job_data.name}' already exists"
             )
         
+        # Handle entity_ids list by converting to JSON string for storage
+        if 'entity_ids' in job_dict and job_dict['entity_ids'] is not None:
+            logger.info(f"Converting entity_ids list to JSON string: {job_dict['entity_ids']}")
+            job_dict['entity_ids'] = json.dumps(job_dict['entity_ids'])
+            logger.info(f"Converted entity_ids to JSON string: {job_dict['entity_ids']}")
+        
         # Generate command based on job type
         command = self._create_command(job_dict)
         
@@ -247,9 +254,15 @@ class JobService:
                 detail=f"Invalid cron expression: {update_data['cron_expression']}"
             )
         
+        # Handle entity_ids list by converting to JSON string for storage
+        if 'entity_ids' in update_data and update_data['entity_ids'] is not None:
+            logger.info(f"Converting entity_ids list to JSON string: {update_data['entity_ids']}")
+            update_data['entity_ids'] = json.dumps(update_data['entity_ids'])
+            logger.info(f"Converted entity_ids to JSON string: {update_data['entity_ids']}")
+            
         # Check if any fields that affect the command have changed
         command_affecting_fields = {
-            'task_type', 'pipeline_id', 'entity_id', 'with_snapshot'
+            'task_type', 'pipeline_id', 'entity_ids', 'with_snapshot'
         }
         
         command_changed = any(field in update_data for field in command_affecting_fields)
