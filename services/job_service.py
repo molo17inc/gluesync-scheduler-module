@@ -123,17 +123,41 @@ class JobService:
         logger.info(f"Generated cron expression: '{cron_expression}'")
         return cron_expression
     
+    def _process_job_data(self, job: ScheduledJob) -> ScheduledJob:
+        """Process job data before returning it to the client"""
+        if job is None:
+            return None
+            
+        # Convert entity_ids from JSON string to list if it exists
+        if job.entity_ids and isinstance(job.entity_ids, str):
+            try:
+                job.entity_ids = json.loads(job.entity_ids)
+                logger.info(f"Converted entity_ids JSON string to list for job {job.id}: {job.entity_ids}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing entity_ids JSON for job {job.id}: {e}")
+                # If parsing fails, set to None rather than returning invalid data
+                job.entity_ids = None
+                
+        return job
+        
+    def _process_jobs_list(self, jobs: List[ScheduledJob]) -> List[ScheduledJob]:
+        """Process a list of jobs before returning to the client"""
+        return [self._process_job_data(job) for job in jobs]
+    
     def get_jobs(self, skip: int = 0, limit: int = 100) -> List[ScheduledJob]:
         """Get all scheduled jobs with pagination"""
-        return self.db.query(ScheduledJob).offset(skip).limit(limit).all()
+        jobs = self.db.query(ScheduledJob).offset(skip).limit(limit).all()
+        return self._process_jobs_list(jobs)
     
     def get_job_by_id(self, job_id: int) -> Optional[ScheduledJob]:
         """Get a job by its ID"""
-        return self.db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+        job = self.db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+        return self._process_job_data(job)
     
     def get_job_by_name(self, name: str) -> Optional[ScheduledJob]:
         """Get a job by its name"""
-        return self.db.query(ScheduledJob).filter(ScheduledJob.name == name).first()
+        job = self.db.query(ScheduledJob).filter(ScheduledJob.name == name).first()
+        return self._process_job_data(job)
     
     def create_job(self, job_data: JobCreate) -> ScheduledJob:
         """Create a new scheduled job"""
@@ -224,7 +248,8 @@ class JobService:
                 detail=f"Failed to create job: {str(e)}"
             )
         
-        return new_job
+        # Process the job data before returning
+        return self._process_job_data(new_job)
     
     def update_job(self, job_id: int, job_data: JobUpdate) -> Optional[ScheduledJob]:
         """Update an existing scheduled job"""
@@ -288,7 +313,8 @@ class JobService:
         self.db.commit()
         self.db.refresh(job)
         
-        return job
+        # Process the job data before returning
+        return self._process_job_data(job)
     
     def delete_job(self, job_id: int) -> bool:
         """Delete a scheduled job"""
