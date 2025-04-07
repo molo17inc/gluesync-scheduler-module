@@ -30,6 +30,8 @@ from datetime import datetime
 from crontab import CronTab
 from croniter import croniter
 import logging
+from typing import Optional
+from sqlalchemy.orm import Session
 
 from config import settings
 from models import ScheduledJob, TaskType
