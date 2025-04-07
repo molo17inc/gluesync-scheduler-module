@@ -89,7 +89,7 @@ class CronService:
                 if job.with_snapshot:
                     endpoint += "?with_snapshot=true"
             # Use double quotes for the URL to avoid issues with nested quotes in crontab
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             
         elif job.task_type == TaskType.ENTITY_STOP:
             # Call the pause endpoint with entity IDs
@@ -97,19 +97,19 @@ class CronService:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause?entity_ids={entity_ids_param}"
             else:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_START:
             # Call the play endpoint without entity IDs (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
             if job.with_snapshot:
                 endpoint += "?with_snapshot=true"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_STOP:
             # Call the pause endpoint without entity IDs (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             
         elif job.task_type == TaskType.ENTITY_SNAPSHOT:
             # Call the resync endpoint with entity IDs
@@ -117,23 +117,18 @@ class CronService:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync?entity_ids={entity_ids_param}"
             else:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_SNAPSHOT:
             # Call the resync endpoint without entity ID (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
+            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             
-        # Log the endpoint and curl command for debugging
-        logger.debug(f"Using endpoint: {endpoint}")
-        logger.debug(f"Generated curl command: {cmd}")
-        
         # Add logging with enhanced details
         log_dir = os.path.join(self.base_path, "logs")
         os.makedirs(log_dir, exist_ok=True)
         
         # Use job.id if available, otherwise use a sanitized version of the job name
-        # This handles the case where the job hasn't been committed to the database yet
         if job.id is not None:
             log_identifier = f"job_{job.id}"
         else:
@@ -193,6 +188,35 @@ class CronService:
         logger.debug(f"Final cron command (truncated): {cmd[:100]}...")
         
         return cmd
+
+    def update_job_status(self, job_id: int, db: Session, success: bool, error_message: Optional[str] = None) -> None:
+        """
+        Update the job's execution status in the database.
+        
+        Args:
+            job_id: The ID of the job to update
+            db: Database session
+            success: Whether the job execution was successful
+            error_message: Error message if the job failed (None if successful)
+        """
+        job = db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+        if not job:
+            logger.error(f"Job with ID {job_id} not found when updating status")
+            return
+            
+        current_time = datetime.now()
+        job.last_run = current_time
+        
+        if success:
+            job.last_successful_run = current_time
+            job.last_error_message = None
+            job.last_run_error_time = None
+        else:
+            job.last_error_message = error_message
+            job.last_run_error_time = current_time
+            
+        db.commit()
+        logger.info(f"Updated job {job_id} status - success: {success}, error: {error_message}")
 
     def add_job(self, job: ScheduledJob) -> str:
         """

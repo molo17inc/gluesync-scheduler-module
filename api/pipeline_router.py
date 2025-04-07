@@ -102,7 +102,8 @@ router = APIRouter(
 async def play_pipeline(
     pipeline_id: str = Path(..., description="The ID of the pipeline to start"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to start. If not provided, all entities in the pipeline will be started."),
-    with_snapshot: bool = Query(False, description="Whether to start with snapshot")
+    with_snapshot: bool = Query(False, description="Whether to start with snapshot"),
+    request: Request = Depends()
 ):
     """
     Start a pipeline or specific entities within a pipeline.
@@ -139,7 +140,15 @@ async def play_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
+        # Extract Job-ID from headers if present
+        job_id = request.headers.get('Job-ID')
+        if job_id:
+            logger.info(f"Job-ID header received: {job_id}")
+            
         manager = PipelineManager()
+        if job_id:
+            manager.job_id = job_id
+            
         if entity_ids:
             # Start specific entities
             result = manager.play_entities(pipeline_id, entity_ids, with_snapshot)
@@ -177,7 +186,8 @@ async def play_pipeline(
 )
 async def pause_pipeline(
     pipeline_id: str = Path(..., description="The ID of the pipeline to stop"),
-    entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to stop. If not provided, all entities in the pipeline will be stopped.")
+    entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to stop. If not provided, all entities in the pipeline will be stopped."),
+    request: Request = Depends()
 ):
     """
     Stop a pipeline or specific entities within a pipeline.
@@ -213,7 +223,15 @@ async def pause_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
+        # Extract Job-ID from headers if present
+        job_id = request.headers.get('Job-ID')
+        if job_id:
+            logger.info(f"Job-ID header received: {job_id}")
+            
         manager = PipelineManager()
+        if job_id:
+            manager.job_id = job_id
+            
         if entity_ids:
             # Stop specific entities
             result = manager.pause_entities(pipeline_id, entity_ids)
@@ -250,7 +268,8 @@ async def pause_pipeline(
 async def resync_pipeline(
     pipeline_id: str = Path(..., description="The ID of the pipeline to resync"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to resync. If not provided, all entities in the pipeline will be resynced."),
-    snapshot_write_method: str = Query("UPSERT", description="The write method for the snapshot, default is UPSERT.")
+    snapshot_write_method: str = Query("UPSERT", description="The write method for the snapshot, default is UPSERT."),
+    request: Request = Depends()
 ):
     """
     Create a data snapshot for a pipeline or specific entities within a pipeline.
@@ -288,7 +307,15 @@ async def resync_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
+        # Extract Job-ID from headers if present
+        job_id = request.headers.get('Job-ID')
+        if job_id:
+            logger.info(f"Job-ID header received: {job_id}")
+            
         manager = PipelineManager()
+        if job_id:
+            manager.job_id = job_id
+            
         if entity_ids:
             # Resync specific entities
             result = manager.resync_entities(pipeline_id, entity_ids, snapshot_write_method)

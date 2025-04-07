@@ -28,6 +28,7 @@ import argparse
 import logging
 import asyncio
 from typing import Dict, List, Optional, Any, Union
+from datetime import datetime
 
 import requests
 from urllib.parse import quote_plus
@@ -308,6 +309,42 @@ class PipelineManager:
     def __init__(self):
         """Initialize the pipeline manager"""
         self.client = CoreHubClient()
+        self.job_id = None  # Will be set from the command line arguments
+        
+    def update_job_status(self, success: bool, error_message: Optional[str] = None) -> None:
+        """
+        Update the job's execution status in the database.
+        
+        Args:
+            success: Whether the job execution was successful
+            error_message: Error message if the job failed (None if successful)
+        """
+        if not self.job_id:
+            logger.warning("No job_id provided, cannot update job status")
+            return
+            
+        from database import get_db
+        from models import ScheduledJob
+        
+        db = get_db()
+        job = db.query(ScheduledJob).filter(ScheduledJob.id == self.job_id).first()
+        if not job:
+            logger.error(f"Job with ID {self.job_id} not found when updating status")
+            return
+            
+        current_time = datetime.now()
+        job.last_run = current_time
+        
+        if success:
+            job.last_successful_run = current_time
+            job.last_error_message = None
+            job.last_run_error_time = None
+        else:
+            job.last_error_message = error_message
+            job.last_run_error_time = current_time
+            
+        db.commit()
+        logger.info(f"Updated job {self.job_id} status - success: {success}, error: {error_message}")
     
     def execute(self, action: str, pipeline_id: Optional[str] = None, 
                entity_ids: Optional[List[str]] = None, with_snapshot: bool = False) -> None:
@@ -326,15 +363,18 @@ class PipelineManager:
             if action == 'list':
                 self._handle_list_action(pipeline_id)
             elif action == 'resync':
-                self._handle_resync_action(pipeline_id, entity_ids)
+                success = self._handle_resync_action(pipeline_id, entity_ids)
+                self.update_job_status(success, None if success else "Resync operation failed")
             elif action in ['play', 'pause']:
-                self._handle_play_pause_action(action, pipeline_id, entity_ids, with_snapshot)
+                success = self._handle_play_pause_action(action, pipeline_id, entity_ids, with_snapshot)
+                action_str = "Play" if action == 'play' else "Pause"
+                self.update_job_status(success, None if success else f"{action_str} operation failed")
             else:
                 raise ValueError("Invalid action. Use 'list', 'play', 'pause', or 'resync'.")
         except Exception as e:
-            print(f"An error occurred: {str(e)}")
-    
-    # API-friendly methods for pipeline operations
+            logger.error(f"An error occurred: {str(e)}")
+            self.update_job_status(False, str(e))
+            raise
     def play_pipeline(self, pipeline_id: str, with_snapshot: bool = False) -> bool:
         """Start all entities in a pipeline
         
@@ -554,16 +594,19 @@ class PipelineManager:
             pipelines = self.client.get_pipelines()
             print(json.dumps(pipelines, indent=2))
     
-    def _handle_resync_action(self, pipeline_id: Optional[str], entity_ids: Optional[List[str]]) -> None:
+    def _handle_resync_action(self, pipeline_id: Optional[str], entity_ids: Optional[List[str]]) -> bool:
         """Handle the resync action
         
         Args:
             pipeline_id: ID of the pipeline
             entity_ids: Optional list of entity IDs
+            
+        Returns:
+            bool: True if operation was successful, False otherwise
         """
         if not pipeline_id:
             print("Pipeline ID is required for resync action")
-            return
+            return False
             
         if entity_ids:
             for entity_id in entity_ids:
@@ -571,14 +614,19 @@ class PipelineManager:
                 if result:
                     print(f"Triggered resync for entity: {entity_id}")
                     print(json.dumps(result, indent=2))
+                else:
+                    return False
         else:
             result = self.client.resync_pipeline(pipeline_id)
             if result:
                 print("Triggered pipeline-wide resync")
                 print(json.dumps(result, indent=2))
+            else:
+                return False
+        return True
     
     def _handle_play_pause_action(self, action: str, pipeline_id: Optional[str], 
-                                 entity_ids: Optional[List[str]], with_snapshot: bool) -> None:
+                                 entity_ids: Optional[List[str]], with_snapshot: bool) -> bool:
         """Handle the play or pause action
         
         Args:
@@ -586,6 +634,9 @@ class PipelineManager:
             pipeline_id: ID of the pipeline
             entity_ids: Optional list of entity IDs
             with_snapshot: Whether to include snapshot
+            
+        Returns:
+            bool: True if operation was successful, False otherwise
         """
         if not pipeline_id:
             raise ValueError("Pipeline ID is required for play/pause actions")
@@ -594,7 +645,7 @@ class PipelineManager:
 
         if not entities:
             print(f"No entities found for pipeline {pipeline_id}")
-            return
+            return False
 
         if entity_ids:
             entities = [entity for entity in entities if entity['entityId'] in entity_ids]
@@ -609,11 +660,13 @@ class PipelineManager:
                     self.client.pause_entity(pipeline_id, entity['entityId'])
             except Exception as e:
                 print(f"Error {'playing' if action == 'play' else 'pausing'} entity {entity['entityId']}: {str(e)}")
+                return False
 
             # Wait between entity operations, except for the last one
             if i < len(entities) - 1:
                 print(f"Waiting for {self.client.entity_start_timeout} seconds before the next action...")
                 time.sleep(self.client.entity_start_timeout)
+        return True
 
 def main():
     """Main entry point for the script
@@ -674,6 +727,10 @@ def main():
         action='store_true', 
         help="Start entities with snapshot"
     )
+    parser.add_argument(
+        '--job-id', 
+        help="Job ID for tracking execution status"
+    )
     
     # Parse arguments
     args = parser.parse_args()
@@ -697,8 +754,11 @@ def main():
         logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
         os.makedirs(logs_dir, exist_ok=True)
         
-        # Execute the requested action
+        # Set the job ID for tracking execution status
         manager = PipelineManager()
+        manager.job_id = args.job_id
+        
+        # Execute the requested action
         manager.execute(args.action, args.pipeline, args.entity, args.snapshot)
         
     except Exception as e:
