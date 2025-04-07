@@ -91,7 +91,11 @@ class CronService:
                 if job.with_snapshot:
                     endpoint += "?with_snapshot=true"
             # Use double quotes for the URL to avoid issues with nested quotes in crontab
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            # Only include Job-ID header if job.id is not None
+            if job.id is not None:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            else:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.ENTITY_STOP:
             # Call the pause endpoint with entity IDs
@@ -99,19 +103,31 @@ class CronService:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause?entity_ids={entity_ids_param}"
             else:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            # Only include Job-ID header if job.id is not None
+            if job.id is not None:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            else:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_START:
             # Call the play endpoint without entity IDs (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
             if job.with_snapshot:
                 endpoint += "?with_snapshot=true"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            # Only include Job-ID header if job.id is not None
+            if job.id is not None:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            else:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_STOP:
             # Call the pause endpoint without entity IDs (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            # Only include Job-ID header if job.id is not None
+            if job.id is not None:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            else:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.ENTITY_SNAPSHOT:
             # Call the resync endpoint with entity IDs
@@ -119,12 +135,20 @@ class CronService:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync?entity_ids={entity_ids_param}"
             else:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            # Only include Job-ID header if job.id is not None
+            if job.id is not None:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            else:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_SNAPSHOT:
             # Call the resync endpoint without entity ID (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            # Only include Job-ID header if job.id is not None
+            if job.id is not None:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+            else:
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         # Add logging with enhanced details
         log_dir = os.path.join(self.base_path, "logs")
