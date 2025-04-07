@@ -131,9 +131,9 @@ class GluesyncSDKClient:
             host = parsed_url.hostname
             port = parsed_url.port
             use_discovery = False
-            logger.info(f"Using provided CoreHub URL: {settings.CORE_HUB_URL}")
+            logger.info(f"Using provided CoreHub host: {host} at port: {port}")
         else:
-            logger.info("No CoreHub URL provided, will use UDP discovery")
+            logger.info("No CoreHub URL provided, will use UDP discovery instead")
         
         # Get license file path from settings
         license_file_path = settings.GLUESYNC_LICENSE_FILE
@@ -277,8 +277,5 @@ class GluesyncSDKClient:
         """
         logger.error(f"Error in connection: {error}")
         
-
-
-
 # Create a global instance for easy import
 gluesync_sdk_client = GluesyncSDKClient.get_instance()
