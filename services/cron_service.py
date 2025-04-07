@@ -91,8 +91,14 @@ class CronService:
                 if job.with_snapshot:
                     endpoint += "?with_snapshot=true"
             # Use double quotes for the URL to avoid issues with nested quotes in crontab
-            # Only include Job-ID header if job.id is not None
+            # Always include job_id (either in header or query parameter)
             if job.id is not None:
+                # Add job_id as a query parameter
+                if '?' in endpoint:
+                    endpoint += f'&job_id={job.id}'
+                else:
+                    endpoint += f'?job_id={job.id}'
+                # Also include it in the header for backward compatibility
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
@@ -103,8 +109,14 @@ class CronService:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause?entity_ids={entity_ids_param}"
             else:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            # Only include Job-ID header if job.id is not None
+            # Always include job_id (either in header or query parameter)
             if job.id is not None:
+                # Add job_id as a query parameter
+                if '?' in endpoint:
+                    endpoint += f'&job_id={job.id}'
+                else:
+                    endpoint += f'?job_id={job.id}'
+                # Also include it in the header for backward compatibility
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
@@ -114,8 +126,14 @@ class CronService:
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
             if job.with_snapshot:
                 endpoint += "?with_snapshot=true"
-            # Only include Job-ID header if job.id is not None
+            # Always include job_id (either in header or query parameter)
             if job.id is not None:
+                # Add job_id as a query parameter
+                if '?' in endpoint:
+                    endpoint += f'&job_id={job.id}'
+                else:
+                    endpoint += f'?job_id={job.id}'
+                # Also include it in the header for backward compatibility
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
@@ -123,8 +141,14 @@ class CronService:
         elif job.task_type == TaskType.PIPELINE_STOP:
             # Call the pause endpoint without entity IDs (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            # Only include Job-ID header if job.id is not None
+            # Always include job_id (either in header or query parameter)
             if job.id is not None:
+                # Add job_id as a query parameter
+                if '?' in endpoint:
+                    endpoint += f'&job_id={job.id}'
+                else:
+                    endpoint += f'?job_id={job.id}'
+                # Also include it in the header for backward compatibility
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
@@ -135,8 +159,14 @@ class CronService:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync?entity_ids={entity_ids_param}"
             else:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            # Only include Job-ID header if job.id is not None
+            # Always include job_id (either in header or query parameter)
             if job.id is not None:
+                # Add job_id as a query parameter
+                if '?' in endpoint:
+                    endpoint += f'&job_id={job.id}'
+                else:
+                    endpoint += f'?job_id={job.id}'
+                # Also include it in the header for backward compatibility
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
@@ -144,8 +174,14 @@ class CronService:
         elif job.task_type == TaskType.PIPELINE_SNAPSHOT:
             # Call the resync endpoint without entity ID (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            # Only include Job-ID header if job.id is not None
+            # Always include job_id (either in header or query parameter)
             if job.id is not None:
+                # Add job_id as a query parameter
+                if '?' in endpoint:
+                    endpoint += f'&job_id={job.id}'
+                else:
+                    endpoint += f'?job_id={job.id}'
+                # Also include it in the header for backward compatibility
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'

@@ -217,15 +217,18 @@ class JobService:
             job_dict['entity_ids'] = json.dumps(job_dict['entity_ids'])
             logger.info(f"Converted entity_ids to JSON string: {job_dict['entity_ids']}")
         
-        # Generate command based on job type
-        command = self._create_command(job_dict)
-        
         # Create job in database first with a unique temporary identifier
         temp_id = f"temp_{uuid.uuid4().hex}"
-        new_job = ScheduledJob(**job_dict, command=command, cron_job_identifier=temp_id)
+        new_job = ScheduledJob(**job_dict, command="", cron_job_identifier=temp_id)
         self.db.add(new_job)
         self.db.commit()
         self.db.refresh(new_job)
+        
+        # Now that we have a real database ID, generate the command with it
+        # This ensures the job ID is included in the command
+        job_dict['id'] = new_job.id
+        command = self._create_command(job_dict)
+        new_job.command = command
         
         try:
             # Now add to crontab and get the identifier

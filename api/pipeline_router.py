@@ -140,10 +140,14 @@ async def play_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
-        # Extract Job-ID from headers if present
+        # Extract Job-ID from headers or query parameters if present
         job_id = request.headers.get('Job-ID')
+        if not job_id:
+            # Check query parameters as fallback
+            job_id = request.query_params.get('job_id')
+        
         if job_id:
-            logger.info(f"Job-ID header received: {job_id}")
+            logger.info(f"Job-ID received: {job_id}")
             
         manager = PipelineManager()
         if job_id:
@@ -223,10 +227,14 @@ async def pause_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
-        # Extract Job-ID from headers if present
+        # Extract Job-ID from headers or query parameters if present
         job_id = request.headers.get('Job-ID')
+        if not job_id:
+            # Check query parameters as fallback
+            job_id = request.query_params.get('job_id')
+        
         if job_id:
-            logger.info(f"Job-ID header received: {job_id}")
+            logger.info(f"Job-ID received: {job_id}")
             
         manager = PipelineManager()
         if job_id:
@@ -307,10 +315,14 @@ async def resync_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
-        # Extract Job-ID from headers if present
+        # Extract Job-ID from headers or query parameters if present
         job_id = request.headers.get('Job-ID')
+        if not job_id:
+            # Check query parameters as fallback
+            job_id = request.query_params.get('job_id')
+        
         if job_id:
-            logger.info(f"Job-ID header received: {job_id}")
+            logger.info(f"Job-ID received: {job_id}")
             
         manager = PipelineManager()
         if job_id:
