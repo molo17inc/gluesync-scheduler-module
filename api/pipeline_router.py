@@ -100,8 +100,8 @@ router = APIRouter(
     description="[INTERNAL USE ONLY] Start a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
 async def play_pipeline(
-    pipeline_id: str = Path(..., description="The ID of the pipeline to start"),
     request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline to start"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to start. If not provided, all entities in the pipeline will be started."),
     with_snapshot: bool = Query(False, description="Whether to start with snapshot")
 ):
@@ -185,8 +185,8 @@ async def play_pipeline(
     description="[INTERNAL USE ONLY] Stop a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
 async def pause_pipeline(
-    pipeline_id: str = Path(..., description="The ID of the pipeline to stop"),
     request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline to stop"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to stop. If not provided, all entities in the pipeline will be stopped.")
 ):
     """
@@ -266,8 +266,8 @@ async def pause_pipeline(
     description="[INTERNAL USE ONLY] Create a data snapshot for a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
 async def resync_pipeline(
-    pipeline_id: str = Path(..., description="The ID of the pipeline to resync"),
     request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline to resync"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to resync. If not provided, all entities in the pipeline will be resynced."),
     snapshot_write_method: str = Query("UPSERT", description="The write method for the snapshot, default is UPSERT.")
 ):
