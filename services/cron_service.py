@@ -56,19 +56,100 @@ class CronService:
         Returns:
             str: Command to be executed by cron
         """
-        # Get the path to the job_runner.py script
-        job_runner_path = os.path.join(self.base_path, "job_runner.py")
+        # In Docker, the application is mounted at /app
+        # Use a direct curl command instead of relying on the job_runner.py script
+        # This avoids issues with file paths in the Docker container
         
-        # Make sure the script is executable
-        if not os.access(job_runner_path, os.X_OK):
-            os.chmod(job_runner_path, 0o755)
-            logger.info(f"Made job runner script executable: {job_runner_path}")
+        # Base URL for API calls (using curl to make HTTP requests)
+        api_host = settings.HOST
+        api_port = settings.PORT
         
-        # Create the command to run the job runner with the job identifier
-        cmd = f"python3 {job_runner_path} {job.cron_job_identifier}"
+        # Use HTTPS when SSL is enabled, otherwise use HTTP
+        protocol = "https" if settings.SSL_ENABLED else "http"
+        api_base_url = f"{protocol}://{api_host}:{api_port}/api"
         
-        # Log the command for debugging
-        logger.debug(f"Job command: {cmd}")
+        # Add SSL verification options when using HTTPS
+        ssl_options = "-k" if settings.SSL_ENABLED else ""
+        
+        # Create a curl command to call the appropriate API endpoint
+        # Parse entity_ids from JSON string if it exists
+        entity_ids_list = []
+        if job.entity_ids:
+            try:
+                entity_ids_list = json.loads(job.entity_ids)
+                logger.info(f"Parsed entity IDs for job {job.id}: {entity_ids_list}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing entity_ids JSON for job {job.id}: {e}")
+        
+        # Convert list to comma-separated string for URL parameters
+        entity_ids_param = ",".join(entity_ids_list) if entity_ids_list else ""
+        
+        # Determine the endpoint based on task type
+        if job.task_type in [TaskType.ENTITY_START, TaskType.PIPELINE_START]:
+            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
+            params = []
+            
+            if entity_ids_param and job.task_type == TaskType.ENTITY_START:
+                params.append(f"entity_ids={entity_ids_param}")
+            
+            if job.with_snapshot:
+                params.append("with_snapshot=true")
+                
+            if job.cron_job_identifier:
+                params.append(f"cron_job_identifier={job.cron_job_identifier}")
+                
+            # Construct the URL with parameters
+            if params:
+                endpoint += "?" + "&".join(params)
+                
+        elif job.task_type in [TaskType.ENTITY_STOP, TaskType.PIPELINE_STOP]:
+            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
+            params = []
+            
+            if entity_ids_param and job.task_type == TaskType.ENTITY_STOP:
+                params.append(f"entity_ids={entity_ids_param}")
+                
+            if job.cron_job_identifier:
+                params.append(f"cron_job_identifier={job.cron_job_identifier}")
+                
+            # Construct the URL with parameters
+            if params:
+                endpoint += "?" + "&".join(params)
+                
+        elif job.task_type in [TaskType.ENTITY_SNAPSHOT, TaskType.PIPELINE_SNAPSHOT]:
+            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
+            params = []
+            
+            if entity_ids_param and job.task_type == TaskType.ENTITY_SNAPSHOT:
+                params.append(f"entity_ids={entity_ids_param}")
+                
+            if job.cron_job_identifier:
+                params.append(f"cron_job_identifier={job.cron_job_identifier}")
+                
+            # Construct the URL with parameters
+            if params:
+                endpoint += "?" + "&".join(params)
+        else:
+            logger.error(f"Unknown task type: {job.task_type}")
+            return ""
+        
+        # Create a log file path for this job
+        log_dir = "/app/logs"
+        log_file = f"{log_dir}/job_{job.cron_job_identifier}.log"
+        
+        # Construct the curl command with headers
+        headers = "-H \"Content-Type: application/json\" -H \"Cron-Job-Identifier: {job.cron_job_identifier}\""
+        curl_cmd = f'curl -X POST "{endpoint}" {headers} {ssl_options}'
+        
+        # Create a compact command that logs the execution and result
+        cmd = f"mkdir -p {log_dir} && echo \"=== JOB EXECUTION START: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file} && "
+        cmd += f"echo \"Job ID: {job.id}; Job Name: {job.name}; Task Type: {job.task_type}\" >> {log_file} && "
+        cmd += f"echo \"Command: {curl_cmd}\" >> {log_file} && "
+        cmd += f"{curl_cmd} >> {log_file} 2>&1 && "
+        cmd += f"echo \"=== JOB EXECUTION END: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file}"
+        
+        # Log the command for debugging (truncated for readability)
+        logger.debug(f"Job command (truncated): {cmd[:100]}...")
         
         return cmd
 

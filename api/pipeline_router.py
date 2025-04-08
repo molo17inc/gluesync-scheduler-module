@@ -157,30 +157,60 @@ async def play_pipeline(
         if entity_ids:
             # Start specific entities
             result = manager.play_entities(pipeline_id, entity_ids, with_snapshot)
-            return {
-                "success": True,
-                "message": f"Started {len(entity_ids)} entities in pipeline {pipeline_id}",
-                "details": {
+            response = OperationResponse(
+                success=True,
+                message="Pipeline started successfully",
+                details={
                     "pipeline_id": pipeline_id,
                     "entities_started": entity_ids,
                     "with_snapshot": with_snapshot
                 }
-            }
+            )
         else:
             # Start entire pipeline
             result = manager.play_pipeline(pipeline_id, with_snapshot)
-            return {
-                "success": True,
-                "message": f"Started pipeline {pipeline_id}",
-                "details": {
+            response = OperationResponse(
+                success=True,
+                message="Pipeline started successfully",
+                details={
                     "pipeline_id": pipeline_id,
                     "with_snapshot": with_snapshot
                 }
-            }
+            )
+        
+        # Update job status if job_identifier is provided
+        if job_identifier:
+            try:
+                # Import here to avoid circular imports
+                from services.job_service import JobService
+                
+                # Update job status
+                job_service = JobService()
+                job_service.update_job_execution_status(job_identifier, None, True)
+                logger.info(f"Updated job status for job identifier: {job_identifier}")
+            except Exception as e:
+                logger.error(f"Failed to update job status: {str(e)}")
+        
+        return response
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start pipeline: {str(e)}"
+        logger.error(f"Error starting pipeline: {str(e)}")
+        
+        # Update job status with error if job_identifier is provided
+        if 'job_identifier' in locals() and job_identifier:
+            try:
+                # Import here to avoid circular imports
+                from services.job_service import JobService
+                
+                # Update job status with error
+                job_service = JobService()
+                job_service.update_job_execution_status(job_identifier, None, False, str(e))
+                logger.info(f"Updated job status with error for job identifier: {job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Failed to update job status with error: {str(update_error)}")
+        
+        return OperationResponse(
+            success=False,
+            message=f"Error starting pipeline: {str(e)}"
         )
 
 @router.post(
@@ -243,30 +273,60 @@ async def pause_pipeline(
             manager.job_identifier = job_identifier
             
         if entity_ids:
-            # Stop specific entities
+            # Pause specific entities
             result = manager.pause_entities(pipeline_id, entity_ids)
-            return {
-                "success": True,
-                "message": f"Stopped {len(entity_ids)} entities in pipeline {pipeline_id}",
-                "details": {
+            response = OperationResponse(
+                success=True,
+                message=f"Paused {len(entity_ids)} entities in pipeline {pipeline_id}",
+                details={
                     "pipeline_id": pipeline_id,
-                    "entities_stopped": entity_ids
+                    "entities_paused": entity_ids
                 }
-            }
+            )
         else:
-            # Stop entire pipeline
+            # Pause entire pipeline
             result = manager.pause_pipeline(pipeline_id)
-            return {
-                "success": True,
-                "message": f"Stopped pipeline {pipeline_id}",
-                "details": {
+            response = OperationResponse(
+                success=True,
+                message=f"Paused pipeline {pipeline_id}",
+                details={
                     "pipeline_id": pipeline_id
                 }
-            }
+            )
+            
+        # Update job status if job_identifier is provided
+        if job_identifier:
+            try:
+                # Import here to avoid circular imports
+                from services.job_service import JobService
+                
+                # Update job status
+                job_service = JobService()
+                job_service.update_job_execution_status(job_identifier, None, True)
+                logger.info(f"Updated job status for job identifier: {job_identifier}")
+            except Exception as e:
+                logger.error(f"Failed to update job status: {str(e)}")
+        
+        return response
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to stop pipeline: {str(e)}"
+        logger.error(f"Error pausing pipeline: {str(e)}")
+        
+        # Update job status with error if job_identifier is provided
+        if 'job_identifier' in locals() and job_identifier:
+            try:
+                # Import here to avoid circular imports
+                from services.job_service import JobService
+                
+                # Update job status with error
+                job_service = JobService()
+                job_service.update_job_execution_status(job_identifier, None, False, str(e))
+                logger.info(f"Updated job status with error for job identifier: {job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Failed to update job status with error: {str(update_error)}")
+        
+        return OperationResponse(
+            success=False,
+            message=f"Error pausing pipeline: {str(e)}"
         )
 
 @router.post(
@@ -334,28 +394,58 @@ async def resync_pipeline(
         if entity_ids:
             # Resync specific entities
             result = manager.resync_entities(pipeline_id, entity_ids, snapshot_write_method)
-            return {
-                "success": True,
-                "message": f"Triggered one-time snapshot for {len(entity_ids)} entities in pipeline {pipeline_id}",
-                "details": {
+            response = OperationResponse(
+                success=True,
+                message=f"Triggered one-time snapshot for {len(entity_ids)} entities in pipeline {pipeline_id}",
+                details={
                     "pipeline_id": pipeline_id,
                     "entities_resynced": entity_ids,
                     "snapshot_write_method": snapshot_write_method
                 }
-            }
+            )
         else:
             # Resync entire pipeline
             result = manager.resync_pipeline(pipeline_id, snapshot_write_method)
-            return {
-                "success": True,
-                "message": f"Triggered one-time snapshot for pipeline {pipeline_id}",
-                "details": {
+            response = OperationResponse(
+                success=True,
+                message=f"Triggered one-time snapshot for pipeline {pipeline_id}",
+                details={
                     "pipeline_id": pipeline_id,
                     "snapshot_write_method": snapshot_write_method
                 }
-            }
+            )
+            
+        # Update job status if job_identifier is provided
+        if job_identifier:
+            try:
+                # Import here to avoid circular imports
+                from services.job_service import JobService
+                
+                # Update job status
+                job_service = JobService()
+                job_service.update_job_execution_status(job_identifier, None, True)
+                logger.info(f"Updated job status for job identifier: {job_identifier}")
+            except Exception as e:
+                logger.error(f"Failed to update job status: {str(e)}")
+        
+        return response
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to resync pipeline: {str(e)}"
+        logger.error(f"Error resyncing pipeline: {str(e)}")
+        
+        # Update job status with error if job_identifier is provided
+        if 'job_identifier' in locals() and job_identifier:
+            try:
+                # Import here to avoid circular imports
+                from services.job_service import JobService
+                
+                # Update job status with error
+                job_service = JobService()
+                job_service.update_job_execution_status(job_identifier, None, False, str(e))
+                logger.info(f"Updated job status with error for job identifier: {job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Failed to update job status with error: {str(update_error)}")
+        
+        return OperationResponse(
+            success=False,
+            message=f"Error resyncing pipeline: {str(e)}"
         )
