@@ -91,15 +91,15 @@ class CronService:
                 if job.with_snapshot:
                     endpoint += "?with_snapshot=true"
             # Use double quotes for the URL to avoid issues with nested quotes in crontab
-            # Always include job_id (either in header or query parameter)
-            if job.id is not None:
-                # Add job_id as a query parameter
+            # Use cron_job_identifier for tracking execution
+            if job.cron_job_identifier:
+                # Add cron_job_identifier as a query parameter
                 if '?' in endpoint:
-                    endpoint += f'&job_id={job.id}'
+                    endpoint += f'&cron_job_identifier={job.cron_job_identifier}'
                 else:
-                    endpoint += f'?job_id={job.id}'
-                # Also include it in the header for backward compatibility
-                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+                    endpoint += f'?cron_job_identifier={job.cron_job_identifier}'
+                # Also include it in the header for better tracking
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Cron-Job-Identifier: {job.cron_job_identifier}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
@@ -109,15 +109,15 @@ class CronService:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause?entity_ids={entity_ids_param}"
             else:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            # Always include job_id (either in header or query parameter)
-            if job.id is not None:
-                # Add job_id as a query parameter
+            # Use cron_job_identifier for tracking execution
+            if job.cron_job_identifier:
+                # Add cron_job_identifier as a query parameter
                 if '?' in endpoint:
-                    endpoint += f'&job_id={job.id}'
+                    endpoint += f'&cron_job_identifier={job.cron_job_identifier}'
                 else:
-                    endpoint += f'?job_id={job.id}'
-                # Also include it in the header for backward compatibility
-                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+                    endpoint += f'?cron_job_identifier={job.cron_job_identifier}'
+                # Also include it in the header for better tracking
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Cron-Job-Identifier: {job.cron_job_identifier}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
@@ -126,30 +126,30 @@ class CronService:
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
             if job.with_snapshot:
                 endpoint += "?with_snapshot=true"
-            # Always include job_id (either in header or query parameter)
-            if job.id is not None:
-                # Add job_id as a query parameter
+            # Use cron_job_identifier for tracking execution
+            if job.cron_job_identifier:
+                # Add cron_job_identifier as a query parameter
                 if '?' in endpoint:
-                    endpoint += f'&job_id={job.id}'
+                    endpoint += f'&cron_job_identifier={job.cron_job_identifier}'
                 else:
-                    endpoint += f'?job_id={job.id}'
-                # Also include it in the header for backward compatibility
-                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+                    endpoint += f'?cron_job_identifier={job.cron_job_identifier}'
+                # Also include it in the header for better tracking
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Cron-Job-Identifier: {job.cron_job_identifier}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_STOP:
             # Call the pause endpoint without entity IDs (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            # Always include job_id (either in header or query parameter)
-            if job.id is not None:
-                # Add job_id as a query parameter
+            # Use cron_job_identifier for tracking execution
+            if job.cron_job_identifier:
+                # Add cron_job_identifier as a query parameter
                 if '?' in endpoint:
-                    endpoint += f'&job_id={job.id}'
+                    endpoint += f'&cron_job_identifier={job.cron_job_identifier}'
                 else:
-                    endpoint += f'?job_id={job.id}'
-                # Also include it in the header for backward compatibility
-                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+                    endpoint += f'?cron_job_identifier={job.cron_job_identifier}'
+                # Also include it in the header for better tracking
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Cron-Job-Identifier: {job.cron_job_identifier}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
@@ -159,30 +159,30 @@ class CronService:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync?entity_ids={entity_ids_param}"
             else:
                 endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            # Always include job_id (either in header or query parameter)
-            if job.id is not None:
-                # Add job_id as a query parameter
+            # Use cron_job_identifier for tracking execution
+            if job.cron_job_identifier:
+                # Add cron_job_identifier as a query parameter
                 if '?' in endpoint:
-                    endpoint += f'&job_id={job.id}'
+                    endpoint += f'&cron_job_identifier={job.cron_job_identifier}'
                 else:
-                    endpoint += f'?job_id={job.id}'
-                # Also include it in the header for backward compatibility
-                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+                    endpoint += f'?cron_job_identifier={job.cron_job_identifier}'
+                # Also include it in the header for better tracking
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Cron-Job-Identifier: {job.cron_job_identifier}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
         elif job.task_type == TaskType.PIPELINE_SNAPSHOT:
             # Call the resync endpoint without entity ID (entire pipeline)
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            # Always include job_id (either in header or query parameter)
-            if job.id is not None:
-                # Add job_id as a query parameter
+            # Use cron_job_identifier for tracking execution
+            if job.cron_job_identifier:
+                # Add cron_job_identifier as a query parameter
                 if '?' in endpoint:
-                    endpoint += f'&job_id={job.id}'
+                    endpoint += f'&cron_job_identifier={job.cron_job_identifier}'
                 else:
-                    endpoint += f'?job_id={job.id}'
-                # Also include it in the header for backward compatibility
-                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Job-ID: {job.id}" {ssl_options}'
+                    endpoint += f'?cron_job_identifier={job.cron_job_identifier}'
+                # Also include it in the header for better tracking
+                cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" -H "Cron-Job-Identifier: {job.cron_job_identifier}" {ssl_options}'
             else:
                 cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
             
@@ -190,9 +190,9 @@ class CronService:
         log_dir = os.path.join(self.base_path, "logs")
         os.makedirs(log_dir, exist_ok=True)
         
-        # Use job.id if available, otherwise use a sanitized version of the job name
-        if job.id is not None:
-            log_identifier = f"job_{job.id}"
+        # Use job.cron_job_identifier if available, otherwise use a sanitized version of the job name
+        if job.cron_job_identifier:
+            log_identifier = f"job_{job.cron_job_identifier}"
         else:
             # Create a safe identifier from the job name (remove spaces and special chars)
             safe_name = ''.join(c if c.isalnum() else '_' for c in job.name)
@@ -251,34 +251,27 @@ class CronService:
         
         return cmd
 
-    def update_job_status(self, job_id: int, db: Session, success: bool, error_message: Optional[str] = None) -> None:
+    def update_job_status(self, cron_job_identifier: str, db: Session, success: bool, error_message: Optional[str] = None):
         """
         Update the job's execution status in the database.
         
         Args:
-            job_id: The ID of the job to update
+            cron_job_identifier: The unique identifier for the cron job
             db: Database session
             success: Whether the job execution was successful
             error_message: Error message if the job failed (None if successful)
         """
-        job = db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
-        if not job:
-            logger.error(f"Job with ID {job_id} not found when updating status")
-            return
-            
-        current_time = datetime.now()
-        job.last_run = current_time
-        
-        if success:
-            job.last_successful_run = current_time
-            job.last_error_message = None
-            job.last_run_error_time = None
-        else:
-            job.last_error_message = error_message
-            job.last_run_error_time = current_time
-            
-        db.commit()
-        logger.info(f"Updated job {job_id} status - success: {success}, error: {error_message}")
+        try:
+            # For backward compatibility, we still accept cron_job_identifier
+            # but we'll use JobService to handle the update
+            from services.job_service import JobService
+            job_service = JobService()
+            result = job_service.update_job_execution_status(cron_job_identifier, db, success, error_message)
+            if not result:
+                logger.error(f"Failed to update job status for cron job identifier {cron_job_identifier}")
+        except Exception as e:
+            logger.error(f"Error updating job status: {str(e)}")
+            db.rollback()
 
     def add_job(self, job: ScheduledJob) -> str:
         """

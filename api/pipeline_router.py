@@ -103,7 +103,8 @@ async def play_pipeline(
     request: Request,
     pipeline_id: str = Path(..., description="The ID of the pipeline to start"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to start. If not provided, all entities in the pipeline will be started."),
-    with_snapshot: bool = Query(False, description="Whether to start with snapshot")
+    with_snapshot: bool = Query(False, description="Whether to start with snapshot"),
+    cron_job_identifier: Optional[str] = Query(None, description="The cron job identifier for tracking execution")
 ):
     """
     Start a pipeline or specific entities within a pipeline.
@@ -140,18 +141,18 @@ async def play_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
-        # Extract Job-ID from headers or query parameters if present
-        job_id = request.headers.get('Job-ID')
-        if not job_id:
-            # Check query parameters as fallback
-            job_id = request.query_params.get('job_id')
+        # Extract cron_job_identifier from headers or query parameters if present
+        job_identifier = request.headers.get('Cron-Job-Identifier')
+        if not job_identifier and cron_job_identifier:
+            # Use the query parameter if provided
+            job_identifier = cron_job_identifier
         
-        if job_id:
-            logger.info(f"Job-ID received: {job_id}")
+        if job_identifier:
+            logger.info(f"Cron-Job-Identifier received: {job_identifier}")
             
         manager = PipelineManager()
-        if job_id:
-            manager.job_id = job_id
+        if job_identifier:
+            manager.job_identifier = job_identifier
             
         if entity_ids:
             # Start specific entities
@@ -191,7 +192,8 @@ async def play_pipeline(
 async def pause_pipeline(
     request: Request,
     pipeline_id: str = Path(..., description="The ID of the pipeline to stop"),
-    entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to stop. If not provided, all entities in the pipeline will be stopped.")
+    entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to stop. If not provided, all entities in the pipeline will be stopped."),
+    cron_job_identifier: Optional[str] = Query(None, description="The cron job identifier for tracking execution")
 ):
     """
     Stop a pipeline or specific entities within a pipeline.
@@ -227,18 +229,18 @@ async def pause_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
-        # Extract Job-ID from headers or query parameters if present
-        job_id = request.headers.get('Job-ID')
-        if not job_id:
-            # Check query parameters as fallback
-            job_id = request.query_params.get('job_id')
+        # Extract cron_job_identifier from headers or query parameters if present
+        job_identifier = request.headers.get('Cron-Job-Identifier')
+        if not job_identifier and cron_job_identifier:
+            # Use the query parameter if provided
+            job_identifier = cron_job_identifier
         
-        if job_id:
-            logger.info(f"Job-ID received: {job_id}")
+        if job_identifier:
+            logger.info(f"Cron-Job-Identifier received: {job_identifier}")
             
         manager = PipelineManager()
-        if job_id:
-            manager.job_id = job_id
+        if job_identifier:
+            manager.job_identifier = job_identifier
             
         if entity_ids:
             # Stop specific entities
@@ -277,7 +279,8 @@ async def resync_pipeline(
     request: Request,
     pipeline_id: str = Path(..., description="The ID of the pipeline to resync"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to resync. If not provided, all entities in the pipeline will be resynced."),
-    snapshot_write_method: str = Query("UPSERT", description="The write method for the snapshot, default is UPSERT.")
+    snapshot_write_method: str = Query("UPSERT", description="The write method for the snapshot, default is UPSERT."),
+    cron_job_identifier: Optional[str] = Query(None, description="The cron job identifier for tracking execution")
 ):
     """
     Create a data snapshot for a pipeline or specific entities within a pipeline.
@@ -315,18 +318,18 @@ async def resync_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
-        # Extract Job-ID from headers or query parameters if present
-        job_id = request.headers.get('Job-ID')
-        if not job_id:
-            # Check query parameters as fallback
-            job_id = request.query_params.get('job_id')
+        # Extract cron_job_identifier from headers or query parameters if present
+        job_identifier = request.headers.get('Cron-Job-Identifier')
+        if not job_identifier and cron_job_identifier:
+            # Use the query parameter if provided
+            job_identifier = cron_job_identifier
         
-        if job_id:
-            logger.info(f"Job-ID received: {job_id}")
+        if job_identifier:
+            logger.info(f"Cron-Job-Identifier received: {job_identifier}")
             
         manager = PipelineManager()
-        if job_id:
-            manager.job_id = job_id
+        if job_identifier:
+            manager.job_identifier = job_identifier
             
         if entity_ids:
             # Resync specific entities

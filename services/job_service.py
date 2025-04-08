@@ -21,7 +21,7 @@
  * Copyright (C) 2025 MOLO17. All rights reserved.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import uuid
 import json
 import logging
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 class JobService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session = None):
         self.db = db
         self.cron_service = CronService()
     
@@ -153,6 +153,68 @@ class JobService:
         """Get a job by its ID"""
         job = self.db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
         return self._process_job_data(job)
+        
+    def get_job_by_identifier(self, cron_job_identifier: str, db: Session = None) -> Optional[ScheduledJob]:
+        """Get a job by its cron_job_identifier"""
+        # Use provided db session or the instance's db
+        session = db if db is not None else self.db
+        if session is None:
+            logger.error("No database session available")
+            return None
+            
+        job = session.query(ScheduledJob).filter(ScheduledJob.cron_job_identifier == cron_job_identifier).first()
+        return self._process_job_data(job)
+        
+    def update_job_execution_status(self, job_id_or_identifier: Union[int, str], db: Session, success: bool, error_message: Optional[str] = None) -> bool:
+        """Update the job's execution status in the database
+        
+        Args:
+            job_id_or_identifier: The ID or cron_job_identifier of the job to update
+            db: Database session
+            success: Whether the job execution was successful
+            error_message: Error message if the job failed (None if successful)
+            
+        Returns:
+            bool: True if the update was successful, False otherwise
+        """
+        try:
+            # Use provided db session or the instance's db
+            session = db if db is not None else self.db
+            if session is None:
+                logger.error("No database session available")
+                return False
+            
+            # Check if job_id_or_identifier is an integer (job_id) or a string (cron_job_identifier)
+            if isinstance(job_id_or_identifier, int):
+                job = session.query(ScheduledJob).filter(ScheduledJob.id == job_id_or_identifier).first()
+                if not job:
+                    logger.error(f"Job with ID {job_id_or_identifier} not found when updating status")
+                    return False
+            else:
+                # Assume it's a cron_job_identifier
+                job = session.query(ScheduledJob).filter(ScheduledJob.cron_job_identifier == job_id_or_identifier).first()
+                if not job:
+                    logger.error(f"Job with identifier {job_id_or_identifier} not found when updating status")
+                    return False
+                
+            from datetime import datetime
+            current_time = datetime.now()
+            job.last_run = current_time
+            
+            if success:
+                job.last_successful_run = current_time
+                job.last_error_message = None
+                job.last_run_error_time = None
+            else:
+                job.last_error_message = error_message
+                job.last_run_error_time = current_time
+                
+            session.commit()
+            logger.info(f"Updated job {job_id} status - success: {success}, error: {error_message}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating job execution status: {str(e)}")
+            return False
     
     def get_job_by_name(self, name: str) -> Optional[ScheduledJob]:
         """Get a job by its name"""

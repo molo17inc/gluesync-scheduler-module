@@ -309,47 +309,45 @@ class PipelineManager:
     def __init__(self):
         """Initialize the pipeline manager"""
         self.client = CoreHubClient()
-        self.job_id = None  # Will be set from the command line arguments
-        
+        self.job_identifier = None  # Will be set from the API request
+
     def update_job_status(self, success: bool, error_message: Optional[str] = None) -> None:
         """
         Update the job's execution status in the database.
-        
+
         Args:
             success: Whether the job execution was successful
             error_message: Error message if the job failed (None if successful)
         """
-        if not self.job_id:
-            logger.warning("No job_id provided, cannot update job status")
+        if self.job_identifier is None:
+            # No job identifier provided, nothing to update
             return
-            
+
+        # Import here to avoid circular imports
         from database import get_db
-        from models import ScheduledJob
-        
-        db = get_db()
-        job = db.query(ScheduledJob).filter(ScheduledJob.id == self.job_id).first()
-        if not job:
-            logger.error(f"Job with ID {self.job_id} not found when updating status")
-            return
-            
-        current_time = datetime.now()
-        job.last_run = current_time
-        
-        if success:
-            job.last_successful_run = current_time
-            job.last_error_message = None
-            job.last_run_error_time = None
-        else:
-            job.last_error_message = error_message
-            job.last_run_error_time = current_time
-            
-        db.commit()
-        logger.info(f"Updated job {self.job_id} status - success: {success}, error: {error_message}")
-    
+        from services.job_service import JobService
+
+        # Create a database session
+        db = next(get_db())
+
+        try:
+            # Update the job status using the job_identifier
+            job_service = JobService()
+            job = job_service.get_job_by_identifier(self.job_identifier, db)
+            if job:
+                job_service.update_job_execution_status(job.id, db, success, error_message)
+                logger.info(f"Updated job with identifier {self.job_identifier} status: success={success}")
+            else:
+                logger.warning(f"No job found with identifier {self.job_identifier}")
+        except Exception as e:
+            logger.error(f"Failed to update job status: {str(e)}")
+        finally:
+            db.close()
+
     def execute(self, action: str, pipeline_id: Optional[str] = None, 
                entity_ids: Optional[List[str]] = None, with_snapshot: bool = False) -> None:
         """Execute a pipeline action
-        
+
         Args:
             action: Action to perform (list, play, pause, resync)
             pipeline_id: ID of the pipeline
@@ -359,7 +357,7 @@ class PipelineManager:
         try:
             # Authenticate with Core Hub
             self.client.authenticate()
-            
+
             if action == 'list':
                 self._handle_list_action(pipeline_id)
             elif action == 'resync':
