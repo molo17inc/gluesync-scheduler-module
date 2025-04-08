@@ -22,9 +22,12 @@
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, status, Query, Path, Request, Depends
+from fastapi import APIRouter, HTTPException, status, Query, Path, Request, Depends, Body
 from pydantic import BaseModel
 import logging
+from sqlalchemy.orm import Session
+
+from database import get_db
 
 from play_pause import PipelineManager
 from schemas import ErrorResponse
@@ -95,7 +98,7 @@ router = APIRouter(
 
 @router.post(
     "/{pipeline_id}/play",
-    response_model=OperationResponse,
+    response_model=dict,
     summary="Start pipeline or entities",
     description="[INTERNAL USE ONLY] Start a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
@@ -104,7 +107,7 @@ async def play_pipeline(
     pipeline_id: str = Path(..., description="The ID of the pipeline to start"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to start. If not provided, all entities in the pipeline will be started."),
     with_snapshot: bool = Query(False, description="Whether to start with snapshot"),
-    cron_job_identifier: Optional[str] = Query(None, description="The cron job identifier for tracking execution")
+    body: dict = Body(default=None)
 ):
     """
     Start a pipeline or specific entities within a pipeline.
@@ -141,81 +144,56 @@ async def play_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
-        # Extract cron_job_identifier from headers or query parameters if present
-        job_identifier = request.headers.get('Cron-Job-Identifier')
-        if not job_identifier and cron_job_identifier:
-            # Use the query parameter if provided
-            job_identifier = cron_job_identifier
-        
-        if job_identifier:
-            logger.info(f"Cron-Job-Identifier received: {job_identifier}")
-            
         manager = PipelineManager()
-        if job_identifier:
-            manager.job_identifier = job_identifier
-            
-        if entity_ids:
+        
+        # Check for entity_ids in both query parameters and request body
+        entities_to_start = entity_ids or []
+        
+        # If we have a body with entity_ids, use those (overrides query parameters)
+        if body and 'entity_ids' in body and isinstance(body['entity_ids'], list):
+            entities_to_start = body['entity_ids']
+            logger.info(f"Using entity_ids from request body: {entities_to_start}")
+        
+        # Check if with_snapshot is in the body
+        snapshot_option = with_snapshot
+        if body and 'with_snapshot' in body:
+            snapshot_option = bool(body['with_snapshot'])
+            logger.info(f"Using with_snapshot from request body: {snapshot_option}")
+        
+        if entities_to_start:
             # Start specific entities
-            result = manager.play_entities(pipeline_id, entity_ids, with_snapshot)
-            response = OperationResponse(
-                success=True,
-                message="Pipeline started successfully",
-                details={
+            result = manager.play_entities(pipeline_id, entities_to_start, snapshot_option)
+            return {
+                "success": True,
+                "message": f"Started {len(entities_to_start)} entities in pipeline {pipeline_id}",
+                "details": {
                     "pipeline_id": pipeline_id,
-                    "entities_started": entity_ids,
-                    "with_snapshot": with_snapshot
+                    "entities_started": entities_to_start,
+                    "with_snapshot": snapshot_option
                 }
-            )
+            }
         else:
             # Start entire pipeline
-            result = manager.play_pipeline(pipeline_id, with_snapshot)
-            response = OperationResponse(
-                success=True,
-                message="Pipeline started successfully",
-                details={
+            result = manager.play_pipeline(pipeline_id, snapshot_option)
+            return {
+                "success": True,
+                "message": f"Started pipeline {pipeline_id}",
+                "details": {
                     "pipeline_id": pipeline_id,
-                    "with_snapshot": with_snapshot
+                    "with_snapshot": snapshot_option
                 }
-            )
+            }
         
-        # Update job status if job_identifier is provided
-        if job_identifier:
-            try:
-                # Import here to avoid circular imports
-                from services.job_service import JobService
-                
-                # Update job status
-                job_service = JobService()
-                job_service.update_job_execution_status(job_identifier, None, True)
-                logger.info(f"Updated job status for job identifier: {job_identifier}")
-            except Exception as e:
-                logger.error(f"Failed to update job status: {str(e)}")
-        
-        return response
     except Exception as e:
         logger.error(f"Error starting pipeline: {str(e)}")
-        
-        # Update job status with error if job_identifier is provided
-        if 'job_identifier' in locals() and job_identifier:
-            try:
-                # Import here to avoid circular imports
-                from services.job_service import JobService
-                
-                # Update job status with error
-                job_service = JobService()
-                job_service.update_job_execution_status(job_identifier, None, False, str(e))
-                logger.info(f"Updated job status with error for job identifier: {job_identifier}")
-            except Exception as update_error:
-                logger.error(f"Failed to update job status with error: {str(update_error)}")
-        
-        return OperationResponse(
-            success=False,
-            message=f"Error starting pipeline: {str(e)}"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start pipeline: {str(e)}"
         )
 
 @router.post(
     "/{pipeline_id}/pause",
-    response_model=OperationResponse,
+    response_model=dict,
     summary="Stop pipeline or entities",
     description="[INTERNAL USE ONLY] Stop a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
@@ -223,7 +201,7 @@ async def pause_pipeline(
     request: Request,
     pipeline_id: str = Path(..., description="The ID of the pipeline to stop"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to stop. If not provided, all entities in the pipeline will be stopped."),
-    cron_job_identifier: Optional[str] = Query(None, description="The cron job identifier for tracking execution")
+    body: dict = Body(default=None)
 ):
     """
     Stop a pipeline or specific entities within a pipeline.
@@ -259,80 +237,48 @@ async def pause_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
-        # Extract cron_job_identifier from headers or query parameters if present
-        job_identifier = request.headers.get('Cron-Job-Identifier')
-        if not job_identifier and cron_job_identifier:
-            # Use the query parameter if provided
-            job_identifier = cron_job_identifier
-        
-        if job_identifier:
-            logger.info(f"Cron-Job-Identifier received: {job_identifier}")
-            
         manager = PipelineManager()
-        if job_identifier:
-            manager.job_identifier = job_identifier
-            
-        if entity_ids:
-            # Pause specific entities
-            result = manager.pause_entities(pipeline_id, entity_ids)
-            response = OperationResponse(
-                success=True,
-                message=f"Paused {len(entity_ids)} entities in pipeline {pipeline_id}",
-                details={
+        
+        # Check for entity_ids in both query parameters and request body
+        entities_to_stop = entity_ids or []
+        
+        # If we have a body with entity_ids, use those (overrides query parameters)
+        if body and 'entity_ids' in body and isinstance(body['entity_ids'], list):
+            entities_to_stop = body['entity_ids']
+            logger.info(f"Using entity_ids from request body: {entities_to_stop}")
+        
+        if entities_to_stop:
+            # Stop specific entities
+            result = manager.pause_entities(pipeline_id, entities_to_stop)
+            return {
+                "success": True,
+                "message": f"Stopped {len(entities_to_stop)} entities in pipeline {pipeline_id}",
+                "details": {
                     "pipeline_id": pipeline_id,
-                    "entities_paused": entity_ids
+                    "entities_stopped": entities_to_stop
                 }
-            )
+            }
         else:
-            # Pause entire pipeline
+            # Stop entire pipeline
             result = manager.pause_pipeline(pipeline_id)
-            response = OperationResponse(
-                success=True,
-                message=f"Paused pipeline {pipeline_id}",
-                details={
+            return {
+                "success": True,
+                "message": f"Stopped pipeline {pipeline_id}",
+                "details": {
                     "pipeline_id": pipeline_id
                 }
-            )
-            
-        # Update job status if job_identifier is provided
-        if job_identifier:
-            try:
-                # Import here to avoid circular imports
-                from services.job_service import JobService
-                
-                # Update job status
-                job_service = JobService()
-                job_service.update_job_execution_status(job_identifier, None, True)
-                logger.info(f"Updated job status for job identifier: {job_identifier}")
-            except Exception as e:
-                logger.error(f"Failed to update job status: {str(e)}")
-        
-        return response
+            }
     except Exception as e:
-        logger.error(f"Error pausing pipeline: {str(e)}")
-        
-        # Update job status with error if job_identifier is provided
-        if 'job_identifier' in locals() and job_identifier:
-            try:
-                # Import here to avoid circular imports
-                from services.job_service import JobService
-                
-                # Update job status with error
-                job_service = JobService()
-                job_service.update_job_execution_status(job_identifier, None, False, str(e))
-                logger.info(f"Updated job status with error for job identifier: {job_identifier}")
-            except Exception as update_error:
-                logger.error(f"Failed to update job status with error: {str(update_error)}")
-        
-        return OperationResponse(
-            success=False,
-            message=f"Error pausing pipeline: {str(e)}"
+        logger.error(f"Error stopping pipeline: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to stop pipeline: {str(e)}"
         )
 
 @router.post(
     "/{pipeline_id}/resync",
-    response_model=OperationResponse,
-    summary="Resync pipeline or entities",
+    response_model=dict,
+    summary="Create snapshot for pipeline or entities",
     description="[INTERNAL USE ONLY] Create a data snapshot for a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
 async def resync_pipeline(
@@ -340,7 +286,7 @@ async def resync_pipeline(
     pipeline_id: str = Path(..., description="The ID of the pipeline to resync"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to resync. If not provided, all entities in the pipeline will be resynced."),
     snapshot_write_method: str = Query("UPSERT", description="The write method for the snapshot, default is UPSERT."),
-    cron_job_identifier: Optional[str] = Query(None, description="The cron job identifier for tracking execution")
+    body: dict = Body(default=None)
 ):
     """
     Create a data snapshot for a pipeline or specific entities within a pipeline.
@@ -378,74 +324,49 @@ async def resync_pipeline(
     - **403**: Forbidden if accessed from non-localhost source
     """
     try:
-        # Extract cron_job_identifier from headers or query parameters if present
-        job_identifier = request.headers.get('Cron-Job-Identifier')
-        if not job_identifier and cron_job_identifier:
-            # Use the query parameter if provided
-            job_identifier = cron_job_identifier
-        
-        if job_identifier:
-            logger.info(f"Cron-Job-Identifier received: {job_identifier}")
-            
         manager = PipelineManager()
-        if job_identifier:
-            manager.job_identifier = job_identifier
-            
-        if entity_ids:
+        
+        # Check for entity_ids in both query parameters and request body
+        entities_to_resync = entity_ids or []
+        
+        # If we have a body with entity_ids, use those (overrides query parameters)
+        if body and 'entity_ids' in body and isinstance(body['entity_ids'], list):
+            entities_to_resync = body['entity_ids']
+            logger.info(f"Using entity_ids from request body: {entities_to_resync}")
+        
+        # Check if snapshot_write_method is in the body
+        write_method = snapshot_write_method
+        if body and 'snapshot_write_method' in body:
+            write_method = body['snapshot_write_method']
+            logger.info(f"Using snapshot_write_method from request body: {write_method}")
+        
+        if entities_to_resync:
             # Resync specific entities
-            result = manager.resync_entities(pipeline_id, entity_ids, snapshot_write_method)
-            response = OperationResponse(
-                success=True,
-                message=f"Triggered one-time snapshot for {len(entity_ids)} entities in pipeline {pipeline_id}",
-                details={
+            result = manager.resync_entities(pipeline_id, entities_to_resync, write_method)
+            return {
+                "success": True,
+                "message": f"Triggered one-time snapshot for {len(entities_to_resync)} entities in pipeline {pipeline_id}",
+                "details": {
                     "pipeline_id": pipeline_id,
-                    "entities_resynced": entity_ids,
-                    "snapshot_write_method": snapshot_write_method
+                    "entities_resynced": entities_to_resync,
+                    "snapshot_write_method": write_method
                 }
-            )
+            }
         else:
             # Resync entire pipeline
-            result = manager.resync_pipeline(pipeline_id, snapshot_write_method)
-            response = OperationResponse(
-                success=True,
-                message=f"Triggered one-time snapshot for pipeline {pipeline_id}",
-                details={
+            result = manager.resync_pipeline(pipeline_id, write_method)
+            return {
+                "success": True,
+                "message": f"Triggered one-time snapshot for pipeline {pipeline_id}",
+                "details": {
                     "pipeline_id": pipeline_id,
-                    "snapshot_write_method": snapshot_write_method
+                    "snapshot_write_method": write_method
                 }
-            )
-            
-        # Update job status if job_identifier is provided
-        if job_identifier:
-            try:
-                # Import here to avoid circular imports
-                from services.job_service import JobService
-                
-                # Update job status
-                job_service = JobService()
-                job_service.update_job_execution_status(job_identifier, None, True)
-                logger.info(f"Updated job status for job identifier: {job_identifier}")
-            except Exception as e:
-                logger.error(f"Failed to update job status: {str(e)}")
+            }
         
-        return response
     except Exception as e:
         logger.error(f"Error resyncing pipeline: {str(e)}")
-        
-        # Update job status with error if job_identifier is provided
-        if 'job_identifier' in locals() and job_identifier:
-            try:
-                # Import here to avoid circular imports
-                from services.job_service import JobService
-                
-                # Update job status with error
-                job_service = JobService()
-                job_service.update_job_execution_status(job_identifier, None, False, str(e))
-                logger.info(f"Updated job status with error for job identifier: {job_identifier}")
-            except Exception as update_error:
-                logger.error(f"Failed to update job status with error: {str(update_error)}")
-        
-        return OperationResponse(
-            success=False,
-            message=f"Error resyncing pipeline: {str(e)}"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to resync pipeline: {str(e)}"
         )

@@ -81,64 +81,60 @@ class CronService:
             except json.JSONDecodeError as e:
                 logger.error(f"Error parsing entity_ids JSON for job {job.id}: {e}")
         
-        # Convert list to comma-separated string for URL parameters
-        entity_ids_param = ",".join(entity_ids_list) if entity_ids_list else ""
-        
-        # Determine the endpoint based on task type
+        # Determine the base endpoint based on task type
         if job.task_type in [TaskType.ENTITY_START, TaskType.PIPELINE_START]:
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
-            params = []
-            
-            if entity_ids_param and job.task_type == TaskType.ENTITY_START:
-                params.append(f"entity_ids={entity_ids_param}")
-            
-            if job.with_snapshot:
-                params.append("with_snapshot=true")
-                
-            if job.cron_job_identifier:
-                params.append(f"cron_job_identifier={job.cron_job_identifier}")
-                
-            # Construct the URL with parameters
-            if params:
-                endpoint += "?" + "&".join(params)
-                
+            action = "play"
         elif job.task_type in [TaskType.ENTITY_STOP, TaskType.PIPELINE_STOP]:
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            params = []
-            
-            if entity_ids_param and job.task_type == TaskType.ENTITY_STOP:
-                params.append(f"entity_ids={entity_ids_param}")
-                
-            if job.cron_job_identifier:
-                params.append(f"cron_job_identifier={job.cron_job_identifier}")
-                
-            # Construct the URL with parameters
-            if params:
-                endpoint += "?" + "&".join(params)
-                
+            action = "pause"
         elif job.task_type in [TaskType.ENTITY_SNAPSHOT, TaskType.PIPELINE_SNAPSHOT]:
             endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            params = []
-            
-            if entity_ids_param and job.task_type == TaskType.ENTITY_SNAPSHOT:
-                params.append(f"entity_ids={entity_ids_param}")
-                
-            if job.cron_job_identifier:
-                params.append(f"cron_job_identifier={job.cron_job_identifier}")
-                
-            # Construct the URL with parameters
-            if params:
-                endpoint += "?" + "&".join(params)
+            action = "resync"
         else:
             logger.error(f"Unknown task type: {job.task_type}")
             return ""
+            
+        # For entity-specific operations, use POST with JSON body instead of long URL parameters
+        # This avoids the "command too long" error when there are many entities
+        if entity_ids_list and job.task_type in [TaskType.ENTITY_START, TaskType.ENTITY_STOP, TaskType.ENTITY_SNAPSHOT]:
+            # Create a minimal JSON payload with the entity IDs
+            json_data = {
+                "entity_ids": entity_ids_list
+            }
+            
+            # Add with_snapshot for start operations if needed
+            if job.task_type == TaskType.ENTITY_START and job.with_snapshot:
+                json_data["with_snapshot"] = True
+                
+            # Escape the JSON for the shell command
+            json_str = json.dumps(json_data).replace('"', '\\"')
+            
+            # Use -d parameter for curl to send the JSON payload
+            curl_params = f'-d "{json_str}"'
+        else:
+            # For pipeline operations or when no entities are specified, use simpler URL parameters
+            params = []
+            
+            # Add with_snapshot parameter if needed
+            if job.with_snapshot and job.task_type in [TaskType.ENTITY_START, TaskType.PIPELINE_START]:
+                params.append("with_snapshot=true")
+                
+            # Construct the URL with parameters
+            if params:
+                endpoint += "?" + "&".join(params)
+                
+            curl_params = ""
         
         # Create a log file path for this job - use a shorter path format
         log_dir = "/app/logs"
         log_file = f"{log_dir}/job_{job.id}.log"
         
-        # Construct a minimal curl command with only essential headers
-        curl_cmd = f'curl -s -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
+        # Construct a minimal curl command with the JSON payload if applicable
+        if 'curl_params' in locals() and curl_params:
+            curl_cmd = f'curl -s -X POST "{endpoint}" -H "Content-Type: application/json" {curl_params} {ssl_options}'
+        else:
+            curl_cmd = f'curl -s -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
         
         # Create a much shorter command that still logs basic info
         # Use >> for all log appends to make the command shorter
