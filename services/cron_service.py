@@ -56,93 +56,27 @@ class CronService:
         Returns:
             str: Command to be executed by cron
         """
+        # Get the path to the job_runner.py script
         # In Docker, the application is mounted at /app
-        # Use a direct curl command instead of relying on the job_runner.py script
-        # This avoids issues with file paths in the Docker container
+        job_runner_path = "/app/job_runner.py"
         
-        # Base URL for API calls (using curl to make HTTP requests)
-        api_host = settings.HOST
-        api_port = settings.PORT
-        
-        # Use HTTPS when SSL is enabled, otherwise use HTTP
-        protocol = "https" if settings.SSL_ENABLED else "http"
-        api_base_url = f"{protocol}://{api_host}:{api_port}/api"
-        
-        # Add SSL verification options when using HTTPS
-        ssl_options = "-k" if settings.SSL_ENABLED else ""
-        
-        # Create a curl command to call the appropriate API endpoint
-        # Parse entity_ids from JSON string if it exists
-        entity_ids_list = []
-        if job.entity_ids:
-            try:
-                entity_ids_list = json.loads(job.entity_ids)
-                logger.info(f"Parsed entity IDs for job {job.id}: {entity_ids_list}")
-            except json.JSONDecodeError as e:
-                logger.error(f"Error parsing entity_ids JSON for job {job.id}: {e}")
-        
-        # Determine the base endpoint based on task type
-        if job.task_type in [TaskType.ENTITY_START, TaskType.PIPELINE_START]:
-            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
-            action = "play"
-        elif job.task_type in [TaskType.ENTITY_STOP, TaskType.PIPELINE_STOP]:
-            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            action = "pause"
-        elif job.task_type in [TaskType.ENTITY_SNAPSHOT, TaskType.PIPELINE_SNAPSHOT]:
-            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            action = "resync"
-        else:
-            logger.error(f"Unknown task type: {job.task_type}")
-            return ""
-            
-        # For entity-specific operations, use POST with JSON body instead of long URL parameters
-        # This avoids the "command too long" error when there are many entities
-        if entity_ids_list and job.task_type in [TaskType.ENTITY_START, TaskType.ENTITY_STOP, TaskType.ENTITY_SNAPSHOT]:
-            # Create a minimal JSON payload with the entity IDs
-            json_data = {
-                "entity_ids": entity_ids_list
-            }
-            
-            # Add with_snapshot for start operations if needed
-            if job.task_type == TaskType.ENTITY_START and job.with_snapshot:
-                json_data["with_snapshot"] = True
-                
-            # Escape the JSON for the shell command
-            json_str = json.dumps(json_data).replace('"', '\\"')
-            
-            # Use -d parameter for curl to send the JSON payload
-            curl_params = f'-d "{json_str}"'
-        else:
-            # For pipeline operations or when no entities are specified, use simpler URL parameters
-            params = []
-            
-            # Add with_snapshot parameter if needed
-            if job.with_snapshot and job.task_type in [TaskType.ENTITY_START, TaskType.PIPELINE_START]:
-                params.append("with_snapshot=true")
-                
-            # Construct the URL with parameters
-            if params:
-                endpoint += "?" + "&".join(params)
-                
-            curl_params = ""
-        
-        # Create a log file path for this job - use a shorter path format
+        # Create a log file path for this job
         log_dir = "/app/logs"
         log_file = f"{log_dir}/job_{job.id}.log"
         
-        # Construct a minimal curl command with the JSON payload if applicable
-        if 'curl_params' in locals() and curl_params:
-            curl_cmd = f'curl -s -X POST "{endpoint}" -H "Content-Type: application/json" {curl_params} {ssl_options}'
-        else:
-            curl_cmd = f'curl -s -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
+        # Use the job's cron_job_identifier to run the job
+        # This will query the database for job details and execute the appropriate API call
+        # This keeps the crontab entry short regardless of how many entities are involved
         
-        # Create a much shorter command that still logs basic info
-        # Use >> for all log appends to make the command shorter
-        # Use date with +%%F%%T format for a compact timestamp
+        # Create a simple command that runs the job_runner.py script with the job identifier
+        # and logs the output to a file
         cmd = f"mkdir -p {log_dir} && "
-        cmd += f"echo \"$(date +%%F-%%T) START job={job.id} type={job.task_type}\" >> {log_file} && "
-        cmd += f"{curl_cmd} >> {log_file} 2>&1 && "
+        cmd += f"echo \"$(date +%%F-%%T) START job={job.id} identifier={job.cron_job_identifier}\" >> {log_file} && "
+        cmd += f"python3 {job_runner_path} {job.cron_job_identifier} >> {log_file} 2>&1 && "
         cmd += f"echo \"$(date +%%F-%%T) END\" >> {log_file}"
+        
+        # Log the command for debugging
+        logger.debug(f"Generated job command: {cmd}")
         
         # Log the command for debugging (truncated for readability)
         logger.debug(f"Job command (truncated): {cmd[:100]}...")

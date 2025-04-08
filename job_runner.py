@@ -111,50 +111,45 @@ def execute_job(job: ScheduledJob) -> bool:
         # Build the base URL
         base_url = f"http://{settings.HOST}:{settings.PORT}/api"
         
-        # Determine the endpoint and HTTP method based on task type
+        # Determine the endpoint based on task type
         if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/play"
-            params = {
-                "with_snapshot": job.with_snapshot,
-                "cron_job_identifier": job.cron_job_identifier
-            }
-            if entity_ids:
-                params["entity_ids"] = ",".join(entity_ids)
-            
+            action = "play"
         elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/pause"
-            params = {
-                "cron_job_identifier": job.cron_job_identifier
-            }
-            if entity_ids:
-                params["entity_ids"] = ",".join(entity_ids)
-            
+            action = "pause"
         elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/resync"
-            params = {
-                "cron_job_identifier": job.cron_job_identifier
-            }
-            if entity_ids:
-                params["entity_ids"] = ",".join(entity_ids)
+            action = "resync"
         else:
             logger.error(f"Unknown task type: {job.task_type}")
             return False
         
+        # Prepare the JSON payload
+        json_data = {}
+        
+        # Add entity_ids to the payload if present
+        if entity_ids:
+            json_data["entity_ids"] = entity_ids
+        
+        # Add with_snapshot for start operations if needed
+        if job.with_snapshot and job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
+            json_data["with_snapshot"] = True
+        
         # Log the request details
         logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
         logger.info(f"Endpoint: POST {endpoint}")
-        logger.info(f"Parameters: {params}")
+        logger.info(f"JSON Payload: {json_data}")
         
-        # Make the API request
+        # Make the API request with JSON payload
         headers = {
-            "Content-Type": "application/json",
-            "Cron-Job-Identifier": job.cron_job_identifier
+            "Content-Type": "application/json"
         }
         
-        response = requests.post(endpoint, params=params, headers=headers)
+        response = requests.post(endpoint, json=json_data, headers=headers)
         
         # Check the response
-        if response.status_code == 200:
+        if response.status_code in [200, 202]:
             logger.info(f"Job executed successfully: {response.text}")
             return True
         else:
