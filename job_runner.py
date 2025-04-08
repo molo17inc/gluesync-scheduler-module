@@ -38,8 +38,22 @@ from models import ScheduledJob, TaskType
 from config import settings
 
 # Configure logging
-log_dir = "/app/logs"
-os.makedirs(log_dir, exist_ok=True)
+# Determine if we're running in Docker or locally
+if os.path.exists('/app'):
+    # Docker environment
+    log_dir = "/app/logs"
+else:
+    # Local environment
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+
+# Create logs directory
+try:
+    os.makedirs(log_dir, exist_ok=True)
+except Exception as e:
+    print(f"Warning: Could not create log directory {log_dir}: {e}")
+    # Fallback to a directory we know we can write to
+    log_dir = os.path.expanduser("~/gluesync_logs")
+    os.makedirs(log_dir, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,

@@ -57,8 +57,13 @@ class CronService:
             str: Command to be executed by cron
         """
         # Get the path to the job_runner.py script
-        # In Docker, the application is mounted at /app
-        job_runner_path = "/app/job_runner.py"
+        # Determine if we're running in Docker or locally
+        if os.path.exists('/app'):
+            # Docker environment
+            job_runner_path = "/app/job_runner.py"
+        else:
+            # Local environment - use absolute path to the script
+            job_runner_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "job_runner.py")
         
         # Create a log file path for this job
         log_dir = "/app/logs"
@@ -68,9 +73,10 @@ class CronService:
         # This will query the database for job details and execute the appropriate API call
         # This keeps the crontab entry short regardless of how many entities are involved
         
-        # Create a much shorter command that just runs the job_runner.py script
-        # We'll let the job_runner handle its own logging to avoid command truncation
-        cmd = f"python3 {job_runner_path} {job.cron_job_identifier}"
+        # Use a wrapper shell script to ensure correct environment for cron jobs
+        # The wrapper script handles PATH setup and logging
+        wrapper_script = "/app/run_job.sh"
+        cmd = f"{wrapper_script} {job.cron_job_identifier}"
         
         # Log the command for debugging
         logger.debug(f"Generated job command: {cmd}")
