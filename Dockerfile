@@ -39,32 +39,27 @@ RUN mkdir -p /opt/gluesync/data &&
     chmod 777 /app/data
 
 # Set environment variables
+# Core Hub settings
+# API Server settings
+# Database settings
+# CORS settings
+# Scheduler settings
+# Gluesync SDK settings using default paths
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    \
     CORE_HUB_URL= \
     ENTITY_START_TIMEOUT=2 \
-    \
     HOST=0.0.0.0 \
     PORT=1717 \
     DEBUG=False \
-    \
     DATA_DIR=/app/data \
     DB_URL=sqlite:///./data/scheduler.db \
-    \
     ALLOWED_ORIGINS=* \
-    \
     CRONTAB_USER=root \
-    \
     GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat \
     SSL_ENABLED=False \
     GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json \
-    SSL_SKIP_VERIFY=True # Core Hub settings \
-# API Server settings \
-# Database settings \
-# CORS settings \
-# Scheduler settings \
-# Gluesync SDK settings using default paths \
+    SSL_SKIP_VERIFY=True
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
