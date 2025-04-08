@@ -122,9 +122,13 @@ class CronService:
             ValueError: If there's an issue with the cron expression or job creation
         """
         try:
-            # Generate a unique identifier for this job
-            job_id = f"gluesync_job_{uuid.uuid4().hex[:8]}"
-            logger.info(f"Generated job ID: {job_id} for job '{job.name}'")
+            # Use the existing job identifier if it exists, otherwise generate a new one
+            if job.cron_job_identifier and not job.cron_job_identifier.startswith('temp_'):
+                job_id = job.cron_job_identifier
+                logger.info(f"Using existing job ID: {job_id} for job '{job.name}'")
+            else:
+                job_id = f"gluesync_job_{uuid.uuid4().hex[:8]}"
+                logger.info(f"Generated new job ID: {job_id} for job '{job.name}' (replacing {job.cron_job_identifier})")
             
             # Log job details
             logger.info(f"Adding job to crontab with details:")

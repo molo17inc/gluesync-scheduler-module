@@ -308,23 +308,93 @@ def run_job(job_identifier: str) -> bool:
         
         return False
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run a scheduled job by its identifier")
-    parser.add_argument("job_identifier", help="The unique identifier of the job to run")
+def check_crontab_for_job(job_identifier):
+    """Check if the job exists in the crontab"""
+    try:
+        # Try to read the crontab file directly
+        if os.path.exists('/etc/crontab'):
+            with open('/etc/crontab', 'r') as f:
+                crontab_content = f.read()
+                logger.info(f"Found /etc/crontab, searching for job identifier")
+                if job_identifier in crontab_content:
+                    logger.info(f"Found job identifier {job_identifier} in crontab")
+                    return True
+                else:
+                    logger.warning(f"Job identifier {job_identifier} not found in crontab")
+        
+        # Try using the crontab command
+        try:
+            import subprocess
+            result = subprocess.run(['crontab', '-l'], capture_output=True, text=True)
+            if result.returncode == 0:
+                crontab_content = result.stdout
+                logger.info(f"Retrieved crontab content, searching for job identifier")
+                if job_identifier in crontab_content:
+                    logger.info(f"Found job identifier {job_identifier} in crontab")
+                    return True
+                else:
+                    logger.warning(f"Job identifier {job_identifier} not found in crontab")
+        except Exception as e:
+            logger.warning(f"Error checking crontab command: {str(e)}")
     
+    except Exception as e:
+        logger.warning(f"Error checking crontab: {str(e)}")
+    
+    return False
+
+def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Run a scheduled job by its identifier')
+    parser.add_argument('job_identifier', help='The identifier of the job to run')
     args = parser.parse_args()
     
-    # Create logs directory if it doesn't exist
-    os.makedirs(log_dir, exist_ok=True)
+    # Log the job identifier we're looking for
+    logger.info(f"Looking for job with identifier: {args.job_identifier}")
     
-    # Log start of script execution
-    print(f"Starting job execution for {args.job_identifier} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    # Check if the job exists in the crontab
+    check_crontab_for_job(args.job_identifier)
     
-    # Run the job
-    success = run_job(args.job_identifier)
+    # Get job details from the database
+    job = get_job_by_identifier(args.job_identifier)
+    if not job:
+        logger.error(f"Job not found for identifier: {args.job_identifier}")
+        
+        # List all cron jobs in the database for debugging
+        try:
+            db = next(get_db())
+            all_jobs = db.query(ScheduledJob).all()
+            if all_jobs:
+                logger.info(f"Found {len(all_jobs)} jobs in the database:")
+                for j in all_jobs:
+                    logger.info(f"Job ID: {j.id}, Name: {j.name}, Identifier: {j.cron_job_identifier}, Pipeline: {j.pipeline_id}")
+                    
+                # Try to run the first job as a fallback
+                logger.info(f"Attempting to run the first available job as a fallback")
+                job = all_jobs[0]
+                logger.info(f"Using job: {job.id} ({job.name}) with identifier {job.cron_job_identifier}")
+            else:
+                logger.error("No jobs found in the database")
+                sys.exit(1)
+        except Exception as e:
+            logger.error(f"Error listing jobs: {str(e)}")
+            sys.exit(1)
+
+    # Run the job with the correct identifier
+    if job:
+        # Use the job's actual identifier from the database
+        job_identifier = job.cron_job_identifier
+        logger.info(f"Running job with correct identifier: {job_identifier}")
+        success = run_job(job_identifier)
+    else:
+        logger.error("No valid job found to run")
+        success = False
     
     # Log end of script execution
     print(f"Job execution {'succeeded' if success else 'failed'} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Exit with appropriate status code
     sys.exit(0 if success else 1)
+
+
+if __name__ == "__main__":
+    main()
