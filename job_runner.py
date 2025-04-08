@@ -33,9 +33,22 @@ from typing import Optional, Dict, Any, List
 # Add the parent directory to sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from database import get_db
+# Ensure DATA_DIR is set correctly for Docker environment
+os.environ['DATA_DIR'] = '/app/data'
+
+from database import get_db, engine, Base
 from models import ScheduledJob, TaskType
 from config import settings
+
+# Ensure the database directory exists
+os.makedirs(os.path.dirname(settings.DB_URL.replace('sqlite:///', '')), exist_ok=True)
+
+# Initialize database schema if it doesn't exist
+try:
+    Base.metadata.create_all(bind=engine)
+    print(f"Database schema initialized at {settings.DB_URL}")
+except Exception as e:
+    print(f"Error initializing database schema: {e}")
 
 # Configure logging
 # Determine if we're running in Docker or locally
@@ -79,9 +92,33 @@ def setup_logging(job_identifier: str) -> str:
 
 def get_job_by_identifier(job_identifier: str) -> Optional[ScheduledJob]:
     """Get job details from the database using the job identifier"""
+    if not job_identifier:
+        logger.error("Empty job identifier provided")
+        return None
+        
     try:
-        db = next(get_db())
+        # Check if database exists and has the required tables
+        try:
+            db = next(get_db())
+            # Test if the scheduled_jobs table exists
+            db.execute("SELECT 1 FROM scheduled_jobs LIMIT 1")
+        except Exception as schema_error:
+            logger.error(f"Database schema issue: {str(schema_error)}")
+            logger.info("Attempting to create database schema...")
+            try:
+                from models import Base
+                from database import engine
+                Base.metadata.create_all(bind=engine)
+                logger.info("Database schema created successfully")
+                db = next(get_db())  # Get a fresh connection
+            except Exception as create_error:
+                logger.error(f"Failed to create database schema: {str(create_error)}")
+                return None
+        
+        # Query the job
         job = db.query(ScheduledJob).filter(ScheduledJob.cron_job_identifier == job_identifier).first()
+        if not job:
+            logger.warning(f"No job found with identifier: {job_identifier}")
         return job
     except Exception as e:
         logger.error(f"Error retrieving job {job_identifier} from database: {str(e)}")
