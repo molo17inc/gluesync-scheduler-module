@@ -68,12 +68,9 @@ class CronService:
         # This will query the database for job details and execute the appropriate API call
         # This keeps the crontab entry short regardless of how many entities are involved
         
-        # Create a simple command that runs the job_runner.py script with the job identifier
-        # and logs the output to a file
-        cmd = f"mkdir -p {log_dir} && "
-        cmd += f"echo \"$(date +%%F-%%T) START job={job.id} identifier={job.cron_job_identifier}\" >> {log_file} && "
-        cmd += f"python3 {job_runner_path} {job.cron_job_identifier} >> {log_file} 2>&1 && "
-        cmd += f"echo \"$(date +%%F-%%T) END\" >> {log_file}"
+        # Create a much shorter command that just runs the job_runner.py script
+        # We'll let the job_runner handle its own logging to avoid command truncation
+        cmd = f"python3 {job_runner_path} {job.cron_job_identifier}"
         
         # Log the command for debugging
         logger.debug(f"Generated job command: {cmd}")

@@ -38,12 +38,15 @@ from models import ScheduledJob, TaskType
 from config import settings
 
 # Configure logging
+log_dir = "/app/logs"
+os.makedirs(log_dir, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join("logs", "job_runner.log"))
+        logging.FileHandler(os.path.join(log_dir, "job_runner.log"))
     ]
 )
 logger = logging.getLogger(__name__)
@@ -160,41 +163,85 @@ def execute_job(job: ScheduledJob) -> bool:
         logger.error(f"Error executing job: {str(e)}")
         return False
 
-def run_job(job_identifier: str):
-    """Main function to run a job by its identifier"""
-    log_file = setup_logging(job_identifier)
-    
-    logger.info(f"=== JOB EXECUTION START: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
+def run_job(job_identifier: str) -> bool:
+    """Run a job by its identifier"""
+    job_start_time = datetime.now().strftime("%F-%T")
+    job = None
+    job_log_file = None
     
     try:
+        logger.info(f"Starting job execution for job identifier: {job_identifier}")
+        
         # Get job details from database
         job = get_job_by_identifier(job_identifier)
-        
         if not job:
-            logger.error(f"Job with identifier {job_identifier} not found")
-            return
+            logger.error(f"Job not found for identifier: {job_identifier}")
+            return False
         
-        # Log job details
-        logger.info(f"Job ID: {job.id}; Job Name: {job.name}; Task Type: {job.task_type}; "
-                   f"Pipeline ID: {job.pipeline_id}; Entity IDs: {job.entity_ids}; "
-                   f"With Snapshot: {job.with_snapshot}; Schedule: {job.cron_expression}")
+        # Set up job-specific log file
+        job_log_file = os.path.join(log_dir, f"job_{job.id}.log")
+        job_file_handler = logging.FileHandler(job_log_file)
+        job_file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        logger.addHandler(job_file_handler)
+        
+        # Log job start to the job-specific log file
+        logger.info(f"START job={job.id} identifier={job_identifier} type={job.task_type}")
+        logger.info(f"Retrieved job details: {job.name} (ID: {job.id}, Type: {job.task_type})")
         
         # Execute the job
         success = execute_job(job)
         
-        # Update job status
-        error_message = None if success else "Job execution failed. See log for details."
-        update_job_status(job_identifier, success, error_message)
+        # Update job status in database
+        if success:
+            logger.info(f"Job executed successfully, updating status")
+            update_job_status(job_identifier, True)
+        else:
+            logger.error(f"Job execution failed, updating status with error")
+            update_job_status(job_identifier, False, "Job execution failed")
         
+        # Log job end
+        logger.info(f"END job={job.id} identifier={job_identifier} success={success}")
+        
+        # Remove the job-specific handler
+        logger.removeHandler(job_file_handler)
+        job_file_handler.close()
+        
+        return success
     except Exception as e:
-        logger.error(f"Error running job {job_identifier}: {str(e)}")
-        update_job_status(job_identifier, False, str(e))
-    
-    logger.info(f"=== JOB EXECUTION END: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
+        error_message = f"Error running job: {str(e)}"
+        logger.error(error_message)
+        
+        # Try to update job status with error
+        try:
+            update_job_status(job_identifier, False, error_message)
+        except Exception as update_error:
+            logger.error(f"Failed to update job status: {str(update_error)}")
+        
+        # Log job end with error if we have job information
+        if job and job_log_file:
+            with open(job_log_file, 'a') as f:
+                f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - ERROR - {error_message}\n")
+                f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - INFO - END job={job.id} identifier={job_identifier} success=False\n")
+        
+        return False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a scheduled job by its identifier")
     parser.add_argument("job_identifier", help="The unique identifier of the job to run")
     
     args = parser.parse_args()
-    run_job(args.job_identifier)
+    
+    # Create logs directory if it doesn't exist
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Log start of script execution
+    print(f"Starting job execution for {args.job_identifier} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Run the job
+    success = run_job(args.job_identifier)
+    
+    # Log end of script execution
+    print(f"Job execution {'succeeded' if success else 'failed'} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Exit with appropriate status code
+    sys.exit(0 if success else 1)
