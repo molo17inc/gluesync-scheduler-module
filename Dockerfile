@@ -13,9 +13,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libc6-dev \
-    python3-dev &&
-    apt-get clean &&
-    rm -rf /var/lib/apt/lists/*
+    python3-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy only the SDK submodule
 COPY ./gluesync-sdk ./gluesync-sdk
@@ -24,9 +24,9 @@ COPY ./gluesync-sdk ./gluesync-sdk
 RUN pip install websockets==11.0.3
 
 # Install the SDK from the submodule and create a wheel
-RUN pip install wheel &&
-    cd ./gluesync-sdk &&
-    pip wheel -w /wheels .
+RUN pip install wheel \
+    && cd ./gluesync-sdk \
+    && pip wheel -w /wheels .
 
 # Final stage
 FROM python:3.11-slim
@@ -34,9 +34,9 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Create Gluesync default directories and app data directory
-RUN mkdir -p /opt/gluesync/data &&
-    mkdir -p /app/data &&
-    chmod 777 /app/data
+RUN mkdir -p /opt/gluesync/data \
+    && mkdir -p /app/data \
+    && chmod 777 /app/data
 
 # Set environment variables
 # Core Hub settings
@@ -65,9 +65,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cron \
     curl \
-    openssl &&
-    apt-get clean &&
-    rm -rf /var/lib/apt/lists/*
+    openssl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy wheels from builder stage
 COPY --from=builder /wheels /wheels
