@@ -90,6 +90,19 @@ from database import Base, engine
 # Setup event handlers for Gluesync SDK client initialization and shutdown
 @app.on_event("startup")
 async def startup_event():
+    # Display ASCII art at startup
+    chronos_ascii = """
+ ██████ ██   ██ ██████   ██████  ███    ██  ██████  ███████ 
+██      ██   ██ ██   ██ ██    ██ ████   ██ ██    ██ ██      
+██      ███████ ██████  ██    ██ ██ ██  ██ ██    ██ ███████ 
+██      ██   ██ ██   ██ ██    ██ ██  ██ ██ ██    ██      ██ 
+ ██████ ██   ██ ██   ██  ██████  ██   ████  ██████  ███████ 
+                                                            
+                                                            
+"""
+    logger.info("\n" + chronos_ascii)
+    logger.info("Starting Gluesync Scheduler Module (Chronos)")
+    
     # Initialize database tables if they don't exist
     logger.info("Checking and initializing database tables...")
     try:
