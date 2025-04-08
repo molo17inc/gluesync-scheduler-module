@@ -133,20 +133,20 @@ class CronService:
             logger.error(f"Unknown task type: {job.task_type}")
             return ""
         
-        # Create a log file path for this job
+        # Create a log file path for this job - use a shorter path format
         log_dir = "/app/logs"
-        log_file = f"{log_dir}/job_{job.cron_job_identifier}.log"
+        log_file = f"{log_dir}/job_{job.id}.log"
         
-        # Construct the curl command with headers
-        headers = "-H \"Content-Type: application/json\" -H \"Cron-Job-Identifier: {job.cron_job_identifier}\""
-        curl_cmd = f'curl -X POST "{endpoint}" {headers} {ssl_options}'
+        # Construct a minimal curl command with only essential headers
+        curl_cmd = f'curl -s -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
         
-        # Create a compact command that logs the execution and result
-        cmd = f"mkdir -p {log_dir} && echo \"=== JOB EXECUTION START: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file} && "
-        cmd += f"echo \"Job ID: {job.id}; Job Name: {job.name}; Task Type: {job.task_type}\" >> {log_file} && "
-        cmd += f"echo \"Command: {curl_cmd}\" >> {log_file} && "
+        # Create a much shorter command that still logs basic info
+        # Use >> for all log appends to make the command shorter
+        # Use date with +%%F%%T format for a compact timestamp
+        cmd = f"mkdir -p {log_dir} && "
+        cmd += f"echo \"$(date +%%F-%%T) START job={job.id} type={job.task_type}\" >> {log_file} && "
         cmd += f"{curl_cmd} >> {log_file} 2>&1 && "
-        cmd += f"echo \"=== JOB EXECUTION END: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file}"
+        cmd += f"echo \"$(date +%%F-%%T) END\" >> {log_file}"
         
         # Log the command for debugging (truncated for readability)
         logger.debug(f"Job command (truncated): {cmd[:100]}...")
