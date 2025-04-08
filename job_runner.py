@@ -101,7 +101,8 @@ def get_job_by_identifier(job_identifier: str) -> Optional[ScheduledJob]:
         try:
             db = next(get_db())
             # Test if the scheduled_jobs table exists
-            db.execute("SELECT 1 FROM scheduled_jobs LIMIT 1")
+            from sqlalchemy import text
+            db.execute(text("SELECT 1 FROM scheduled_jobs LIMIT 1"))
         except Exception as schema_error:
             logger.error(f"Database schema issue: {str(schema_error)}")
             logger.info("Attempting to create database schema...")
@@ -115,10 +116,41 @@ def get_job_by_identifier(job_identifier: str) -> Optional[ScheduledJob]:
                 logger.error(f"Failed to create database schema: {str(create_error)}")
                 return None
         
-        # Query the job
+        # Extract the comment part if it's a crontab comment-style identifier
+        # Format could be either "temp_uuid" or "gluesync_job_uuid"
+        # or "# gluesync_job_uuid" (from crontab comment)
+        if job_identifier.startswith('#'):
+            job_identifier = job_identifier.strip('#').strip()
+            logger.info(f"Extracted identifier from comment: {job_identifier}")
+            
+        # Try to find the job by the provided identifier
         job = db.query(ScheduledJob).filter(ScheduledJob.cron_job_identifier == job_identifier).first()
+        
+        # If not found and it's a gluesync_job_* format, try to find by comment in the command
+        if not job and job_identifier.startswith('gluesync_job_'):
+            logger.info(f"Trying to find job by comment in command: {job_identifier}")
+            job = db.query(ScheduledJob).filter(ScheduledJob.command.like(f'%{job_identifier}%')).first()
+            
+        # If still not found, try to find any job with this pipeline_id
+        if not job and len(job_identifier) >= 8:
+            # Try to find by pipeline_id (assuming the identifier might contain a pipeline ID)
+            logger.info(f"Trying to find job by pipeline_id containing: {job_identifier}")
+            potential_jobs = db.query(ScheduledJob).filter(ScheduledJob.pipeline_id.like(f'%{job_identifier}%')).all()
+            if potential_jobs:
+                # If multiple found, take the first one
+                job = potential_jobs[0]
+                logger.info(f"Found job by pipeline_id: {job.id} ({job.name})")
+        
+        # If still not found, list all jobs for debugging
         if not job:
-            logger.warning(f"No job found with identifier: {job_identifier}")
+            all_jobs = db.query(ScheduledJob).all()
+            if all_jobs:
+                logger.warning(f"No job found with identifier: {job_identifier}. Available jobs:")
+                for j in all_jobs:
+                    logger.warning(f"  - ID: {j.id}, Name: {j.name}, Identifier: {j.cron_job_identifier}")
+            else:
+                logger.warning(f"No jobs found in the database at all")
+                
         return job
     except Exception as e:
         logger.error(f"Error retrieving job {job_identifier} from database: {str(e)}")
