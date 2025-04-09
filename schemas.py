@@ -141,6 +141,9 @@ class Job(JobBase):
     created_at: datetime = Field(..., description="Timestamp when the job was created")
     updated_at: datetime = Field(..., description="Timestamp when the job was last updated")
     last_run: Optional[datetime] = Field(None, description="Timestamp of the last execution (null if never run)")
+    last_successful_run: Optional[datetime] = Field(None, description="Timestamp of the last successful execution (null if never run)")
+    last_error_message: Optional[str] = Field(None, description="Error message from the last failed execution (null if last execution was successful)")
+    last_run_error_time: Optional[datetime] = Field(None, description="Timestamp of the last error (null if no errors occurred)")
     next_run: Optional[datetime] = Field(None, description="Timestamp of the next scheduled execution")
     command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
 
@@ -162,6 +165,9 @@ class Job(JobBase):
                 "created_at": "2025-03-20T10:00:00Z",
                 "updated_at": "2025-03-20T10:00:00Z",
                 "last_run": "2025-03-20T00:00:00Z",
+                "last_successful_run": "2025-03-20T00:00:00Z",
+                "last_error_message": None,
+                "last_run_error_time": None,
                 "next_run": "2025-03-21T00:00:00Z"
             }
         }
@@ -191,6 +197,9 @@ class JobList(BaseModel):
                         "created_at": "2025-03-20T10:00:00Z",
                         "updated_at": "2025-03-20T10:00:00Z",
                         "last_run": "2025-03-20T00:00:00Z",
+                        "last_successful_run": "2025-03-20T00:00:00Z",
+                        "last_error_message": None,
+                        "last_run_error_time": None,
                         "next_run": "2025-03-21T00:00:00Z"
                     }
                 ],

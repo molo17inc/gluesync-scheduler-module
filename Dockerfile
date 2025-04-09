@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libc6-dev \
     python3-dev \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy only the SDK submodule
 COPY ./gluesync-sdk ./gluesync-sdk
@@ -24,9 +24,9 @@ COPY ./gluesync-sdk ./gluesync-sdk
 RUN pip install websockets==11.0.3
 
 # Install the SDK from the submodule and create a wheel
-RUN pip install wheel && \
-    cd ./gluesync-sdk && \
-    pip wheel -w /wheels .
+RUN pip install wheel \
+    && cd ./gluesync-sdk \
+    && pip wheel -w /wheels .
 
 # Final stage
 FROM python:3.11-slim
@@ -34,28 +34,28 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Create Gluesync default directories and app data directory
-RUN mkdir -p /opt/gluesync/data && \
-    mkdir -p /app/data && \
-    chmod 777 /app/data
+RUN mkdir -p /opt/gluesync/data \
+    && mkdir -p /app/data \
+    && chmod 777 /app/data
 
 # Set environment variables
+# Core Hub settings
+# API Server settings
+# Database settings
+# CORS settings
+# Scheduler settings
+# Gluesync SDK settings using default paths
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    # Core Hub settings \
     CORE_HUB_URL= \
     ENTITY_START_TIMEOUT=2 \
-    # API Server settings \
     HOST=0.0.0.0 \
     PORT=1717 \
     DEBUG=False \
-    # Database settings \
     DATA_DIR=/app/data \
     DB_URL=sqlite:///./data/scheduler.db \
-    # CORS settings \
     ALLOWED_ORIGINS=* \
-    # Scheduler settings \
     CRONTAB_USER=root \
-    # Gluesync SDK settings using default paths \
     GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat \
     SSL_ENABLED=False \
     GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json \
@@ -66,8 +66,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cron \
     curl \
     openssl \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy wheels from builder stage
 COPY --from=builder /wheels /wheels
@@ -84,12 +84,14 @@ COPY ./gluesync_sdk_client.py .
 COPY ./database.py .
 COPY ./api ./api
 COPY ./services ./services
+COPY job_runner.py .
+COPY run_job.sh .
 
 # Create logs directory
 RUN mkdir -p /app/logs
 
-# Make entrypoint script executable
-RUN chmod +x /app/entrypoint.sh
+# Make scripts executable
+RUN chmod +x /app/entrypoint.sh /app/run_job.sh
 
 # Install specific websockets version first to avoid compatibility issues
 RUN pip install websockets==11.0.3

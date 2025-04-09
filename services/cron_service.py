@@ -30,6 +30,8 @@ from datetime import datetime
 from crontab import CronTab
 from croniter import croniter
 import logging
+from typing import Optional
+from sqlalchemy.orm import Session
 
 from config import settings
 from models import ScheduledJob, TaskType
@@ -54,145 +56,57 @@ class CronService:
         Returns:
             str: Command to be executed by cron
         """
-        # Base URL for API calls (using curl to make HTTP requests)
-        api_host = settings.HOST
-        api_port = settings.PORT
-        
-        # Use HTTPS when SSL is enabled, otherwise use HTTP
-        protocol = "https" if settings.SSL_ENABLED else "http"
-        api_base_url = f"{protocol}://{api_host}:{api_port}/api"
-        
-        # Add SSL verification options when using HTTPS
-        ssl_options = "-k" if settings.SSL_ENABLED else ""
-        
-        # Create a curl command to call the appropriate API endpoint
-        # Parse entity_ids from JSON string if it exists
-        entity_ids_list = []
-        if job.entity_ids:
-            try:
-                entity_ids_list = json.loads(job.entity_ids)
-                logger.info(f"Parsed entity IDs for job {job.id}: {entity_ids_list}")
-            except json.JSONDecodeError as e:
-                logger.error(f"Error parsing entity_ids JSON for job {job.id}: {e}")
-        
-        # Convert list to comma-separated string for URL parameters
-        entity_ids_param = ",".join(entity_ids_list) if entity_ids_list else ""
-        
-        if job.task_type == TaskType.ENTITY_START:
-            # Call the play endpoint with entity IDs
-            if entity_ids_param:
-                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play?entity_ids={entity_ids_param}"
-                if job.with_snapshot:
-                    endpoint += "&with_snapshot=true"
-            else:
-                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
-                if job.with_snapshot:
-                    endpoint += "?with_snapshot=true"
-            # Use double quotes for the URL to avoid issues with nested quotes in crontab
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
-            
-        elif job.task_type == TaskType.ENTITY_STOP:
-            # Call the pause endpoint with entity IDs
-            if entity_ids_param:
-                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause?entity_ids={entity_ids_param}"
-            else:
-                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
-            
-        elif job.task_type == TaskType.PIPELINE_START:
-            # Call the play endpoint without entity IDs (entire pipeline)
-            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/play"
-            if job.with_snapshot:
-                endpoint += "?with_snapshot=true"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
-            
-        elif job.task_type == TaskType.PIPELINE_STOP:
-            # Call the pause endpoint without entity IDs (entire pipeline)
-            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/pause"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
-            
-        elif job.task_type == TaskType.ENTITY_SNAPSHOT:
-            # Call the resync endpoint with entity IDs
-            if entity_ids_param:
-                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync?entity_ids={entity_ids_param}"
-            else:
-                endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
-            
-        elif job.task_type == TaskType.PIPELINE_SNAPSHOT:
-            # Call the resync endpoint without entity ID (entire pipeline)
-            endpoint = f"{api_base_url}/pipelines/{job.pipeline_id}/resync"
-            cmd = f'curl -X POST "{endpoint}" -H "Content-Type: application/json" {ssl_options}'
-            
-        # Log the endpoint and curl command for debugging
-        logger.debug(f"Using endpoint: {endpoint}")
-        logger.debug(f"Generated curl command: {cmd}")
-        
-        # Add logging with enhanced details
-        log_dir = os.path.join(self.base_path, "logs")
-        os.makedirs(log_dir, exist_ok=True)
-        
-        # Use job.id if available, otherwise use a sanitized version of the job name
-        # This handles the case where the job hasn't been committed to the database yet
-        if job.id is not None:
-            log_identifier = f"job_{job.id}"
+        # Get the path to the job_runner.py script
+        # Determine if we're running in Docker or locally
+        if os.path.exists('/app'):
+            # Docker environment
+            job_runner_path = "/app/job_runner.py"
         else:
-            # Create a safe identifier from the job name (remove spaces and special chars)
-            safe_name = ''.join(c if c.isalnum() else '_' for c in job.name)
-            log_identifier = f"job_{safe_name}"
-            
-        log_file = os.path.join(log_dir, f"{log_identifier}.log")
+            # Local environment - use absolute path to the script
+            job_runner_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "job_runner.py")
         
-        # Enhanced logging with timestamps, request details, and response
-        timestamp_cmd = "date '+%Y-%m-%d %H:%M:%S'"
+        # Create a log file path for this job
+        log_dir = "/app/logs"
+        log_file = f"{log_dir}/job_{job.id}.log"
         
-        # Store the original curl command before we modify it
-        curl_cmd = cmd
+        # Use the job's cron_job_identifier to run the job
+        # This will query the database for job details and execute the appropriate API call
+        # This keeps the crontab entry short regardless of how many entities are involved
         
-        # Create a more detailed logging command that captures:
-        # 1. Timestamp when job starts
-        # 2. The job details (type, pipeline, entity)
-        # 3. The actual curl command being executed
-        # 4. The response from the API with proper formatting
-        # 5. Timestamp when job completes
-        job_id_str = str(job.id) if job.id is not None else "Not assigned"
-        # Handle entity_ids - parse if JSON string, otherwise use raw value
-        entity_ids_str = "N/A"
-        if job.entity_ids is not None:
-            try:
-                # Try to parse as JSON if it's a string
-                if isinstance(job.entity_ids, str):
-                    entity_list = json.loads(job.entity_ids)
-                    entity_ids_str = ", ".join(entity_list)
-                else:
-                    entity_ids_str = str(job.entity_ids)
-            except json.JSONDecodeError:
-                # If not valid JSON, use as is
-                entity_ids_str = str(job.entity_ids)
+        # Use a wrapper shell script to ensure correct environment for cron jobs
+        # The wrapper script handles PATH setup and logging
+        wrapper_script = "/app/run_job.sh"
+        cmd = f"{wrapper_script} {job.cron_job_identifier}"
         
-        # For crontab compatibility, create a single-line command with no embedded newlines
-        # Use echo commands with semicolons for newlines in the log file
+        # Log the command for debugging
+        logger.debug(f"Generated job command: {cmd}")
         
-        # Create a single line command with escaped special characters
-        # The format will be: echo header && echo job details && echo command info && run curl && echo footer
-        
-        # Format the log text - replace newlines with semicolons that will be interpreted in the echo
-        job_details_text = f"Job ID: {job_id_str}; Job Name: {job.name}; Task Type: {job.task_type}; Pipeline ID: {job.pipeline_id}; Entity IDs: {entity_ids_str}; With Snapshot: {job.with_snapshot}; Schedule: {job.cron_expression}"
-        
-        # Create each echo command without any newlines
-        start_log = f"echo \"=== JOB EXECUTION START: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file}"
-        job_details = f"echo \"{job_details_text}\" >> {log_file}"
-        cmd_log = f"echo \"Executing command: {curl_cmd}\" >> {log_file}"
-        curl_execution = f"{curl_cmd} -v >> {log_file} 2>&1"
-        end_log = f"echo \"=== JOB EXECUTION END: $(date '+%Y-%m-%d %H:%M:%S') ===\" >> {log_file}"
-        
-        # Combine all parts with && to ensure they run in sequence - this is ONE line
-        cmd = f"{start_log} && {job_details} && {cmd_log} && {curl_execution} && {end_log}"
-        
-        # Log the first part of the command for debugging (it might be very long)
-        logger.debug(f"Final cron command (truncated): {cmd[:100]}...")
+        # Log the command for debugging (truncated for readability)
+        logger.debug(f"Job command (truncated): {cmd[:100]}...")
         
         return cmd
+
+    def update_job_status(self, cron_job_identifier: str, db: Session, success: bool, error_message: Optional[str] = None):
+        """
+        Update the job's execution status in the database.
+        
+        Args:
+            cron_job_identifier: The unique identifier for the cron job
+            db: Database session
+            success: Whether the job execution was successful
+            error_message: Error message if the job failed (None if successful)
+        """
+        try:
+            # For backward compatibility, we still accept cron_job_identifier
+            # but we'll use JobService to handle the update
+            from services.job_service import JobService
+            job_service = JobService()
+            result = job_service.update_job_execution_status(cron_job_identifier, db, success, error_message)
+            if not result:
+                logger.error(f"Failed to update job status for cron job identifier {cron_job_identifier}")
+        except Exception as e:
+            logger.error(f"Error updating job status: {str(e)}")
+            db.rollback()
 
     def add_job(self, job: ScheduledJob) -> str:
         """
@@ -208,9 +122,13 @@ class CronService:
             ValueError: If there's an issue with the cron expression or job creation
         """
         try:
-            # Generate a unique identifier for this job
-            job_id = f"gluesync_job_{uuid.uuid4().hex[:8]}"
-            logger.info(f"Generated job ID: {job_id} for job '{job.name}'")
+            # Use the existing job identifier if it exists, otherwise generate a new one
+            if job.cron_job_identifier and not job.cron_job_identifier.startswith('temp_'):
+                job_id = job.cron_job_identifier
+                logger.info(f"Using existing job ID: {job_id} for job '{job.name}'")
+            else:
+                job_id = f"gluesync_job_{uuid.uuid4().hex[:8]}"
+                logger.info(f"Generated new job ID: {job_id} for job '{job.name}' (replacing {job.cron_job_identifier})")
             
             # Log job details
             logger.info(f"Adding job to crontab with details:")

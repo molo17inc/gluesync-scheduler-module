@@ -22,9 +22,12 @@
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, status, Query, Path, Request, Depends
+from fastapi import APIRouter, HTTPException, status, Query, Path, Request, Depends, Body
 from pydantic import BaseModel
 import logging
+from sqlalchemy.orm import Session
+
+from database import get_db
 
 from play_pause import PipelineManager
 from schemas import ErrorResponse
@@ -95,14 +98,16 @@ router = APIRouter(
 
 @router.post(
     "/{pipeline_id}/play",
-    response_model=OperationResponse,
+    response_model=dict,
     summary="Start pipeline or entities",
     description="[INTERNAL USE ONLY] Start a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
 async def play_pipeline(
+    request: Request,
     pipeline_id: str = Path(..., description="The ID of the pipeline to start"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to start. If not provided, all entities in the pipeline will be started."),
-    with_snapshot: bool = Query(False, description="Whether to start with snapshot")
+    with_snapshot: bool = Query(False, description="Whether to start with snapshot"),
+    body: dict = Body(default=None)
 ):
     """
     Start a pipeline or specific entities within a pipeline.
@@ -140,30 +145,47 @@ async def play_pipeline(
     """
     try:
         manager = PipelineManager()
-        if entity_ids:
+        
+        # Check for entity_ids in both query parameters and request body
+        entities_to_start = entity_ids or []
+        
+        # If we have a body with entity_ids, use those (overrides query parameters)
+        if body and 'entity_ids' in body and isinstance(body['entity_ids'], list):
+            entities_to_start = body['entity_ids']
+            logger.info(f"Using entity_ids from request body: {entities_to_start}")
+        
+        # Check if with_snapshot is in the body
+        snapshot_option = with_snapshot
+        if body and 'with_snapshot' in body:
+            snapshot_option = bool(body['with_snapshot'])
+            logger.info(f"Using with_snapshot from request body: {snapshot_option}")
+        
+        if entities_to_start:
             # Start specific entities
-            result = manager.play_entities(pipeline_id, entity_ids, with_snapshot)
+            result = manager.play_entities(pipeline_id, entities_to_start, snapshot_option)
             return {
                 "success": True,
-                "message": f"Started {len(entity_ids)} entities in pipeline {pipeline_id}",
+                "message": f"Started {len(entities_to_start)} entities in pipeline {pipeline_id}",
                 "details": {
                     "pipeline_id": pipeline_id,
-                    "entities_started": entity_ids,
-                    "with_snapshot": with_snapshot
+                    "entities_started": entities_to_start,
+                    "with_snapshot": snapshot_option
                 }
             }
         else:
             # Start entire pipeline
-            result = manager.play_pipeline(pipeline_id, with_snapshot)
+            result = manager.play_pipeline(pipeline_id, snapshot_option)
             return {
                 "success": True,
                 "message": f"Started pipeline {pipeline_id}",
                 "details": {
                     "pipeline_id": pipeline_id,
-                    "with_snapshot": with_snapshot
+                    "with_snapshot": snapshot_option
                 }
             }
+        
     except Exception as e:
+        logger.error(f"Error starting pipeline: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to start pipeline: {str(e)}"
@@ -171,13 +193,15 @@ async def play_pipeline(
 
 @router.post(
     "/{pipeline_id}/pause",
-    response_model=OperationResponse,
+    response_model=dict,
     summary="Stop pipeline or entities",
     description="[INTERNAL USE ONLY] Stop a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
 async def pause_pipeline(
+    request: Request,
     pipeline_id: str = Path(..., description="The ID of the pipeline to stop"),
-    entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to stop. If not provided, all entities in the pipeline will be stopped.")
+    entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to stop. If not provided, all entities in the pipeline will be stopped."),
+    body: dict = Body(default=None)
 ):
     """
     Stop a pipeline or specific entities within a pipeline.
@@ -214,15 +238,24 @@ async def pause_pipeline(
     """
     try:
         manager = PipelineManager()
-        if entity_ids:
+        
+        # Check for entity_ids in both query parameters and request body
+        entities_to_stop = entity_ids or []
+        
+        # If we have a body with entity_ids, use those (overrides query parameters)
+        if body and 'entity_ids' in body and isinstance(body['entity_ids'], list):
+            entities_to_stop = body['entity_ids']
+            logger.info(f"Using entity_ids from request body: {entities_to_stop}")
+        
+        if entities_to_stop:
             # Stop specific entities
-            result = manager.pause_entities(pipeline_id, entity_ids)
+            result = manager.pause_entities(pipeline_id, entities_to_stop)
             return {
                 "success": True,
-                "message": f"Stopped {len(entity_ids)} entities in pipeline {pipeline_id}",
+                "message": f"Stopped {len(entities_to_stop)} entities in pipeline {pipeline_id}",
                 "details": {
                     "pipeline_id": pipeline_id,
-                    "entities_stopped": entity_ids
+                    "entities_stopped": entities_to_stop
                 }
             }
         else:
@@ -236,6 +269,7 @@ async def pause_pipeline(
                 }
             }
     except Exception as e:
+        logger.error(f"Error stopping pipeline: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to stop pipeline: {str(e)}"
@@ -243,14 +277,16 @@ async def pause_pipeline(
 
 @router.post(
     "/{pipeline_id}/resync",
-    response_model=OperationResponse,
-    summary="Resync pipeline or entities",
+    response_model=dict,
+    summary="Create snapshot for pipeline or entities",
     description="[INTERNAL USE ONLY] Create a data snapshot for a pipeline or specific entities within a pipeline. This endpoint is restricted to localhost access only."
 )
 async def resync_pipeline(
+    request: Request,
     pipeline_id: str = Path(..., description="The ID of the pipeline to resync"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to resync. If not provided, all entities in the pipeline will be resynced."),
-    snapshot_write_method: str = Query("UPSERT", description="The write method for the snapshot, default is UPSERT.")
+    snapshot_write_method: str = Query("UPSERT", description="The write method for the snapshot, default is UPSERT."),
+    body: dict = Body(default=None)
 ):
     """
     Create a data snapshot for a pipeline or specific entities within a pipeline.
@@ -289,30 +325,47 @@ async def resync_pipeline(
     """
     try:
         manager = PipelineManager()
-        if entity_ids:
+        
+        # Check for entity_ids in both query parameters and request body
+        entities_to_resync = entity_ids or []
+        
+        # If we have a body with entity_ids, use those (overrides query parameters)
+        if body and 'entity_ids' in body and isinstance(body['entity_ids'], list):
+            entities_to_resync = body['entity_ids']
+            logger.info(f"Using entity_ids from request body: {entities_to_resync}")
+        
+        # Check if snapshot_write_method is in the body
+        write_method = snapshot_write_method
+        if body and 'snapshot_write_method' in body:
+            write_method = body['snapshot_write_method']
+            logger.info(f"Using snapshot_write_method from request body: {write_method}")
+        
+        if entities_to_resync:
             # Resync specific entities
-            result = manager.resync_entities(pipeline_id, entity_ids, snapshot_write_method)
+            result = manager.resync_entities(pipeline_id, entities_to_resync, write_method)
             return {
                 "success": True,
-                "message": f"Triggered one-time snapshot for {len(entity_ids)} entities in pipeline {pipeline_id}",
+                "message": f"Triggered one-time snapshot for {len(entities_to_resync)} entities in pipeline {pipeline_id}",
                 "details": {
                     "pipeline_id": pipeline_id,
-                    "entities_resynced": entity_ids,
-                    "snapshot_write_method": snapshot_write_method
+                    "entities_resynced": entities_to_resync,
+                    "snapshot_write_method": write_method
                 }
             }
         else:
             # Resync entire pipeline
-            result = manager.resync_pipeline(pipeline_id, snapshot_write_method)
+            result = manager.resync_pipeline(pipeline_id, write_method)
             return {
                 "success": True,
                 "message": f"Triggered one-time snapshot for pipeline {pipeline_id}",
                 "details": {
                     "pipeline_id": pipeline_id,
-                    "snapshot_write_method": snapshot_write_method
+                    "snapshot_write_method": write_method
                 }
             }
+        
     except Exception as e:
+        logger.error(f"Error resyncing pipeline: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to resync pipeline: {str(e)}"
