@@ -32,8 +32,6 @@ RUN python -m pip install websockets==11.0.3
 # Create wheels directory
 RUN mkdir -p /wheels
 
-RUN pip wheel -w /wheels
-
 # Install wheel and setuptools
 RUN python -m pip install --upgrade pip wheel setuptools
 
