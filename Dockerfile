@@ -27,13 +27,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY ./gluesync-sdk ./gluesync-sdk
 
 # Install specific websockets version first to avoid compatibility issues
-RUN python3 -m pip install websockets==11.0.3
+RUN python -m pip install websockets==11.0.3
 
 # Create wheels directory
 RUN mkdir -p /wheels
 
+RUN pip wheel -w /wheels
+
 # Install wheel and setuptools
-RUN python3 -m pip install --upgrade pip wheel setuptools
+RUN python -m pip install --upgrade pip wheel setuptools
 
 # Install the SDK directly instead of trying to create a wheel
 RUN cd ./gluesync-sdk && \
