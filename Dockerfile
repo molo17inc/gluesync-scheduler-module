@@ -39,9 +39,12 @@ RUN python -m pip install --upgrade pip wheel setuptools
 RUN cd ./gluesync-sdk && \
     python -m pip install -e .
 
-# Copy the installed SDK to the wheels directory
+# List the site-packages directory to see what's installed
+RUN ls -la /usr/local/lib/python3.11/site-packages
+
+# Copy the installed SDK to the wheels directory - use a more general approach
 RUN cd /usr/local/lib/python3.11/site-packages && \
-    tar -czf /wheels/gluesync-sdk.tar.gz gluesync_sdk*
+    find . -name "*gluesync*" -o -name "*twofish*" | tar -czf /wheels/gluesync-sdk.tar.gz -T -
 
 # Final stage
 FROM python:3.11-slim
