@@ -20,15 +20,11 @@ fi
 
 # Initialize the database if it doesn't exist
 echo "Checking database initialization..."
-DATA_DIR=/app/data DB_URL=sqlite:////${DATA_DIR}/scheduler.db python3 -c "from database import engine; from models import Base; Base.metadata.create_all(bind=engine)" || {
+DATA_DIR=/app/data DB_URL=sqlite:////${DATA_DIR}/scheduler.db python -c "from database import engine; from models import Base; Base.metadata.create_all(bind=engine)" || {
     echo "Error initializing database schema"
     exit 1
 }
 echo "Database schema initialized successfully"
-
-# List all files in the app directory for debugging
-echo "Listing files in /app:"
-ls -la /app
 
 # Start cron service
 echo "Starting cron service..."

@@ -36,8 +36,8 @@ else
 fi
 
 # Run the job_runner.py script with the job identifier
-echo "Executing: /usr/local/bin/python /app/job_runner.py \"$1\"" >> /app/logs/job_wrapper.log
-/usr/local/bin/python /app/job_runner.py "$1" 2>&1 | tee -a /app/logs/job_wrapper.log
+echo "Executing: python /app/job_runner.py \"$1\"" >> /app/logs/job_wrapper.log
+python /app/job_runner.py "$1" 2>&1 | tee -a /app/logs/job_wrapper.log
 RESULT=${PIPESTATUS[0]}
 
 # Log end of execution
