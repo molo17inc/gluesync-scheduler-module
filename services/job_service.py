@@ -201,6 +201,9 @@ class JobService:
             current_time = datetime.now()
             job.last_run = current_time
             
+            # Update the next_run field based on the cron expression
+            job.next_run = self.cron_service.get_next_run_time(job.cron_expression)
+            
             if success:
                 job.last_successful_run = current_time
                 job.last_error_message = None

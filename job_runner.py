@@ -169,6 +169,11 @@ def update_job_status(job_identifier: str, success: bool, error_message: Optiona
         current_time = datetime.now()
         job.last_run = current_time
         
+        # Update the next_run field based on the cron expression
+        from services.cron_service import CronService
+        cron_service = CronService()
+        job.next_run = cron_service.get_next_run_time(job.cron_expression)
+        
         if success:
             job.last_successful_run = current_time
             job.last_error_message = None
