@@ -3,6 +3,12 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
+    python3-dev
+
 # Set environment variables for Python and dependency installation
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -24,8 +30,9 @@ COPY ./gluesync-sdk ./gluesync-sdk
 RUN pip install websockets==11.0.3
 
 # Install the SDK from the submodule and create a wheel
-RUN pip install wheel \
+RUN pip install wheel setuptools \
     && cd ./gluesync-sdk \
+    && pip install -e . \
     && pip wheel -w /wheels .
 
 # Final stage
@@ -33,10 +40,19 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install required system packages
+RUN apt-get update && apt-get install -y \
+    cron \
+    curl \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create Gluesync default directories and app data directory
 RUN mkdir -p /opt/gluesync/data \
     && mkdir -p /app/data \
-    && chmod 777 /app/data
+    && mkdir -p /app/logs \
+    && chmod -R 777 /app/data \
+    && chmod -R 777 /app/logs
 
 # Set environment variables
 # Core Hub settings
@@ -82,16 +98,19 @@ COPY ./schemas.py .
 COPY ./play_pause.py .
 COPY ./gluesync_sdk_client.py .
 COPY ./database.py .
+
+# Copy API and services directories
 COPY ./api ./api
 COPY ./services ./services
-COPY job_runner.py .
-COPY run_job.sh .
 
-# Create logs directory
-RUN mkdir -p /app/logs
+# Copy the job_runner.py and run_job.sh scripts
+COPY ./job_runner.py /app/job_runner.py
+COPY ./run_job.sh /app/run_job.sh
 
 # Make scripts executable
-RUN chmod +x /app/entrypoint.sh /app/run_job.sh
+RUN chmod +x /app/entrypoint.sh \
+    && chmod +x /app/job_runner.py \
+    && chmod +x /app/run_job.sh
 
 # Install specific websockets version first to avoid compatibility issues
 RUN pip install websockets==11.0.3
