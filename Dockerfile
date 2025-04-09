@@ -19,9 +19,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libc6-dev \
-    python3-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    python3-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy only the SDK submodule
 COPY ./gluesync-sdk ./gluesync-sdk
@@ -32,16 +32,16 @@ RUN python3 -m pip install websockets==11.0.3
 # Create wheels directory
 RUN mkdir -p /wheels
 
-# Ensure wheel is installed first
+# Install wheel and setuptools
 RUN python3 -m pip install --upgrade pip wheel setuptools
 
 # Install the SDK directly instead of trying to create a wheel
-RUN cd ./gluesync-sdk \
-    && python3 -m pip install -e .
+RUN cd ./gluesync-sdk && \
+    python -m pip install -e .
 
 # Copy the installed SDK to the wheels directory
-RUN cd /usr/local/lib/python3.11/site-packages \
-    && tar -czf /wheels/gluesync-sdk.tar.gz gluesync_sdk*
+RUN cd /usr/local/lib/python3.11/site-packages && \
+    tar -czf /wheels/gluesync-sdk.tar.gz gluesync_sdk*
 
 # Final stage
 FROM python:3.11-slim
@@ -52,15 +52,15 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     cron \
     curl \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
+    procps && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create Gluesync default directories and app data directory
-RUN mkdir -p /opt/gluesync/data \
-    && mkdir -p /app/data \
-    && mkdir -p /app/logs \
-    && chmod -R 777 /app/data \
-    && chmod -R 777 /app/logs
+RUN mkdir -p /opt/gluesync/data && \
+    mkdir -p /app/data && \
+    mkdir -p /app/logs && \
+    chmod -R 777 /app/data && \
+    chmod -R 777 /app/logs
 
 # Set environment variables
 # Core Hub settings
@@ -89,9 +89,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cron \
     curl \
-    openssl \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    openssl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy wheels from builder stage
 COPY --from=builder /wheels /wheels
@@ -116,18 +116,18 @@ COPY ./job_runner.py /app/job_runner.py
 COPY ./run_job.sh /app/run_job.sh
 
 # Make scripts executable
-RUN chmod +x /app/entrypoint.sh \
-    && chmod +x /app/job_runner.py \
-    && chmod +x /app/run_job.sh
+RUN chmod +x /app/entrypoint.sh && \
+    chmod +x /app/job_runner.py && \
+    chmod +x /app/run_job.sh
 
 # Install specific websockets version first to avoid compatibility issues
 RUN python3 -m pip install websockets==11.0.3
 
 # Install the SDK from the tarball
-RUN mkdir -p /tmp/sdk \
-    && tar -xzf /wheels/gluesync-sdk.tar.gz -C /tmp/sdk \
-    && cp -r /tmp/sdk/* /usr/local/lib/python3.11/site-packages/ \
-    && rm -rf /tmp/sdk
+RUN mkdir -p /tmp/sdk && \
+    tar -xzf /wheels/gluesync-sdk.tar.gz -C /tmp/sdk && \
+    cp -r /tmp/sdk/* /usr/local/lib/python3.11/site-packages/ && \
+    rm -rf /tmp/sdk
 
 # Install other Python dependencies
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
