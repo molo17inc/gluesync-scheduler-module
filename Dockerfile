@@ -32,9 +32,11 @@ RUN python3 -m pip install websockets==11.0.3
 # Create wheels directory
 RUN mkdir -p /wheels
 
+# Ensure wheel is installed first
+RUN python3 -m pip install --upgrade pip wheel setuptools
+
 # Install the SDK directly instead of trying to create a wheel
-RUN python3 -m pip install wheel setuptools \
-    && cd ./gluesync-sdk \
+RUN cd ./gluesync-sdk \
     && python3 -m pip install -e .
 
 # Copy the installed SDK to the wheels directory
