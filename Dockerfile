@@ -27,13 +27,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY ./gluesync-sdk ./gluesync-sdk
 
 # Install specific websockets version first to avoid compatibility issues
-RUN pip install websockets==11.0.3
+RUN python3 -m pip install websockets==11.0.3
 
 # Install the SDK from the submodule and create a wheel
-RUN pip install wheel setuptools \
+RUN python3 -m pip install wheel setuptools \
     && cd ./gluesync-sdk \
-    && pip install -e . \
-    && pip wheel -w /wheels .
+    && python3 -m pip install -e . \
+    && python3 -m pip wheel -w /wheels .
 
 # Final stage
 FROM python:3.11-slim
@@ -113,13 +113,13 @@ RUN chmod +x /app/entrypoint.sh \
     && chmod +x /app/run_job.sh
 
 # Install specific websockets version first to avoid compatibility issues
-RUN pip install websockets==11.0.3
+RUN python3 -m pip install websockets==11.0.3
 
 # Install the SDK from the wheel
-RUN pip install /wheels/*
+RUN python3 -m pip install /wheels/*
 
 # Install other Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 # Expose the port the app runs on
 EXPOSE 1717
