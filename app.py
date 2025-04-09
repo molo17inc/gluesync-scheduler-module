@@ -92,15 +92,13 @@ from database import Base, engine
 async def startup_event():
     # Display ASCII art at startup
     chronos_ascii = """
- ██████ ██   ██ ██████   ██████  ███    ██  ██████  ███████ 
-██      ██   ██ ██   ██ ██    ██ ████   ██ ██    ██ ██      
-██      ███████ ██████  ██    ██ ██ ██  ██ ██    ██ ███████ 
-██      ██   ██ ██   ██ ██    ██ ██  ██ ██ ██    ██      ██ 
- ██████ ██   ██ ██   ██  ██████  ██   ████  ██████  ███████ 
-                                                            
-                                                            
+#   ██████ ██   ██ ██████   ██████  ███    ██  ██████  ███████ 
+#  ██      ██   ██ ██   ██ ██    ██ ████   ██ ██    ██ ██      
+#  ██      ███████ ██████  ██    ██ ██ ██  ██ ██    ██ ███████ 
+#  ██      ██   ██ ██   ██ ██    ██ ██  ██ ██ ██    ██      ██ 
+#   ██████ ██   ██ ██   ██  ██████  ██   ████  ██████  ███████ 
 """
-    logger.info("\n" + chronos_ascii)
+    logger.info("\n" + chronos_ascii + "\n")
     logger.info("Starting Gluesync Scheduler Module (Chronos)")
     
     # Initialize database tables if they don't exist
