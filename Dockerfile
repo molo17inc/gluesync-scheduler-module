@@ -29,11 +29,17 @@ COPY ./gluesync-sdk ./gluesync-sdk
 # Install specific websockets version first to avoid compatibility issues
 RUN python3 -m pip install websockets==11.0.3
 
-# Install the SDK from the submodule and create a wheel
+# Create wheels directory
+RUN mkdir -p /wheels
+
+# Install the SDK directly instead of trying to create a wheel
 RUN python3 -m pip install wheel setuptools \
     && cd ./gluesync-sdk \
-    && python3 -m pip install -e . \
-    && python3 -m pip wheel -w /wheels .
+    && python3 -m pip install -e .
+
+# Copy the installed SDK to the wheels directory
+RUN cd /usr/local/lib/python3.11/site-packages \
+    && tar -czf /wheels/gluesync-sdk.tar.gz gluesync_sdk*
 
 # Final stage
 FROM python:3.11-slim
@@ -115,8 +121,11 @@ RUN chmod +x /app/entrypoint.sh \
 # Install specific websockets version first to avoid compatibility issues
 RUN python3 -m pip install websockets==11.0.3
 
-# Install the SDK from the wheel
-RUN python3 -m pip install /wheels/*
+# Install the SDK from the tarball
+RUN mkdir -p /tmp/sdk \
+    && tar -xzf /wheels/gluesync-sdk.tar.gz -C /tmp/sdk \
+    && cp -r /tmp/sdk/* /usr/local/lib/python3.11/site-packages/ \
+    && rm -rf /tmp/sdk
 
 # Install other Python dependencies
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
