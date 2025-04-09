@@ -67,17 +67,17 @@ class CoreHubClient:
             logger.warning("Will attempt to continue without SDK initialization")
     
     def _try_sdk_token(self):
-        """Try to get token from gluesync SDK client if it's initialized"""
+        """Try to get token from Gluesync SDK client if it's initialized"""
         try:
             if gluesync_sdk_client.is_initialized and gluesync_sdk_client.token:
                 self.token = gluesync_sdk_client.token
-                logger.info("Using token from gluesync SDK client")
+                logger.info("Using token from Gluesync SDK client")
                 return True
             else:
                 logger.warning("SDK client is not initialized or token is not available")
                 logger.info(f"SDK initialized: {gluesync_sdk_client.is_initialized}, Token available: {gluesync_sdk_client.token is not None}")
         except Exception as e:
-            logger.warning(f"Could not get token from gluesync SDK client: {e}")
+            logger.warning(f"Could not get token from Gluesync SDK client: {e}")
         return False
             
     def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict[str, Any]] = None, 

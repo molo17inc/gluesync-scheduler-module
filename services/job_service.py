@@ -132,7 +132,7 @@ class JobService:
         if job.entity_ids and isinstance(job.entity_ids, str):
             try:
                 job.entity_ids = json.loads(job.entity_ids)
-                logger.info(f"Converted entity_ids JSON string to list for job {job.id}: {job.entity_ids}")
+                logger.debug(f"Converted entity_ids JSON string to list for job {job.id}: {job.entity_ids}")
             except json.JSONDecodeError as e:
                 logger.error(f"Error parsing entity_ids JSON for job {job.id}: {e}")
                 # If parsing fails, set to None rather than returning invalid data

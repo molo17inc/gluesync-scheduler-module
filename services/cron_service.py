@@ -125,10 +125,10 @@ class CronService:
             # Use the existing job identifier if it exists, otherwise generate a new one
             if job.cron_job_identifier and not job.cron_job_identifier.startswith('temp_'):
                 job_id = job.cron_job_identifier
-                logger.info(f"Using existing job ID: {job_id} for job '{job.name}'")
+                logger.debug(f"Using existing job ID: {job_id} for job '{job.name}'")
             else:
                 job_id = f"gluesync_job_{uuid.uuid4().hex[:8]}"
-                logger.info(f"Generated new job ID: {job_id} for job '{job.name}' (replacing {job.cron_job_identifier})")
+                logger.debug(f"Generated new job ID: {job_id} for job '{job.name}' (replacing {job.cron_job_identifier})")
             
             # Log job details
             logger.info(f"Adding job to crontab with details:")
@@ -144,18 +144,18 @@ class CronService:
             
             # Generate a clean command directly (don't use the stored command that might have issues)
             fresh_command = self._get_job_command(job)
-            logger.info(f"Generated fresh command for crontab (first 100 chars): {fresh_command[:100]}...")
+            logger.debug(f"Generated fresh command for crontab (first 100 chars): {fresh_command[:100]}...")
             
             # Create a new cron job with the fresh command
-            logger.info(f"Creating new cron job with fresh command")
+            logger.info(f"Creating new cron job command...")
             cron_job = self.crontab.new(command=fresh_command, comment=job_id)
             
             # Normalize the cron expression for better compatibility
             original_expression = job.cron_expression
-            logger.info(f"Original cron expression: '{original_expression}'")
+            logger.debug(f"Original cron expression: '{original_expression}'")
             
             normalized_expression = self._normalize_cron_expression(original_expression)
-            logger.info(f"Normalized cron expression: '{normalized_expression}'")
+            logger.debug(f"Normalized cron expression: '{normalized_expression}'")
             
             # Log the cron expression being used
             if original_expression != normalized_expression:
@@ -181,15 +181,15 @@ class CronService:
             try:
                 # Render the crontab to a string to verify its content
                 crontab_content = self.crontab.render()
-                logger.info(f"Preview of crontab content to be written:")
+                logger.debug(f"Preview of crontab content to be written:")
                 lines = crontab_content.strip().split('\n')
                 for i, line in enumerate(lines):
                     # Only log the first 5 lines to avoid flooding logs
                     if i < 5:
-                        logger.info(f"Line {i+1}: {line}")
+                        logger.debug(f"Line {i+1}: {line}")
                     else:
                         remaining_lines = len(lines) - 5
-                        logger.info(f"... {remaining_lines} more lines ...")
+                        logger.debug(f"... {remaining_lines} more lines ...")
                         break
             except Exception as e:
                 logger.warning(f"Could not preview crontab content: {str(e)}")
