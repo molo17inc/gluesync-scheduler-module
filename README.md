@@ -229,7 +229,6 @@ This is particularly useful for:
 - Starting or stopping groups of entities together
 - Ensuring operations across multiple entities are performed in a consistent timeframe
 
-
 #### Example Job Creation Request
 
 ```json
