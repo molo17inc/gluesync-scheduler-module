@@ -23,8 +23,11 @@
 
 from datetime import datetime
 from typing import Optional, List, Union
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, ConfigDict
 from enum import Enum
+import pytz
+
+from config import settings
 
 from models import TaskType
 
@@ -146,10 +149,12 @@ class Job(JobBase):
     last_run_error_time: Optional[datetime] = Field(None, description="Timestamp of the last error (null if no errors occurred)")
     next_run: Optional[datetime] = Field(None, description="Timestamp of the next scheduled execution")
     command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
+    timezone: str = Field(default=settings.TIMEZONE, description="Timezone used for all datetime fields")
 
     class Config:
         from_attributes = True
         json_schema_extra = {
+            "timezone": settings.TIMEZONE,
             "example": {
                 "id": 1,
                 "name": "Daily entity backup",
@@ -162,13 +167,14 @@ class Job(JobBase):
                 "enabled": True,
                 "command": "python3 play_pause.py resync --pipeline pipeline-123 --entity entity-456,entity-789",
                 "cron_job_identifier": "gluesync_job_1",
-                "created_at": "2025-03-20T10:00:00Z",
-                "updated_at": "2025-03-20T10:00:00Z",
-                "last_run": "2025-03-20T00:00:00Z",
-                "last_successful_run": "2025-03-20T00:00:00Z",
+                "created_at": "2025-03-20T10:00:00+02:00",
+                "updated_at": "2025-03-20T10:00:00+02:00",
+                "last_run": "2025-03-20T00:00:00+02:00",
+                "last_successful_run": "2025-03-20T00:00:00+02:00",
                 "last_error_message": None,
                 "last_run_error_time": None,
-                "next_run": "2025-03-21T00:00:00Z"
+                "next_run": "2025-03-21T00:00:00+02:00",
+                "timezone": "Europe/Rome"
             }
         }
 

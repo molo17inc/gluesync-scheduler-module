@@ -16,6 +16,7 @@ services:
       - GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
       - CRONTAB_USER=root
       - HOST=0.0.0.0
+      - TIMEZONE=UTC
     volumes:
       - ./:/app
     command: >

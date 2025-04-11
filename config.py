@@ -72,6 +72,10 @@ class Settings:
     # Legacy settings (kept for backward compatibility but not used)
     GLUESYNC_KEYSTORE_PATH = os.getenv('GLUESYNC_KEYSTORE_PATH', None)
     GLUESYNC_KEYSTORE_PASSWORD = os.getenv('GLUESYNC_KEYSTORE_PASSWORD', None)
+    
+    # Timezone settings
+    # Default timezone is UTC if not specified
+    TIMEZONE = os.getenv('TIMEZONE', 'UTC')
 
 
 settings = Settings()

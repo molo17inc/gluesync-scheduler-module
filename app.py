@@ -106,6 +106,17 @@ async def startup_event():
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables initialized successfully")
+        
+        # Run migrations
+        logger.info("Running database migrations...")
+        try:
+            # Run migration to add timezone field
+            from migrations.add_timezone_field import migrate as migrate_timezone
+            migrate_timezone()
+            logger.info("Timezone migration completed successfully")
+        except Exception as migration_error:
+            logger.error(f"Error running migrations: {migration_error}")
+            logger.warning("Some features may not work correctly due to incomplete migrations")
     except Exception as e:
         logger.error(f"Failed to initialize database tables: {e}")
         logger.warning("Application may not function correctly without database tables")

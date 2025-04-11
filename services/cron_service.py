@@ -27,6 +27,7 @@ import uuid
 import json
 import requests
 from datetime import datetime
+import pytz
 from crontab import CronTab
 from croniter import croniter
 import logging
@@ -242,7 +243,7 @@ class CronService:
             # Update schedule if needed
             cron_job.setall(job.cron_expression)
             
-            # Update enabled status
+            # Enable/disable the job
             cron_job.enable(job.enabled)
             
             # Write changes
@@ -280,10 +281,23 @@ class CronService:
             cron_expression: A valid cron expression
             
         Returns:
-            datetime: The next time the job will run
+            datetime: The next time the job will run with timezone info
         """
-        cron = croniter(cron_expression, datetime.now())
-        return cron.get_next(datetime)
+        # Get the configured timezone
+        tz = pytz.timezone(settings.TIMEZONE)
+        
+        # Get current time in the configured timezone
+        now = datetime.now(tz)
+        
+        # Calculate next run time
+        cron = croniter(cron_expression, now)
+        next_run = cron.get_next(datetime)
+        
+        # Ensure timezone info is attached
+        if next_run.tzinfo is None:
+            next_run = tz.localize(next_run)
+            
+        return next_run
     
     def _normalize_cron_expression(self, cron_expression: str) -> str:
         """

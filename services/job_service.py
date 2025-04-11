@@ -25,8 +25,12 @@ from typing import List, Optional, Dict, Any, Union
 import uuid
 import json
 import logging
+import pytz
+from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+
+from config import settings
 
 from models import ScheduledJob
 from schemas import JobCreate, JobUpdate, ScheduleConfig
@@ -197,8 +201,10 @@ class JobService:
                     logger.error(f"Job with identifier {job_id_or_identifier} not found when updating status")
                     return False
                 
-            from datetime import datetime
-            current_time = datetime.now()
+            # Get the configured timezone
+            tz = pytz.timezone(settings.TIMEZONE)
+            # Get current time with timezone info
+            current_time = datetime.now(tz)
             job.last_run = current_time
             
             # Update the next_run field based on the cron expression
