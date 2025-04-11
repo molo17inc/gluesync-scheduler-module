@@ -27,9 +27,12 @@ import os
 import ssl
 import json
 import uvicorn
+from datetime import datetime
+import pytz
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
+from fastapi.encoders import jsonable_encoder
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from api.router import router
@@ -47,6 +50,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Custom JSON encoder to handle datetime objects with timezone information
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            # Ensure datetime has timezone info
+            if obj.tzinfo is None:
+                # If no timezone info, use the configured timezone
+                tz = pytz.timezone(settings.TIMEZONE)
+                obj = tz.localize(obj)
+            # Format with timezone info
+            return obj.isoformat()
+        return super().default(obj)
+
+# Configure FastAPI to use the custom JSON encoder
 app = FastAPI(
     title="Gluesync Scheduler Module (aka Chronos)",
     description="REST API service for scheduling tasks in Gluesync. This module provides endpoints to create, manage, and execute scheduled jobs for Gluesync pipelines and entities.",
@@ -204,6 +221,36 @@ async def catch_exceptions_middleware(request: Request, call_next):
 # Include the API routers
 app.include_router(router, prefix="/api")
 app.include_router(pipeline_router, prefix="/api")
+
+# Configure FastAPI to use the custom JSON encoder for responses
+@app.middleware("http")
+async def add_json_encoder(request: Request, call_next):
+    response = await call_next(request)
+    
+    # Only modify JSON responses
+    if response.headers.get("content-type") == "application/json":
+        # Get the response body
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+        
+        # Decode and re-encode with our custom encoder
+        try:
+            data = json.loads(body.decode())
+            # Re-encode with our custom encoder to handle datetime objects properly
+            encoded_body = json.dumps(data, cls=CustomJSONEncoder).encode()
+            
+            # Create a new response with the properly encoded body
+            response = Response(
+                content=encoded_body,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.media_type
+            )
+        except Exception as e:
+            logger.error(f"Error in JSON encoding middleware: {str(e)}")
+    
+    return response
 
 # Add HTTPS redirect middleware if SSL is enabled
 if settings.SSL_ENABLED:
