@@ -275,6 +275,60 @@ Examples:
 - `0 0 * * 0` - Run once a week on Sunday at midnight
 - `0 0 1 * *` - Run once a month on the 1st at midnight
 
+#### Day of Week Mapping
+
+In cron expressions, days of the week are represented as numbers:
+
+| Day | Number |
+|-----|--------|
+| Sunday | 0 |
+| Monday | 1 |
+| Tuesday | 2 |
+| Wednesday | 3 |
+| Thursday | 4 |
+| Friday | 5 |
+| Saturday | 6 |
+
+#### Scheduling for Specific Days
+
+To schedule jobs for specific days of the week, you can use comma-separated values in the day of week field:
+
+- `0 8 * * 1,3,5` - Run at 8:00 AM on Monday, Wednesday, and Friday
+- `30 18 * * 1-5` - Run at 6:30 PM on weekdays (Monday through Friday)
+- `0 12 * * 0,6` - Run at 12:00 PM on weekends (Saturday and Sunday)
+
+#### Weekend Scheduling
+
+To schedule a job to run only on weekends, you can use either of these approaches:
+
+**Using Cron Expression:**
+
+```plaintext
+0 HH MM * * 0,6
+```
+
+Where `HH` is the hour (0-23) and `MM` is the minute (0-59).
+
+For example, to run a job every Saturday and Sunday at 8:30 AM:
+
+```plaintext
+30 8 * * 0,6
+```
+
+**Using User-Friendly Schedule:**
+
+```json
+{
+  "schedule": {
+    "days_of_week": ["saturday", "sunday"],
+    "hour": 8,
+    "minute": 30
+  }
+}
+```
+
+The system will automatically convert this to the correct cron expression (`30 8 * * 0,6`).
+
 ## License
 
 This project is dual-licensed under the following licenses:
