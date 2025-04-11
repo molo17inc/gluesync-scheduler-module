@@ -127,6 +127,83 @@ class JobService:
         logger.info(f"Generated cron expression: '{cron_expression}'")
         return cron_expression
     
+    def _extract_schedule_days(self, cron_expression: str) -> List[str]:
+        """
+        Extract the days of the week from a cron expression
+        
+        Args:
+            cron_expression: A valid cron expression
+            
+        Returns:
+            List[str]: List of days of the week in lowercase (e.g., ['monday', 'wednesday', 'friday'])
+        """
+        try:
+            # Parse the cron expression
+            parts = cron_expression.split()
+            if len(parts) != 5:
+                logger.warning(f"Invalid cron expression format: {cron_expression}")
+                return []
+                
+            day_of_week = parts[4]  # Fifth field is day of week (0-6)
+            
+            # Map cron day numbers to day names (lowercase for API consistency)
+            day_map = {
+                "0": "sunday",
+                "1": "monday",
+                "2": "tuesday",
+                "3": "wednesday",
+                "4": "thursday",
+                "5": "friday",
+                "6": "saturday"
+            }
+            
+            # If day of week is *, return all days
+            if day_of_week == "*":
+                return list(day_map.values())
+                
+            result = []
+            
+            # Handle comma-separated list of days
+            if "," in day_of_week:
+                days = day_of_week.split(",")
+                for day in days:
+                    if day in day_map:
+                        result.append(day_map[day])
+                    else:
+                        logger.warning(f"Unknown day format in cron expression: {day}")
+                        
+            # Handle range of days (e.g., 1-5 for Monday to Friday)
+            elif "-" in day_of_week:
+                start, end = day_of_week.split("-")
+                try:
+                    start_idx = int(start)
+                    end_idx = int(end)
+                    # Handle wrap-around (e.g., 5-1 for Friday to Monday)
+                    if start_idx <= end_idx:
+                        day_range = range(start_idx, end_idx + 1)
+                    else:
+                        day_range = list(range(start_idx, 7)) + list(range(0, end_idx + 1))
+                        
+                    for day_idx in day_range:
+                        day_key = str(day_idx)
+                        if day_key in day_map:
+                            result.append(day_map[day_key])
+                except ValueError:
+                    logger.warning(f"Invalid day range in cron expression: {day_of_week}")
+                    
+            # Handle single day
+            else:
+                if day_of_week in day_map:
+                    result.append(day_map[day_of_week])
+                else:
+                    logger.warning(f"Unknown day format in cron expression: {day_of_week}")
+                    
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error extracting days from cron expression '{cron_expression}': {str(e)}")
+            return []
+    
     def _process_job_data(self, job: ScheduledJob) -> ScheduledJob:
         """Process job data before returning it to the client"""
         if job is None:
@@ -141,6 +218,15 @@ class JobService:
                 logger.error(f"Error parsing entity_ids JSON for job {job.id}: {e}")
                 # If parsing fails, set to None rather than returning invalid data
                 job.entity_ids = None
+        
+        # Add schedule days array
+        if hasattr(job, 'cron_expression') and job.cron_expression:
+            try:
+                job.schedule_days = self._extract_schedule_days(job.cron_expression)
+                logger.debug(f"Added schedule days for job {job.id}: {job.schedule_days}")
+            except Exception as e:
+                logger.error(f"Error extracting schedule days for job {job.id}: {str(e)}")
+                job.schedule_days = []
                 
         return job
         
