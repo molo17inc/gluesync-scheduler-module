@@ -149,13 +149,11 @@ class Job(JobBase):
     last_run_error_time: Optional[datetime] = Field(None, description="Timestamp of the last error (null if no errors occurred)")
     next_run: Optional[datetime] = Field(None, description="Timestamp of the next scheduled execution")
     command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
-    timezone: str = Field(default=settings.TIMEZONE, description="Timezone used for all datetime fields")
     schedule_days: Optional[List[str]] = Field(None, description="Array of days when the job is scheduled to run (e.g., ['monday', 'wednesday', 'friday'])")
 
     class Config:
         from_attributes = True
         json_schema_extra = {
-            "timezone": settings.TIMEZONE,
             "example": {
                 "id": 1,
                 "name": "Daily entity backup",
@@ -175,7 +173,6 @@ class Job(JobBase):
                 "last_error_message": None,
                 "last_run_error_time": None,
                 "next_run": "2025-03-21T00:00:00+02:00",
-                "timezone": "Europe/Rome",
                 "schedule_days": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
             }
         }

@@ -287,10 +287,8 @@ class JobService:
                     logger.error(f"Job with identifier {job_id_or_identifier} not found when updating status")
                     return False
                 
-            # Get the configured timezone
-            tz = pytz.timezone(settings.TIMEZONE)
-            # Get current time with timezone info
-            current_time = datetime.now(tz)
+            # Get current time with timezone info using the configured timezone
+            current_time = datetime.now(pytz.timezone(settings.TIMEZONE))
             job.last_run = current_time
             
             # Update the next_run field based on the cron expression
