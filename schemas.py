@@ -21,12 +21,11 @@
  * Copyright (C) 2025 MOLO17. All rights reserved.
 """
 
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
-from typing import Optional, List, Union
-from pydantic import BaseModel, Field, validator, ConfigDict
-from enum import Enum
 import pytz
-
+from enum import Enum
+from pydantic import BaseModel, Field, validator, field_serializer, ConfigDict
 from config import settings
 
 from models import TaskType
@@ -150,6 +149,21 @@ class Job(JobBase):
     next_run: Optional[datetime] = Field(None, description="Timestamp of the next scheduled execution")
     command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
     schedule_days: Optional[List[str]] = Field(None, description="Array of days when the job is scheduled to run (e.g., ['monday', 'wednesday', 'friday'])")
+    
+    # Add serializer for datetime fields to include timezone information
+    @field_serializer('created_at', 'updated_at', 'last_run', 'last_successful_run', 'last_run_error_time', 'next_run')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        if dt is None:
+            return None
+            
+        # Ensure datetime has timezone info
+        if dt.tzinfo is None:
+            # If no timezone info, use the configured timezone
+            tz = pytz.timezone(settings.TIMEZONE)
+            dt = tz.localize(dt)
+            
+        # Format with timezone info, ensuring timezone is included
+        return dt.strftime('%Y-%m-%dT%H:%M:%S%z')
 
     class Config:
         from_attributes = True
