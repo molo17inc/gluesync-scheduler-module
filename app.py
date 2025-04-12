@@ -221,8 +221,8 @@ class JSONEncoder(json.JSONEncoder):
                 # If no timezone info, use the configured timezone
                 tz = pytz.timezone(settings.TIMEZONE)
                 obj = tz.localize(obj)
-            # Format with timezone info
-            return obj.isoformat()
+            # Format with timezone info, ensuring timezone is included
+            return obj.strftime('%Y-%m-%dT%H:%M:%S%z')
         return super().default(obj)
 
 # Override FastAPI's default JSON encoder
