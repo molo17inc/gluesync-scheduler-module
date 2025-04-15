@@ -228,14 +228,14 @@ class JobService:
                 logger.error(f"Error extracting schedule days for job {job.id}: {str(e)}")
                 job.schedule_days = []
         
-        # Add startTime with timezone information
+        # Add start_time with timezone information
         # Get current time with timezone info
         tz = pytz.timezone(settings.TIMEZONE)
         current_time = datetime.now(tz)
         
         # Format with timezone info - this field is required
-        job.startTime = current_time.strftime('%Y-%m-%dT%H:%M:%S%z')
-        logger.debug(f"Added startTime with timezone for job {job.id}: {job.startTime}")
+        job.start_time = current_time.strftime('%Y-%m-%dT%H:%M:%S%z')
+        logger.debug(f"Added start_time with timezone for job {job.id}: {job.start_time}")
                 
         return job
         
