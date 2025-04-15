@@ -149,6 +149,7 @@ class Job(JobBase):
     next_run: Optional[datetime] = Field(None, description="Timestamp of the next scheduled execution")
     command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
     schedule_days: Optional[List[str]] = Field(None, description="Array of days when the job is scheduled to run (e.g., ['monday', 'wednesday', 'friday'])")
+    startTime: str = Field(..., description="Current time with timezone information when the job data was retrieved", example="2025-04-14T23:19:46+0200")
     
     # Add serializer for datetime fields to include timezone information
     @field_serializer('created_at', 'updated_at', 'last_run', 'last_successful_run', 'last_run_error_time', 'next_run')
@@ -187,7 +188,8 @@ class Job(JobBase):
                 "last_error_message": None,
                 "last_run_error_time": None,
                 "next_run": "2025-03-21T00:00:00+02:00",
-                "schedule_days": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+                "schedule_days": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+                "startTime": "2025-04-14T23:19:46+0200"
             }
         }
 
