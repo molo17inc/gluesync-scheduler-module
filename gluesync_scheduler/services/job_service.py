@@ -240,6 +240,55 @@ class JobService:
                 detail=f"Error updating job: {str(e)}"
             )
 
+    def toggle_job_status(self, job_id: int, enabled: bool) -> Job:
+        """
+        Enable or disable a job
+        
+        Args:
+            job_id: The ID of the job to update
+            enabled: True to enable, False to disable
+            
+        Returns:
+            The updated job
+            
+        Raises:
+            HTTPException: If job not found or error updating
+        """
+        job = self.db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job with ID {job_id} not found"
+            )
+        
+        try:
+            # Update the job status
+            job.enabled = enabled
+            
+            # If enabling, create the cron job
+            if enabled:
+                command = self.cron_service.create_job(job)
+                job.command = command
+            # If disabling, delete the cron job
+            else:
+                self.cron_service.remove_job(job.cron_job_identifier)
+                # Ensure command is not NULL when disabling
+                if not job.command:
+                    job.command = "disabled"
+            
+            job.updated_at = datetime.utcnow()
+            self.db.commit()
+            self.db.refresh(job)
+            
+            return Job.from_orm(job)
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error updating job status: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error updating job status: {str(e)}"
+            )
+
     def delete_job(self, job_id: int) -> None:
         """
         Delete a job
@@ -257,15 +306,14 @@ class JobService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Job with ID {job_id} not found"
             )
-            
+        
         try:
-            # Remove from crontab
+            # Delete the cron job first
             self.cron_service.remove_job(db_job.cron_job_identifier)
             
-            # Delete from database
+            # Then delete from database
             self.db.delete(db_job)
             self.db.commit()
-            
         except Exception as e:
             self.db.rollback()
             logger.error(f"Error deleting job: {str(e)}")

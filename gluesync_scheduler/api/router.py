@@ -350,17 +350,62 @@ async def update_job(job_id: int = Path(..., description="The ID of the job to u
             )
 
 
+@router.patch("/{job_id}/status", response_model=Job, responses={
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponse,
+        "description": "Job not found"
+    },
+    status.HTTP_500_INTERNAL_SERVER_ERROR: {
+        "model": ErrorResponse,
+        "description": "Error updating job status"
+    }
+})
+def toggle_job_status(
+    job_id: int = Path(..., description="The ID of the job to update"),
+    enabled: bool = Body(..., description="True to enable, False to disable the job", embed=True),
+    db: Session = Depends(get_db)
+):
+    """
+    Enable or disable a scheduled job.
+    
+    ## Parameters
+    - **job_id**: The unique identifier of the job to update
+    - **enabled**: Boolean value to enable (true) or disable (false) the job
+    
+    ## Returns
+    The updated job object with all details
+    
+    ## Example Request
+    ```json
+    {
+      "enabled": true
+    }
+    ```
+    
+    ## Errors
+    - **404**: Job with the specified ID was not found
+    - **500**: Server error during status update
+    """
+    job_service = JobService(db)
+    return job_service.toggle_job_status(job_id, enabled)
+
+
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT, responses={
-    status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Job not found"},
-    status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse, "description": "Server error during job deletion"}
-}, summary="Delete a scheduled job")
-async def delete_job(job_id: int = Path(..., description="The ID of the job to delete"), db: Session = Depends(get_db)):
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponse,
+        "description": "Job not found"
+    },
+    status.HTTP_500_INTERNAL_SERVER_ERROR: {
+        "model": ErrorResponse,
+        "description": "Error deleting job"
+    }
+})
+def delete_job(job_id: int = Path(..., description="The ID of the job to delete"), db: Session = Depends(get_db)):
     """
     Delete a scheduled job.
     
     ## Parameters
     - **job_id**: The unique identifier of the job to delete
-    
     ## Returns
     No content (204) on successful deletion
     
