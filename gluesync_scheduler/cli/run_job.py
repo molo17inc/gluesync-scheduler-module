@@ -21,18 +21,8 @@
  * Copyright (C) 2025 MOLO17. All rights reserved.
 """
 
-from database import Base, engine
-
-# Import all models
-from models import ScheduledJob
-
-
-def init_db():
-    """Initialize the database by creating all tables."""
-    print("Creating database tables...")
-    Base.metadata.create_all(bind=engine)
-    print("Database tables created successfully!")
-
+import sys
+from gluesync_scheduler.cli.job_runner import main
 
 if __name__ == "__main__":
-    init_db()
+    main()

@@ -22,28 +22,28 @@ echo "  Current directory: $(pwd)" >> /app/logs/job_wrapper.log
 
 # Check if database file exists
 DB_FILE=${DATA_DIR}/scheduler.db
-if [ -f "${DB_FILE}" ]; then
-    echo "Database file exists at ${DB_FILE}" >> /app/logs/job_wrapper.log
-    echo "Database file size: $(ls -lh ${DB_FILE} | awk '{print $5}')" >> /app/logs/job_wrapper.log
-    echo "Database file permissions: $(ls -la ${DB_FILE} | awk '{print $1}')" >> /app/logs/job_wrapper.log
-    echo "Database file owner: $(ls -la ${DB_FILE} | awk '{print $3}')" >> /app/logs/job_wrapper.log
-else
-    echo "Database file does NOT exist at ${DB_FILE}" >> /app/logs/job_wrapper.log
-    echo "Creating empty database directory" >> /app/logs/job_wrapper.log
+if [ ! -f "${DB_FILE}" ]; then
+    echo "Database file does not exist at ${DB_FILE}, creating directory" >> /app/logs/job_wrapper.log
     mkdir -p $(dirname ${DB_FILE})
-    touch ${DB_FILE}
-    echo "Created empty database file" >> /app/logs/job_wrapper.log
 fi
 
-# Run the job_runner.py script with the job identifier
-echo "Executing: python /app/job_runner.py \"$1\"" >> /app/logs/job_wrapper.log
-python /app/job_runner.py "$1" 2>&1 | tee -a /app/logs/job_wrapper.log
-RESULT=${PIPESTATUS[0]}
+# Get the directory of this script
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Log end of execution
-echo "$(date) - Finished job execution for $1 with exit code ${RESULT}" >> /app/logs/job_wrapper.log
-echo "===== JOB EXECUTION END =====" >> /app/logs/job_wrapper.log
-echo "" >> /app/logs/job_wrapper.log
+# Change to the script directory
+cd "$SCRIPT_DIR"
 
-# Return the exit code from the Python script
-exit ${RESULT}
+# Create logs directory if it doesn't exist
+mkdir -p "$SCRIPT_DIR/logs"
+
+# Run the job runner with the provided arguments using the module path
+python3 -m gluesync_scheduler.cli.job_runner "$@" 2>&1 | tee -a "$SCRIPT_DIR/logs/run_job.log"
+
+# Get the exit code of the job runner
+EXIT_CODE=${PIPESTATUS[0]}
+
+# Log the exit code
+echo "$(date) - Job $1 completed with exit code $EXIT_CODE" >> "$SCRIPT_DIR/logs/run_job.log"
+
+# Exit with the same code as the job runner
+exit $EXIT_CODE
