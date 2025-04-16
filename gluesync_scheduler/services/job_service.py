@@ -130,7 +130,9 @@ class JobService:
                 with_snapshot=job_data.with_snapshot,
                 enabled=job_data.enabled,
                 created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                updated_at=datetime.utcnow(),
+                # Set a placeholder command to satisfy NOT NULL constraint
+                command="pending"
             )
             
             # Generate a unique identifier for the cron job
@@ -212,6 +214,12 @@ class JobService:
             else:
                 # Remove from crontab if disabled
                 self.cron_service.remove_job(db_job.cron_job_identifier)
+                
+                # Ensure command is not NULL when disabled
+                if db_job.command is None:
+                    db_job.command = "disabled"
+                    self.db.commit()
+                    self.db.refresh(db_job)
             
             return Job.from_orm(db_job)
             

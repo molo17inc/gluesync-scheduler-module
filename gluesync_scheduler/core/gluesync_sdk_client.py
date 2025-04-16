@@ -129,8 +129,13 @@ class GluesyncSDKClient:
         
         # Create the Gluesync client
         try:
+            # Check if the license file exists
+            if not os.path.exists(settings.GLUESYNC_LICENSE_FILE):
+                logger.warning(f"License file not found: {settings.GLUESYNC_LICENSE_FILE}")
+                
+            # Initialize the client with the correct parameters
             self._client = GluesyncClient(
-                license_file=settings.GLUESYNC_LICENSE_FILE,
+                license_file_path=settings.GLUESYNC_LICENSE_FILE,
                 module_tag=settings.GLUESYNC_MODULE_TAG,
                 **ssl_config
             )
