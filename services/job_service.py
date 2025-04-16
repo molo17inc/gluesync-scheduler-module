@@ -35,6 +35,7 @@ from config import settings
 from models import ScheduledJob
 from schemas import JobCreate, JobUpdate, ScheduleConfig
 from services.cron_service import CronService
+from play_pause import CoreHubClient
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -374,6 +375,19 @@ class JobService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Job with name '{job_data.name}' already exists"
             )
+            
+        # Verify CoreHub connectivity before scheduling the job
+        try:
+            corehub_client = CoreHubClient()
+            if not corehub_client.base_url:
+                # Log a warning but don't prevent job creation
+                logger.warning(f"Job '{job_data.name}' is being scheduled but CoreHub URL is unknown. "
+                              f"This may cause job execution failures. Please ensure CoreHub connectivity "
+                              f"before the job runs.")
+        except Exception as e:
+            # Log the error but don't prevent job creation
+            logger.error(f"Error checking CoreHub connectivity when scheduling job '{job_data.name}': {str(e)}. "
+                         f"This may cause job execution failures.")
         
         # Handle entity_ids list by converting to JSON string for storage
         if 'entity_ids' in job_dict and job_dict['entity_ids'] is not None:
@@ -427,6 +441,19 @@ class JobService:
             
         # Update job fields from the request
         update_data = job_data.dict(exclude_unset=True)
+        
+        # Verify CoreHub connectivity before updating the job
+        try:
+            corehub_client = CoreHubClient()
+            if not corehub_client.base_url:
+                # Log a warning but don't prevent job update
+                logger.warning(f"Job '{job.name}' (ID: {job.id}) is being updated but CoreHub URL is unknown. "
+                              f"This may cause job execution failures. Please ensure CoreHub connectivity "
+                              f"before the job runs.")
+        except Exception as e:
+            # Log the error but don't prevent job update
+            logger.error(f"Error checking CoreHub connectivity when updating job '{job.name}' (ID: {job.id}): {str(e)}. "
+                         f"This may cause job execution failures.")
         
         # Handle schedule conversion to cron expression if provided
         if job_data.schedule:

@@ -114,6 +114,7 @@ class JobUpdate(BaseModel):
     """Model for updating an existing job (all fields are optional)"""
     name: Optional[str] = Field(None, description="Updated name of the job", example="Updated daily entity backup")
     description: Optional[str] = Field(None, description="Updated description of the job", example="Updated description for the daily backup")
+    task_type: Optional[TaskType] = Field(None, description="Updated type of task to perform (use lowercase values in API requests)")
     schedule: Optional[ScheduleConfig] = Field(None, description="Updated user-friendly schedule configuration")
     cron_expression: Optional[str] = Field(None, description="Updated cron expression. Not required if schedule is provided.", example="0 0 * * *")
     pipeline_id: Optional[str] = Field(None, description="Updated pipeline ID", example="pipeline-123")
@@ -126,6 +127,7 @@ class JobUpdate(BaseModel):
             "example": {
                 "name": "Updated daily entity backup",
                 "description": "Updated description",
+                "task_type": "pipeline_stop",
                 "schedule": {
                     "days_of_week": ["monday", "wednesday", "friday"],
                     "hour": 8,

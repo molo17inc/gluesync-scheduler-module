@@ -242,6 +242,7 @@ def update_job(job_id: int = Path(..., description="The ID of the job to update"
               job_data: JobUpdate = Body(..., description="Job data to update", example={
                   "name": "Updated job schedule",
                   "description": "Now runs on weekends at midnight",
+                  "task_type": "pipeline_stop",
                   "schedule": {
                       "days_of_week": ["saturday", "sunday"],
                       "hour": 0,
@@ -260,6 +261,7 @@ def update_job(job_id: int = Path(..., description="The ID of the job to update"
     All fields are optional. Only specified fields will be updated:
     - **name**: Updated name of the job
     - **description**: Updated description of the job
+    - **task_type**: Updated type of task to perform (e.g., "pipeline_start", "pipeline_stop", "entity_snapshot")
     - **schedule**: Updated user-friendly schedule configuration
       - **days_of_week**: Array of days when the job should run (e.g., ["monday", "wednesday", "friday"])
       - **hour**: Hour of the day (0-23)
@@ -278,6 +280,7 @@ def update_job(job_id: int = Path(..., description="The ID of the job to update"
     {
       "name": "Updated job schedule",
       "description": "Now runs on weekends at midnight",
+      "task_type": "pipeline_stop",
       "schedule": {
         "days_of_week": ["saturday", "sunday"],
         "hour": 0,
