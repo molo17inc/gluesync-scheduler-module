@@ -110,14 +110,13 @@ COPY ./README.md .
 # Copy the restructured package
 COPY ./gluesync_scheduler ./gluesync_scheduler
 
-# Copy main entry points
+# Copy main entry points and scripts
 COPY ./main.py .
 COPY ./run_scheduler.py .
 COPY ./run_job.sh .
 
 # Make scripts executable
 RUN chmod +x /app/entrypoint.sh && \
-    chmod +x /app/job_runner.py && \
     chmod +x /app/run_job.sh
 
 # Install SDK dependencies one by one to avoid issues
