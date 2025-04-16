@@ -120,7 +120,7 @@ Additional environment variables for the Gluesync SDK integration:
 | `GLUESYNC_KEYSTORE_PATH` | Path to JKS keystore file for SSL | `None` |
 | `GLUESYNC_KEYSTORE_PASSWORD` | Password for JKS keystore | `None` |
 
-> **Note**: The module identifier (`GLUESYNC_MODULE_TAG`) is hardcoded as `scheduler-module` and cannot be changed externally.
+> **Note**: The module identifier (`GLUESYNC_MODULE_TAG`) is hardcoded as `chronos` and cannot be changed externally.
 
 You can set these in a `.env` file in the project root.
 
@@ -141,7 +141,7 @@ To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with
 
    ```text
    GLUESYNC_LICENSE_FILE=gs-license.dat
-   GLUESYNC_MODULE_TAG=scheduler-module
+   GLUESYNC_MODULE_TAG=chronos
    SSL_ENABLED=False
    GLUESYNC_SECURITY_CONFIG=/path/to/security-config.json
    DB_URL=sqlite:///./data/test_scheduler.db

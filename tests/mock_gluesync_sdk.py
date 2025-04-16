@@ -185,7 +185,7 @@ class GluesyncClient:
         self.host = host or "localhost"
         self.port = port or 8080
         self.use_ssl = use_ssl
-        self.module_tag = module_tag or "scheduler-module"
+        self.module_tag = module_tag or "chronos"
         self.connected = False
         self.token = "mock-token-123456"
         logger.info("Mock GluesyncClient created with host=%s, port=%s, use_ssl=%s, module_tag=%s", 

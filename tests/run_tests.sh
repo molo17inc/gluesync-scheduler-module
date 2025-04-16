@@ -31,7 +31,7 @@ fi
 
 # Set up environment variables for testing
 export GLUESYNC_LICENSE_FILE=./tests/gluesync/data/gs-license.dat
-export GLUESYNC_MODULE_TAG=scheduler-module
+export GLUESYNC_MODULE_TAG=chronos
 export SSL_ENABLED=False
 export GLUESYNC_SECURITY_CONFIG=./tests/gluesync/data/security-config.json
 export DB_URL=sqlite:///./tests/data/test_scheduler.db

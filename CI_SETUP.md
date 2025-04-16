@@ -13,7 +13,7 @@ The following CI/CD variables need to be set in the GitLab project settings:
 ### Docker Registry Variables
 
 - `DOCKER_REGISTRY`: The Docker registry URL (e.g., `registry.gitlab.com/molo17/gluesync`).
-- `APP_NAME`: The name of the application (e.g., `scheduler-module`).
+- `APP_NAME`: The name of the application (e.g., `chronos`).
 - `CI_REGISTRY_PASSWORD`: The password for the Docker registry.
 
 ## Setting Up CI/CD Variables

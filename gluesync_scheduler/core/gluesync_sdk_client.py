@@ -160,20 +160,28 @@ class GluesyncSDKClient:
                     
                     # Get CoreHub URL from the connection
                     try:
-                        # The CoreHub URL is already discovered during the connection process
-                        # We can extract it from the WebSocket URL
-                        if hasattr(self._client, '_connection') and self._client._connection and self._client._connection.url:
-                            ws_url = self._client._connection.url
-                            # Parse the WebSocket URL to get the host and port
-                            # ws://172.18.0.2:1717/ext-module -> http://172.18.0.2:1717
-                            parsed_url = urlparse(ws_url)
-                            host = parsed_url.hostname
-                            port = parsed_url.port
-                            use_ssl = parsed_url.scheme == 'wss'
+                        # First try to get host directly from the client
+                        if hasattr(self._client, '_host') and self._client._host:
+                            host = self._client._host
+                            port = getattr(self._client, '_port', 1717)  # Default to 1717 if not available
+                            use_ssl = getattr(self._client, '_use_ssl', False)
                             
                             if host and port:
                                 self._corehub_url = self._build_corehub_url(host, port, use_ssl)
                                 logger.info(f"Discovered CoreHub URL: {self._corehub_url}")
+                        # If that fails, try to get it from the discovery result
+                        elif hasattr(self._client, '_discovery_result') and self._client._discovery_result:
+                            host = self._client._discovery_result.get('host')
+                            port = self._client._discovery_result.get('port', 1717)
+                            use_ssl = self._client._discovery_result.get('ssl', False)
+                            
+                            if host and port:
+                                self._corehub_url = self._build_corehub_url(host, port, use_ssl)
+                                logger.info(f"Discovered CoreHub URL from discovery result: {self._corehub_url}")
+                        # If all else fails, use the default CoreHub URL from settings if available
+                        elif settings.CORE_HUB_URL:
+                            self._corehub_url = settings.CORE_HUB_URL
+                            logger.info(f"Using CoreHub URL from settings: {self._corehub_url}")
                     except Exception as e:
                         logger.error(f"Error during CoreHub discovery: {str(e)}")
                     
