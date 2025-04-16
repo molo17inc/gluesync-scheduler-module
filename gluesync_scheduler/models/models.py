@@ -61,3 +61,4 @@ class ScheduledJob(Base):
     last_successful_run = Column(DateTime(timezone=True), nullable=True)
     last_error_message = Column(Text, nullable=True)
     last_run_error_time = Column(DateTime(timezone=True), nullable=True)
+    start_time = Column(String, nullable=True)

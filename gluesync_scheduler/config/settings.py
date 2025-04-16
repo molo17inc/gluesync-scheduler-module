@@ -49,6 +49,9 @@ class Settings:
     DATA_DIR = os.getenv('DATA_DIR', './data')
     DB_URL = os.getenv('DB_URL', f'sqlite:///{DATA_DIR}/scheduler.db')
     
+    # Timezone settings
+    TIMEZONE = os.getenv('TIMEZONE', 'Europe/Rome')
+    
     # SSL settings
     SSL_ENABLED = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
     

@@ -24,8 +24,11 @@
 import json
 import logging
 import uuid
+import pytz
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any, Union
+
+from gluesync_scheduler.config.settings import settings
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, or_
@@ -119,6 +122,10 @@ class JobService:
             HTTPException: If there's an error creating the job
         """
         try:
+            # Get current time with timezone for start_time
+            current_time = datetime.now(pytz.timezone(settings.TIMEZONE))
+            formatted_time = current_time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            
             # Create the database record
             db_job = ScheduledJob(
                 name=job_data.name,
@@ -132,7 +139,9 @@ class JobService:
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
                 # Set a placeholder command to satisfy NOT NULL constraint
-                command="pending"
+                command="pending",
+                # Add start_time field
+                start_time=formatted_time
             )
             
             # Generate a unique identifier for the cron job

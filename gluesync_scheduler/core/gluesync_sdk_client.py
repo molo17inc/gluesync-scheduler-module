@@ -158,14 +158,18 @@ class GluesyncSDKClient:
                     self._is_initialized = True
                     logger.info("Gluesync SDK client initialized successfully")
                     
-                    # Get CoreHub URL from discovery
+                    # Get CoreHub URL from the connection
                     try:
-                        discovery_result = await self._client.discover_corehub()
-                        if discovery_result and 'corehub' in discovery_result:
-                            corehub_info = discovery_result['corehub']
-                            host = corehub_info.get('host')
-                            port = corehub_info.get('port')
-                            use_ssl = corehub_info.get('ssl', False)
+                        # The CoreHub URL is already discovered during the connection process
+                        # We can extract it from the WebSocket URL
+                        if hasattr(self._client, '_connection') and self._client._connection and self._client._connection.url:
+                            ws_url = self._client._connection.url
+                            # Parse the WebSocket URL to get the host and port
+                            # ws://172.18.0.2:1717/ext-module -> http://172.18.0.2:1717
+                            parsed_url = urlparse(ws_url)
+                            host = parsed_url.hostname
+                            port = parsed_url.port
+                            use_ssl = parsed_url.scheme == 'wss'
                             
                             if host and port:
                                 self._corehub_url = self._build_corehub_url(host, port, use_ssl)
