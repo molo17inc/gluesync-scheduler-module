@@ -200,7 +200,7 @@ def execute_job(job: ScheduledJob) -> bool:
                 logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
         
         # Build the base URL
-        base_url = f"http://{settings.HOST}:{settings.PORT}/api"
+        base_url = f"http://127.0.0.1:{settings.PORT}/api"
         
         # Determine the endpoint based on task type
         if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
