@@ -208,43 +208,46 @@ class SchedulerService:
             with open(log_file, 'a') as f:
                 f.write(f"[{datetime.now()}] Running job {job_id}: {job_name}\n")
             
-            # Call the API to run the job
-            api_url = f"http://localhost:{settings.PORT}/api/jobs/{job_id}/run"
-            
+            # DIRECTLY execute the job logic instead of making an HTTP request
+            # This avoids any potential recursion issues with JSON serialization
             logger.info(f"Executing scheduled job {job_id}: {job_name}")
-            logger.info(f"API URL: {api_url}")
             
-            # Make the API request with error handling
+            # Import here to avoid circular imports
+            from gluesync_scheduler.db.database import get_db
+            from gluesync_scheduler.services.job_service import JobService
+            
+            # Get a database connection
+            db = next(get_db())
+            
             try:
-                response = requests.post(
-                    api_url,
-                    headers={"Content-Type": "application/json"},
-                    timeout=30
-                )
+                # Create job service and run the job directly
+                job_service = JobService(db)
+                success, message, details = job_service.run_job(job_id)
                 
-                # Log the response
+                # Log the results without serializing the entire response
                 with open(log_file, 'a') as f:
-                    f.write(f"[{datetime.now()}] Response status: {response.status_code}\n")
+                    f.write(f"[{datetime.now()}] Job execution {'succeeded' if success else 'failed'}\n")
+                    f.write(f"Message: {message}\n")
                     
-                    # Log a truncated preview of the response to avoid large logs
-                    response_preview = response.text[:200] + '...' if len(response.text) > 200 else response.text
-                    f.write(f"Response preview: {response_preview}\n")
+                    # Only log a limited set of details to avoid recursion issues
+                    if isinstance(details, dict):
+                        safe_details = {
+                            k: str(v)[:100] if not isinstance(v, (int, float, bool)) else v 
+                            for k, v in details.items()
+                        }
+                        f.write(f"Details: {safe_details}\n")
                 
-                # Check if the request was successful
-                if response.status_code not in [200, 201, 202]:
-                    error_message = f"Error executing job {job_id}: HTTP {response.status_code}"
-                    
-                    # Log to error file with truncated response
+                # Log success or failure
+                if success:
+                    logger.info(f"Successfully executed job {job_id}: {message}")
+                else:
+                    error_message = f"Error in job {job_id}: {message}"
                     with open(error_file, 'a') as f:
                         f.write(f"[{datetime.now()}] {error_message}\n")
-                        f.write(f"Response preview: {response_preview}\n")
-                    
                     logger.error(error_message)
-                else:
-                    logger.info(f"Successfully executed job {job_id} with status {response.status_code}")
             
-            except requests.exceptions.RequestException as e:
-                error_message = f"HTTP request failed when executing job {job_id}: {str(e)}"
+            except Exception as e:
+                error_message = f"Exception occurred while executing job {job_id}: {str(e)}"
                 logger.error(error_message)
                 
                 # Log to error file
