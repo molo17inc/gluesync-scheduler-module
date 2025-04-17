@@ -464,9 +464,16 @@ class CoreHubClient:
                 self.base_url = CoreHubClient._shared_base_url
                 logger.debug(f"Using shared CoreHub URL in start_pipeline: {self.base_url}")
             else:
-                # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
-                logger.error("CoreHub URL not available - start_pipeline cannot proceed")
-                return False
+                # Import settings directly here to avoid any variable access issues
+                from gluesync_scheduler.config.settings import settings
+                
+                if settings.CORE_HUB_URL:
+                    self.base_url = settings.CORE_HUB_URL
+                    logger.debug(f"Using settings CoreHub URL in start_pipeline: {self.base_url}")
+                else:
+                    # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
+                    logger.error("CoreHub URL not available - start_pipeline cannot proceed")
+                    return False
             
         path = f'/pipelines/{pipeline_id}/commands/lifecycle/start'
         body = {}
@@ -494,9 +501,16 @@ class CoreHubClient:
                 self.base_url = CoreHubClient._shared_base_url
                 logger.debug(f"Using shared CoreHub URL in stop_pipeline: {self.base_url}")
             else:
-                # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
-                logger.error("CoreHub URL not available - stop_pipeline cannot proceed")
-                return False
+                # Import settings directly here to avoid any variable access issues
+                from gluesync_scheduler.config.settings import settings
+                
+                if settings.CORE_HUB_URL:
+                    self.base_url = settings.CORE_HUB_URL
+                    logger.debug(f"Using settings CoreHub URL in stop_pipeline: {self.base_url}")
+                else:
+                    # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
+                    logger.error("CoreHub URL not available - stop_pipeline cannot proceed")
+                    return False
             
         path = f'/pipelines/{pipeline_id}/commands/lifecycle/stop'
         
