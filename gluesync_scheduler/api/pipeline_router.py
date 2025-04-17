@@ -193,14 +193,9 @@ async def play_pipeline(
     except Exception as e:
         logger.error(f"Error starting pipeline: {str(e)}")
         
-        # Update job status with error if cron_job_identifier is provided
+        # Log job error if cron_job_identifier is provided
         if cron_job_identifier:
-            try:
-                from gluesync_scheduler.cli.job_runner import update_job_status
-                update_job_status(cron_job_identifier, False, str(e))
-                logger.info(f"Updated job status with error for {cron_job_identifier}")
-            except Exception as update_error:
-                logger.error(f"Error updating job status: {str(update_error)}")
+            logger.error(f"Job failed for {cron_job_identifier}: {str(e)}")
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -281,16 +276,6 @@ async def pause_pipeline(
                 "pipeline_id": pipeline_id
             }
         
-        # Update job status if cron_job_identifier is provided
-        if cron_job_identifier:
-            from gluesync_scheduler.cli.job_runner import update_job_status
-            
-            try:
-                update_job_status(cron_job_identifier, True)
-                logger.info(f"Updated job status for {cron_job_identifier}")
-            except Exception as e:
-                logger.error(f"Error updating job status: {str(e)}")
-        
         # Return a simplified response to avoid recursion issues
         return {
             "success": True,
@@ -300,14 +285,9 @@ async def pause_pipeline(
     except Exception as e:
         logger.error(f"Error stopping pipeline: {str(e)}")
         
-        # Update job status with error if cron_job_identifier is provided
+        # Log job error if cron_job_identifier is provided
         if cron_job_identifier:
-            try:
-                from gluesync_scheduler.cli.job_runner import update_job_status
-                update_job_status(cron_job_identifier, False, str(e))
-                logger.info(f"Updated job status with error for {cron_job_identifier}")
-            except Exception as update_error:
-                logger.error(f"Error updating job status: {str(update_error)}")
+            logger.error(f"Job failed for {cron_job_identifier}: {str(e)}")
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -398,16 +378,6 @@ async def resync_pipeline(
                 "snapshot_write_method": snapshot_write_method
             }
         
-        # Update job status if cron_job_identifier is provided
-        if cron_job_identifier:
-            from gluesync_scheduler.cli.job_runner import update_job_status
-            
-            try:
-                update_job_status(cron_job_identifier, True)
-                logger.info(f"Updated job status for {cron_job_identifier}")
-            except Exception as e:
-                logger.error(f"Error updating job status: {str(e)}")
-        
         # Return a simplified response to avoid recursion issues
         return {
             "success": True,
@@ -417,14 +387,9 @@ async def resync_pipeline(
     except Exception as e:
         logger.error(f"Error resyncing pipeline: {str(e)}")
         
-        # Update job status with error if cron_job_identifier is provided
+        # Log job error if cron_job_identifier is provided
         if cron_job_identifier:
-            try:
-                from gluesync_scheduler.cli.job_runner import update_job_status
-                update_job_status(cron_job_identifier, False, str(e))
-                logger.info(f"Updated job status with error for {cron_job_identifier}")
-            except Exception as update_error:
-                logger.error(f"Error updating job status: {str(update_error)}")
+            logger.error(f"Job failed for {cron_job_identifier}: {str(e)}")
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

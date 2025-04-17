@@ -23,6 +23,7 @@
 
 import json
 import logging
+import requests
 import uuid
 import pytz
 from datetime import datetime
@@ -318,7 +319,7 @@ class JobService:
             # Log job execution
             logger.info(f"Running job {job_id}: {db_job.name}")
             
-            # Execute the job logic directly instead of running the command
+            # Execute the job logic
             success, message, details = self._execute_job_logic(db_job)
             
             # Update job status based on execution result
@@ -326,18 +327,19 @@ class JobService:
                 db_job.last_successful_run = now
                 db_job.last_error_message = None
                 db_job.last_run_error_time = None
+                logger.info(f"Job {job_id} executed successfully: {message}")
             else:
                 db_job.last_error_message = message
                 db_job.last_run_error_time = now
+                logger.error(f"Job {job_id} execution failed: {message}")
             
-            # Save changes to database
-            db_job.updated_at = now
+            # Save the updated job status
             self.db.commit()
             
-            # Return a very simple dictionary to avoid recursion issues
+            # Return a simple dictionary to avoid recursion issues
             return {
                 "success": success,
-                "message": "Job executed successfully" if success else "Job execution failed",
+                "message": message,
                 "job_id": job_id
             }
         except Exception as e:
