@@ -109,20 +109,17 @@ async def startup_event():
         await gluesync_sdk_client.initialize()
         logger.info("Gluesync SDK client initialized successfully")
         
-        # Update CoreHub URL from SDK if discovered
-        if gluesync_sdk_client.corehub_url:
-            settings.update_corehub_url(gluesync_sdk_client.corehub_url)
-            logger.info(f"Updated CoreHub URL from SDK: {settings.CORE_HUB_URL}")
-        elif hasattr(gluesync_sdk_client, '_client') and gluesync_sdk_client._client:
-            # Try to extract CoreHub URL from the client's connection
-            if hasattr(gluesync_sdk_client._client, '_host') and gluesync_sdk_client._client._host:
-                host = gluesync_sdk_client._client._host
-                port = getattr(gluesync_sdk_client._client, '_port', 1717)
-                use_ssl = getattr(gluesync_sdk_client._client, '_use_ssl', False)
-                protocol = 'https' if use_ssl else 'http'
-                corehub_url = f"{protocol}://{host}:{port}"
-                settings.update_corehub_url(corehub_url)
-                logger.info(f"Extracted CoreHub URL from client connection: {settings.CORE_HUB_URL}")
+        # The CoreHub URL is now automatically extracted and stored in the settings
+        # by the SDK client's _on_connected method. We just need to log it here.
+        if settings.CORE_HUB_URL:
+            logger.info(f"CoreHub URL is set to: {settings.CORE_HUB_URL}")
+        else:
+            logger.warning("CoreHub URL is not set yet. It will be extracted when the SDK client connects.")
+            
+            # Create a CoreHubClient instance to initialize the singleton
+            from gluesync_scheduler.core.play_pause import CoreHubClient
+            client = CoreHubClient()
+            logger.info("Initialized CoreHubClient singleton for later use")
     except Exception as e:
         logger.error(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("The application will continue, but some functionality may be limited")

@@ -336,11 +336,13 @@ class JobService:
             # Save the updated job status
             self.db.commit()
             
-            # Return a simple dictionary to avoid recursion issues
+            # Return an extremely minimal response structure to avoid any possible recursion
+            # Only use primitive types (strings, numbers, booleans)
             return {
                 "success": success,
                 "message": message,
-                "job_id": job_id
+                "job_id": job_id,
+                "timestamp": str(datetime.utcnow())
             }
         except Exception as e:
             self.db.rollback()
@@ -365,25 +367,20 @@ class JobService:
             import json
             data = json.loads(response_text)
             
-            # Create a new simple dictionary with only primitive types
-            result = {}
-            
-            # Only include simple values to avoid recursion
-            if isinstance(data, dict):
-                for key, value in data.items():
-                    if isinstance(value, (str, int, float, bool, type(None))):
-                        result[key] = value
-                    else:
-                        # Convert complex values to strings
-                        result[key] = str(value)[:100]  # Limit string length
-            else:
-                # If not a dict, just return a simple message
-                result = {"data": str(data)[:100]}
-                
-            return result
-        except Exception:
-            # If parsing fails, return a simple string
-            return {"text": str(response_text)[:100]}
+            # Don't even attempt to process the response structure
+            # Just return a minimal dictionary with status information
+            return {
+                "status": "success",
+                "response_size": len(response_text),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            # If parsing fails, return a simple error message
+            return {
+                "status": "error",
+                "error": str(e)[:100],
+                "timestamp": datetime.utcnow().isoformat()
+            }
     
     def _execute_job_logic(self, job: ScheduledJob) -> tuple[bool, str, dict]:
         """
@@ -465,12 +462,14 @@ class JobService:
                 # This avoids any potential recursion issues
                 success_msg = f"Job executed successfully with status code {response.status_code}"
                 logger.info(success_msg)
+                # Return a minimal response with just primitive types
                 return True, success_msg, {"status_code": response.status_code}
             else:
                 # For error responses, just log the status code and a truncated response
                 truncated_response = response.text[:100] + '...' if len(response.text) > 100 else response.text
                 error_msg = f"Job execution failed with status {response.status_code}"
                 logger.error(f"{error_msg}: {truncated_response}")
+                # Return a minimal response with just primitive types
                 return False, error_msg, {"status_code": response.status_code}
                 
         except Exception as e:

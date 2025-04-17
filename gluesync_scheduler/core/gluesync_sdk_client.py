@@ -258,6 +258,31 @@ class GluesyncSDKClient:
         self._token = token
         logger.info("Connected to Gluesync server")
         logger.info(f"Received token: {token[:10]}...")
+        
+        # Extract and store the CoreHub URL from the client's connection
+        try:
+            if self._client and hasattr(self._client, '_connection') and self._client._connection:
+                conn = self._client._connection
+                if hasattr(conn, '_ws') and conn._ws and hasattr(conn._ws, 'url'):
+                    ws_url = conn._ws.url
+                    logger.info(f"WebSocket URL: {ws_url}")
+                    
+                    # Parse the WebSocket URL to extract host and port
+                    parsed_url = urlparse(ws_url)
+                    host = parsed_url.hostname
+                    port = parsed_url.port or 1717
+                    use_ssl = parsed_url.scheme == 'wss'
+                    
+                    # Build and store the CoreHub URL
+                    self._corehub_url = self._build_corehub_url(host, port, use_ssl)
+                    logger.info(f"Extracted CoreHub URL: {self._corehub_url}")
+                    
+                    # Update settings
+                    from gluesync_scheduler.config.settings import settings
+                    settings.update_corehub_url(self._corehub_url)
+                    logger.info(f"Updated CoreHub URL in settings: {settings.CORE_HUB_URL}")
+        except Exception as e:
+            logger.error(f"Error extracting CoreHub URL: {str(e)}")
     
     def _on_disconnected(self, reason):
         """
