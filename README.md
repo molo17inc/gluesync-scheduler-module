@@ -11,6 +11,7 @@ A backend service that provides a set of REST APIs for scheduling and managing c
 
 - **Comprehensive REST API**: Full CRUD operations for scheduled jobs
 - **Flexible Job Scheduling**: Choose between user-friendly schedule format or standard cron expressions
+- **In-Memory Job Scheduling**: Uses APScheduler for reliable job execution in containerized environments
 - **Multiple Task Types**:
   - Start/stop entities
   - Start/stop entire pipelines
@@ -23,8 +24,19 @@ A backend service that provides a set of REST APIs for scheduling and managing c
 ## Prerequisites
 
 - Python 3.8+
-- Access to crontab (for Unix-based systems)
 - Gluesync Core Hub instance
+
+## Job Scheduling Architecture
+
+The module uses APScheduler for reliable in-memory job scheduling, which is particularly well-suited for containerized environments:
+
+- **In-Memory Scheduler**: Jobs are stored and executed in memory, eliminating the need for system crontab access
+- **Persistent Storage**: Job definitions are stored in the database for persistence across restarts
+- **Automatic Recovery**: On application startup, all enabled jobs are automatically loaded from the database into the scheduler
+- **Timezone Support**: All jobs respect the configured timezone setting
+- **Detailed Logging**: Each job execution is logged with timestamps and results
+
+This architecture ensures that jobs continue to run reliably even in containerized environments where traditional cron services may not be available or may lose state between container restarts.
 
 ## Project Structure
 

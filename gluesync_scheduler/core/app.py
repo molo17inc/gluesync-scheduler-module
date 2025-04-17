@@ -40,6 +40,10 @@ from gluesync_scheduler.api.router import router
 from gluesync_scheduler.api.pipeline_router import router as pipeline_router
 from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+from gluesync_scheduler.services.scheduler_service import scheduler_service
+from gluesync_scheduler.models.models import ScheduledJob
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
 
 # Configure logging
 logging.basicConfig(
@@ -123,6 +127,33 @@ async def startup_event():
         logger.error(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("The application will continue, but some functionality may be limited")
     
+    # Initialize the scheduler service and load existing jobs
+    try:
+        logger.info("Loading existing jobs into scheduler...")
+        # Create a database session
+        engine = create_engine(settings.DB_URL)
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        db = SessionLocal()
+        
+        # Get all enabled jobs from the database
+        jobs = db.query(ScheduledJob).filter(ScheduledJob.enabled == True).all()
+        logger.info(f"Found {len(jobs)} enabled jobs in the database")
+        
+        # Add each job to the scheduler
+        for job in jobs:
+            try:
+                job_id = scheduler_service.create_job(job)
+                logger.info(f"Loaded job {job.id}: {job.name} into scheduler with ID {job_id}")
+            except Exception as e:
+                logger.error(f"Error loading job {job.id}: {str(e)}")
+        
+        # Close the database session
+        db.close()
+        logger.info("Finished loading jobs into scheduler")
+    except Exception as e:
+        logger.error(f"Error loading jobs into scheduler: {str(e)}")
+        logger.warning("The scheduler will continue, but existing jobs may not be loaded")
+    
     # Log configuration
     logger.info(f"Host: {settings.HOST}")
     logger.info(f"Port: {settings.PORT}")
@@ -145,6 +176,15 @@ async def shutdown_event():
         await gluesync_sdk_client.shutdown()
     except Exception as e:
         logger.error(f"Error shutting down Gluesync SDK client: {e}")
+        
+    # Shutdown the scheduler
+    try:
+        if hasattr(scheduler_service, 'scheduler') and scheduler_service.scheduler:
+            logger.info("Shutting down scheduler...")
+            scheduler_service.scheduler.shutdown()
+            logger.info("Scheduler shut down successfully")
+    except Exception as e:
+        logger.error(f"Error shutting down scheduler: {e}")
 
 # Middleware to redirect HTTP to HTTPS when SSL_ENABLED is true
 class HTTPSRedirectMiddleware(BaseHTTPMiddleware):

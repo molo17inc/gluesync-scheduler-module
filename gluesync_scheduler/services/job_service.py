@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from gluesync_scheduler.models.models import ScheduledJob, TaskType
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job
-from gluesync_scheduler.services.cron_service import CronService
+from gluesync_scheduler.services.scheduler_service import scheduler_service
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,8 @@ class JobService:
 
     def __init__(self, db: Session):
         self.db = db
-        self.cron_service = CronService()
+        # Use the singleton scheduler service instance
+        self.scheduler_service = scheduler_service
 
     def get_jobs(
         self, 
@@ -152,12 +153,12 @@ class JobService:
             self.db.commit()
             self.db.refresh(db_job)
             
-            # Create the actual cron job if enabled
+            # Create the actual scheduled job if enabled
             if db_job.enabled:
-                command = self.cron_service.create_job(db_job)
+                job_id = self.scheduler_service.create_job(db_job)
                 
-                # Update the command in the database
-                db_job.command = command
+                # Update the job_id in the database
+                db_job.command = f"Scheduled job ID: {job_id}"
                 self.db.commit()
                 self.db.refresh(db_job)
             
@@ -221,8 +222,8 @@ class JobService:
                 self.db.commit()
                 self.db.refresh(db_job)
             else:
-                # Remove from crontab if disabled
-                self.cron_service.remove_job(db_job.cron_job_identifier)
+                # Remove from scheduler if disabled
+                self.scheduler_service.remove_job(db_job.id)
                 
                 # Ensure command is not NULL when disabled
                 if db_job.command is None:
@@ -267,11 +268,11 @@ class JobService:
             
             # If enabling, create the cron job
             if enabled:
-                command = self.cron_service.create_job(job)
-                job.command = command
-            # If disabling, delete the cron job
+                job_id = self.scheduler_service.create_job(job)
+                job.command = f"Scheduled job ID: {job_id}"
+            # If disabling, delete the scheduled job
             else:
-                self.cron_service.remove_job(job.cron_job_identifier)
+                self.scheduler_service.remove_job(job.id)
                 # Ensure command is not NULL when disabling
                 if not job.command:
                     job.command = "disabled"
@@ -490,8 +491,8 @@ class JobService:
             )
         
         try:
-            # Delete the cron job first
-            self.cron_service.remove_job(db_job.cron_job_identifier)
+            # Delete the scheduled job first
+            self.scheduler_service.remove_job(db_job.id)
             
             # Then delete from database
             self.db.delete(db_job)
