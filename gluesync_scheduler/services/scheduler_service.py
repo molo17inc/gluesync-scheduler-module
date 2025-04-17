@@ -222,7 +222,12 @@ class SchedulerService:
             try:
                 # Create job service and run the job directly
                 job_service = JobService(db)
-                success, message, details = job_service.run_job(job_id)
+                result = job_service.run_job(job_id)
+                
+                # Extract values from the result dictionary
+                success = result.get('success', False)
+                message = result.get('message', 'Unknown result')
+                details = result  # Use the whole result dict as details
                 
                 # Log the results without serializing the entire response
                 with open(log_file, 'a') as f:
