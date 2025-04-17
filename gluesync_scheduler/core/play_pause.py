@@ -336,12 +336,38 @@ class CoreHubClient:
                 # Parse the response JSON if there is any
                 if response.text:
                     try:
-                        return response.json()
+                        # Safely handle the response to prevent recursion errors
+                        # Only extract the essential data and avoid complex nested structures
+                        json_data = response.json()
+                        
+                        # Create a simplified response with only primitive types
+                        # This prevents potential recursion issues with complex objects
+                        safe_response = {
+                            "status": "success",
+                            "status_code": response.status_code
+                        }
+                        
+                        # Extract only the essential data we need
+                        if isinstance(json_data, dict):
+                            # Add basic fields if they exist
+                            if "id" in json_data:
+                                safe_response["id"] = json_data["id"]
+                            if "name" in json_data:
+                                safe_response["name"] = json_data["name"]
+                            if "status" in json_data:
+                                safe_response["operation_status"] = json_data["status"]
+                            if "message" in json_data:
+                                safe_response["message"] = json_data["message"]
+                        
+                        return safe_response
                     except json.JSONDecodeError:
-                        logger.warning(f"Response is not valid JSON: {response.text}")
-                        return {"text": response.text}
+                        logger.warning(f"Response is not valid JSON: {response.text[:100]}...")
+                        return {"status": "success", "text": response.text[:100], "status_code": response.status_code}
+                    except RecursionError as e:
+                        logger.error(f"Recursion error while processing response: {str(e)}")
+                        return {"status": "success", "error": "Response too complex to process", "status_code": response.status_code}
                 else:
-                    return {}
+                    return {"status": "success", "status_code": response.status_code}
             else:
                 logger.error(f"Request failed with status code {response.status_code}: {response.text}")
                 return None

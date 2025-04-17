@@ -91,7 +91,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cron \
     curl \
     openssl && \
     apt-get clean && \
@@ -113,11 +112,9 @@ COPY ./gluesync_scheduler ./gluesync_scheduler
 # Copy main entry points and scripts
 COPY ./main.py .
 COPY ./run_scheduler.py .
-COPY ./run_job.sh .
 
 # Make scripts executable
-RUN chmod +x /app/entrypoint.sh && \
-    chmod +x /app/run_job.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Install SDK dependencies one by one to avoid issues
 RUN python -m pip install --upgrade pip && \

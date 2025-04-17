@@ -214,12 +214,13 @@ class JobService:
             self.db.commit()
             self.db.refresh(db_job)
             
-            # Update the cron job
+            # Update the scheduled job
             if db_job.enabled:
-                command = self.cron_service.update_job(db_job)
+                # Update the job in the scheduler
+                self.scheduler_service.update_job(db_job)
                 
-                # Update the command in the database
-                db_job.command = command
+                # No need to store command anymore as we're using in-memory scheduler
+                db_job.command = f"APScheduler job {db_job.id}"
                 self.db.commit()
                 self.db.refresh(db_job)
             else:
@@ -458,19 +459,43 @@ class JobService:
             
             # Check the response
             if response.status_code in [200, 201, 202]:
-                # Don't try to parse the response, just return a simple success message
-                # This avoids any potential recursion issues
+                # Don't try to parse the response JSON, just return a simple success message
+                # This completely avoids any potential recursion issues
                 success_msg = f"Job executed successfully with status code {response.status_code}"
                 logger.info(success_msg)
+                
                 # Return a minimal response with just primitive types
-                return True, success_msg, {"status_code": response.status_code}
+                # Avoid including any complex objects that might cause recursion
+                result = {
+                    "status_code": response.status_code,
+                    "success": True,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                # Include a very limited preview of the response text
+                if response.text:
+                    preview = response.text[:50]
+                    if len(response.text) > 50:
+                        preview += '...'
+                    result["response_preview"] = preview
+                
+                return True, success_msg, result
             else:
                 # For error responses, just log the status code and a truncated response
                 truncated_response = response.text[:100] + '...' if len(response.text) > 100 else response.text
                 error_msg = f"Job execution failed with status {response.status_code}"
                 logger.error(f"{error_msg}: {truncated_response}")
+                
                 # Return a minimal response with just primitive types
-                return False, error_msg, {"status_code": response.status_code}
+                # Avoid including any complex objects that might cause recursion
+                result = {
+                    "status_code": response.status_code,
+                    "success": False,
+                    "error": truncated_response,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                return False, error_msg, result
                 
         except Exception as e:
             error_msg = f"Error executing job: {str(e)}"

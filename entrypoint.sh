@@ -34,10 +34,7 @@ DATA_DIR=/app/data DB_URL=sqlite:////${DATA_DIR}/scheduler.db python3 -c "from g
 }
 echo "Database schema initialized successfully"
 
-# Start cron service
-echo "Starting cron service..."
-service cron start
-echo "Cron service started"
+# No longer need to start cron service as we're using APScheduler
 
 # Execute the CMD command
 echo "Starting application..."

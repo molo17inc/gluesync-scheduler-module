@@ -1,6 +1,5 @@
 fastapi==0.115.12
 uvicorn==0.29.0
-python-crontab==3.0.0
 pydantic==2.6.4
 requests==2.32.3
 sqlalchemy==2.0.28
