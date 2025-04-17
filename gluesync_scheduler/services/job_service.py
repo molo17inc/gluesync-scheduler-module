@@ -315,7 +315,7 @@ class JobService:
             db_job.last_run = now
             
             # Log job execution
-            logger.info(f"Manually running job {job_id}: {db_job.name}")
+            logger.info(f"Running job {job_id}: {db_job.name}")
             
             # Execute the job logic directly instead of running the command
             success, message, details = self._execute_job_logic(db_job)
@@ -393,11 +393,14 @@ class JobService:
             Tuple of (success, message, details)
         """
         try:
+            logger.info(f"Starting execution of job {job.id}: {job.name} (type: {job.task_type})")
+            
             # Parse entity_ids if present
             entity_ids = []
             if job.entity_ids:
                 try:
                     entity_ids = json.loads(job.entity_ids)
+                    logger.info(f"Parsed entity_ids: {entity_ids}")
                 except json.JSONDecodeError:
                     logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
             
@@ -430,14 +433,26 @@ class JobService:
             
             # Log the request details
             logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
-            logger.info(f"Endpoint: POST {endpoint}")
+            logger.info(f"Endpoint: {method} {endpoint}")
             logger.info(f"JSON Payload: {json_data}")
             
-            # Make the API request with JSON payload
-            import requests
-            headers = {"Content-Type": "application/json"}
-            
-            response = requests.post(endpoint, json=json_data, headers=headers)
+            try:
+                response = requests.request(
+                    method=method,
+                    url=endpoint,
+                    json=json_data,
+                    headers={"Content-Type": "application/json"},
+                    timeout=30  # Add timeout to prevent hanging requests
+                )
+                logger.info(f"Response status code: {response.status_code}")
+                logger.info(f"Response headers: {response.headers}")
+                
+                # Log the first 500 characters of the response for debugging
+                response_preview = response.text[:500] + '...' if len(response.text) > 500 else response.text
+                logger.info(f"Response preview: {response_preview}")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"HTTP request failed: {str(e)}")
+                return False, f"HTTP request failed: {str(e)}", {}
             
             # Check the response
             if response.status_code in [200, 202]:

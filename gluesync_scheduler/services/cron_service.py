@@ -42,7 +42,10 @@ class CronService:
     def __init__(self):
         """Initialize the cron service with the user's crontab"""
         try:
-            self.crontab = CronTab(user=True)
+            # Use the current user if CRONTAB_USER is not specified
+            crontab_user = settings.CRONTAB_USER or True
+            logger.info(f"Initializing crontab for user: {crontab_user}")
+            self.crontab = CronTab(user=crontab_user)
         except Exception as e:
             logger.error(f"Error initializing crontab: {str(e)}")
             raise HTTPException(
@@ -65,10 +68,20 @@ class CronService:
         run_job_script = os.path.join(script_dir, "run_job.sh")
         
         # Use curl to call the API endpoint for job execution
-        api_url = f"http://{settings.HOST}:{settings.PORT}/api/jobs/{job.id}/run"
+        # Always use localhost for API calls, not the binding address (0.0.0.0)
+        api_url = f"http://localhost:{settings.PORT}/api/jobs/{job.id}/run"
         
-        # Create the curl command
-        command = f"curl -X POST '{api_url}' > /dev/null 2>&1"
+        # Create log directory if it doesn't exist
+        os.makedirs(settings.CRON_LOG_DIR, exist_ok=True)
+        
+        # Create the curl command with proper logging
+        log_file = os.path.join(settings.CRON_LOG_DIR, f"{job.cron_job_identifier}.log")
+        error_file = os.path.join(settings.CRON_LOG_DIR, f"{job.cron_job_identifier}.error.log")
+        
+        # Add timestamp and job info to the log
+        command = f"echo '[$(date)] Running job {job.id}: {job.name}' >> {log_file} && \
+                  curl -s -X POST '{api_url}' -w '\n%{{http_code}}' >> {log_file} 2>> {error_file} || \
+                  echo '[$(date)] Failed to execute job {job.id}' >> {error_file}"
         
         return command
 
