@@ -112,16 +112,21 @@ class SchedulerService:
                 timezone=settings.TIMEZONE
             )
             
-            # Add the job to the scheduler
+            # Calculate the next run time based on the trigger
+            from datetime import datetime, timedelta
+            import pytz
+            
+            # Add the job to the scheduler with proper next run time calculation
+            # We want it to run on schedule but not immediately
             self.scheduler.add_job(
                 self._execute_job,
                 trigger=trigger,
                 id=job_id,
                 replace_existing=True,
                 args=[job.id, job.name],
-                misfire_grace_time=None,  # Don't execute missed runs
-                coalesce=True,            # Only run once if multiple executions are missed
-                next_run_time=None        # Don't run immediately, wait for next scheduled time
+                misfire_grace_time=3600,   # Allow misfires up to an hour
+                coalesce=True              # Only run once if multiple executions are missed
+                # Let the trigger naturally determine the next run time
             )
             
             logger.info(f"Created scheduled job: {job_id} with expression: {job.cron_expression}")
