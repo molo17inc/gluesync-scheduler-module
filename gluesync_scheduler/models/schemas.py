@@ -24,11 +24,12 @@
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 import pytz
+import json
 from enum import Enum
 from pydantic import BaseModel, Field, validator, field_serializer, ConfigDict
-from config import settings
 
-from models import TaskType
+from gluesync_scheduler.config.settings import settings
+from gluesync_scheduler.models.models import TaskType
 
 
 class DayOfWeek(str, Enum):
@@ -40,7 +41,7 @@ class DayOfWeek(str, Enum):
     FRIDAY = "friday"
     SATURDAY = "saturday"
     SUNDAY = "sunday"
-    
+
 
 class ScheduleConfig(BaseModel):
     """User-friendly schedule configuration"""
@@ -64,10 +65,14 @@ class ScheduleConfig(BaseModel):
         lt=60
     )
     
-    @validator('days_of_week')
+    @validator("days_of_week")
     def validate_days(cls, v):
+        # Empty list means every day
         if not v:
-            return v  # Empty list means every day
+            return v
+        # Ensure all days are unique
+        if len(v) != len(set(v)):
+            raise ValueError("Days of week must be unique")
         return v
 
 
@@ -83,19 +88,18 @@ class JobBase(BaseModel):
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     
-    @validator('cron_expression', 'schedule')
+    @validator("schedule", "cron_expression")
     def validate_schedule_options(cls, v, values):
-        # Ensure either cron_expression or schedule is provided
-        if 'cron_expression' in values and values['cron_expression'] is None and \
-           ('schedule' not in values or values['schedule'] is None):
-            if v is None:  # This is the second field being validated
-                raise ValueError("Either cron_expression or schedule must be provided")
+        # Ensure either schedule or cron_expression is provided
+        if "schedule" in values and "cron_expression" in values:
+            if values["schedule"] is None and values["cron_expression"] is None:
+                raise ValueError("Either schedule or cron_expression must be provided")
         return v
 
 
 class JobCreate(JobBase):
     """Model for creating a new job (inherits all fields from JobBase)"""
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "name": "Daily entity backup",
@@ -108,6 +112,7 @@ class JobCreate(JobBase):
                 "enabled": True
             }
         }
+    )
 
 
 class JobUpdate(BaseModel):
@@ -122,7 +127,7 @@ class JobUpdate(BaseModel):
     with_snapshot: Optional[bool] = Field(None, description="Updated snapshot setting")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "name": "Updated daily entity backup",
@@ -136,6 +141,7 @@ class JobUpdate(BaseModel):
                 "enabled": True
             }
         }
+    )
 
 
 class Job(JobBase):
@@ -151,25 +157,20 @@ class Job(JobBase):
     next_run: Optional[datetime] = Field(None, description="Timestamp of the next scheduled execution")
     command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
     schedule_days: Optional[List[str]] = Field(None, description="Array of days when the job is scheduled to run (e.g., ['monday', 'wednesday', 'friday'])")
-    start_time: str = Field(..., description="Current time with timezone information when the job data was retrieved", example="2025-04-14T23:19:46+0200")
+    start_time: Optional[str] = Field(None, description="Current time with timezone information when the job data was retrieved", example="2025-04-14T23:19:46+0200")
     
-    # Add serializer for datetime fields to include timezone information
-    @field_serializer('created_at', 'updated_at', 'last_run', 'last_successful_run', 'last_run_error_time', 'next_run')
-    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
-        if dt is None:
-            return None
-            
-        # Ensure datetime has timezone info
-        if dt.tzinfo is None:
-            # If no timezone info, use the configured timezone
-            tz = pytz.timezone(settings.TIMEZONE)
-            dt = tz.localize(dt)
-            
-        # Format with timezone info, ensuring timezone is included
-        return dt.strftime('%Y-%m-%dT%H:%M:%S%z')
-
-    class Config:
-        from_attributes = True
+    @validator('entity_ids', pre=True)
+    def parse_entity_ids(cls, v):
+        """Parse entity_ids from JSON string to list if it's a string"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return None
+        return v
+    
+    model_config = ConfigDict(
+        from_attributes = True,
         json_schema_extra = {
             "example": {
                 "id": 1,
@@ -194,6 +195,16 @@ class Job(JobBase):
                 "start_time": "2025-04-14T23:19:46+0200"
             }
         }
+    )
+    
+    @field_serializer('created_at', 'updated_at', 'last_run', 'last_successful_run', 'last_run_error_time', 'next_run')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        if dt is None:
+            return None
+        # Ensure datetime has timezone information
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=pytz.UTC)
+        return dt.isoformat()
 
 
 class JobList(BaseModel):
@@ -201,7 +212,7 @@ class JobList(BaseModel):
     items: List[Job] = Field(..., description="List of job objects")
     total: int = Field(..., description="Total number of jobs (without pagination)")
     
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "items": [
@@ -229,15 +240,24 @@ class JobList(BaseModel):
                 "total": 1
             }
         }
+    )
 
 
 class ErrorResponse(BaseModel):
     """Model for error responses"""
     detail: str = Field(..., description="Error message with details about the problem")
     
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "detail": "Job with ID 123 not found"
             }
         }
+    )
+
+
+class OperationResponse(BaseModel):
+    """Model for operation responses"""
+    success: bool = Field(..., description="Whether the operation was successful")
+    message: str = Field(..., description="Message describing the result of the operation")
+    data: Optional[Dict[str, Any]] = Field(None, description="Optional data returned by the operation")

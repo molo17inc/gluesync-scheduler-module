@@ -25,10 +25,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Body
 from sqlalchemy.orm import Session
 
-from database import get_db
-from models import TaskType
-from schemas import JobCreate, JobUpdate, Job, JobList, ErrorResponse
-from services.job_service import JobService
+from gluesync_scheduler.db.database import get_db
+from gluesync_scheduler.models.models import TaskType
+from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, JobList, ErrorResponse
+from gluesync_scheduler.services.job_service import JobService
 
 router = APIRouter(
     prefix="/jobs",
@@ -40,17 +40,17 @@ router = APIRouter(
         },
         status.HTTP_400_BAD_REQUEST: {
             "model": ErrorResponse,
-            "description": "Invalid request parameters or payload"
+            "description": "Invalid request data"
         },
-        status.HTTP_409_CONFLICT: {
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
             "model": ErrorResponse,
-            "description": "Resource conflict, e.g., duplicate cron job identifier"
-        },
-    },
+            "description": "Server error"
+        }
+    }
 )
 
-@router.get("/", response_model=JobList, summary="List all scheduled jobs", description="Retrieve a paginated list of all scheduled jobs with optional filtering by task type and enabled status")
-def list_jobs(
+@router.get("/", response_model=JobList, summary="List all scheduled jobs")
+async def list_jobs(
     skip: int = Query(0, ge=0, description="Number of records to skip for pagination"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
     task_type: Optional[TaskType] = Query(None, description="Filter by task type (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline"),
@@ -96,19 +96,14 @@ def list_jobs(
     ```
     """
     job_service = JobService(db)
-    jobs = job_service.get_jobs(skip=skip, limit=limit)
-    
-    # Apply filters if provided
-    if task_type:
-        jobs = [job for job in jobs if job.task_type == task_type]
-    
-    if enabled is not None:
-        jobs = [job for job in jobs if job.enabled == enabled]
-    
-    return {"items": jobs, "total": job_service.count_jobs()}
+    jobs, total = job_service.get_jobs(skip=skip, limit=limit, task_type=task_type, enabled=enabled)
+    return {"items": jobs, "total": total}
 
-@router.get("/{job_id}", response_model=Job, summary="Get a specific job", description="Retrieve detailed information about a specific scheduled job by its ID")
-def get_job(job_id: int = Path(..., description="The ID of the scheduled job to retrieve"), db: Session = Depends(get_db)):
+
+@router.get("/{job_id}", response_model=Job, responses={
+    status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Job not found"}
+}, summary="Get a specific scheduled job")
+async def get_job(job_id: int = Path(..., description="The ID of the scheduled job to retrieve"), db: Session = Depends(get_db)):
     """
     Get a specific scheduled job by ID.
     
@@ -143,18 +138,21 @@ def get_job(job_id: int = Path(..., description="The ID of the scheduled job to 
     - **404**: Job with the specified ID was not found
     """
     job_service = JobService(db)
-    job = job_service.get_job_by_id(job_id)
-    
+    job = job_service.get_job(job_id)
     if not job:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job with ID {job_id} not found"
         )
-    
     return job
 
-@router.post("/", response_model=Job, status_code=status.HTTP_201_CREATED, summary="Create a new job", description="Create a new scheduled job with the specified parameters")
-def create_job(job_data: JobCreate = Body(..., description="Job data to create", example={
+
+@router.post("/", response_model=Job, status_code=status.HTTP_201_CREATED, responses={
+    status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse, "description": "Invalid request data"},
+    status.HTTP_409_CONFLICT: {"model": ErrorResponse, "description": "Conflict with existing job"},
+    status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse, "description": "Server error during job creation"}
+}, summary="Create a new scheduled job")
+async def create_job(job_data: JobCreate = Body(..., description="Job data to create", example={
     "name": "Monday-Wednesday-Friday Job",
     "description": "Runs on specific days at 8:30 AM",
     "task_type": "ENTITY_SNAPSHOT",
@@ -226,19 +224,34 @@ def create_job(job_data: JobCreate = Body(..., description="Job data to create",
     - **500**: Server error during job creation
     """
     job_service = JobService(db)
-    
     try:
-        return job_service.create_job(job_data)
-    except HTTPException as e:
-        raise e
-    except Exception as e:
+        job = job_service.create_job(job_data)
+        return job
+    except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create job: {str(e)}"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
+    except Exception as e:
+        if "UNIQUE constraint failed" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A job with the same identifier already exists: {str(e)}"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error creating job: {str(e)}"
+            )
 
-@router.put("/{job_id}", response_model=Job, summary="Update an existing job", description="Update an existing scheduled job with the specified parameters")
-def update_job(job_id: int = Path(..., description="The ID of the job to update"), 
+
+@router.put("/{job_id}", response_model=Job, responses={
+    status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Job not found"},
+    status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse, "description": "Invalid request data"},
+    status.HTTP_409_CONFLICT: {"model": ErrorResponse, "description": "Conflict with existing job"},
+    status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse, "description": "Server error during job update"}
+}, summary="Update an existing scheduled job")
+async def update_job(job_id: int = Path(..., description="The ID of the job to update"), 
               job_data: JobUpdate = Body(..., description="Job data to update", example={
                   "name": "Updated job schedule",
                   "description": "Now runs on weekends at midnight",
@@ -308,32 +321,142 @@ def update_job(job_id: int = Path(..., description="The ID of the job to update"
     """
     job_service = JobService(db)
     
+    # Check if job exists
+    existing_job = job_service.get_job(job_id)
+    if not existing_job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job with ID {job_id} not found"
+        )
+    
     try:
         updated_job = job_service.update_job(job_id, job_data)
-        
-        if not updated_job:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Job with ID {job_id} not found"
-            )
-        
         return updated_job
-    except HTTPException as e:
-        raise e
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update job: {str(e)}"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
+    except Exception as e:
+        if "UNIQUE constraint failed" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A job with the same identifier already exists: {str(e)}"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error updating job: {str(e)}"
+            )
 
-@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a job", description="Delete a scheduled job by its ID")
+
+@router.post("/{job_id}/run", responses={
+    status.HTTP_200_OK: {
+        "description": "Job execution result",
+        "content": {
+            "application/json": {
+                "example": {
+                    "success": True,
+                    "message": "Job executed successfully",
+                    "job_id": 1,
+                    "exit_code": 0,
+                    "stdout": "Pipeline started successfully",
+                    "stderr": ""
+                }
+            }
+        }
+    },
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponse,
+        "description": "Job not found"
+    },
+    status.HTTP_500_INTERNAL_SERVER_ERROR: {
+        "model": ErrorResponse,
+        "description": "Error running job"
+    }
+})
+def run_job(
+    job_id: int = Path(..., description="The ID of the job to run"),
+    db: Session = Depends(get_db)
+):
+    """
+    Run a job.
+    
+    ## Parameters
+    - **job_id**: The unique identifier of the job to run
+    
+    ## Returns
+    A dictionary with the execution results:
+    - **success**: Whether the job executed successfully
+    - **message**: A message describing the result
+    - **job_id**: The ID of the job that was run
+    - **exit_code**: The exit code of the command
+    - **stdout**: The standard output of the command
+    - **stderr**: The standard error of the command
+    
+    ## Errors
+    - **404**: Job with the specified ID was not found
+    - **500**: Server error during job execution
+    """
+    job_service = JobService(db)
+    return job_service.run_job(job_id)
+
+@router.patch("/{job_id}/status", response_model=Job, responses={
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponse,
+        "description": "Job not found"
+    },
+    status.HTTP_500_INTERNAL_SERVER_ERROR: {
+        "model": ErrorResponse,
+        "description": "Error updating job status"
+    }
+})
+def toggle_job_status(
+    job_id: int = Path(..., description="The ID of the job to update"),
+    enabled: bool = Body(..., description="True to enable, False to disable the job", embed=True),
+    db: Session = Depends(get_db)
+):
+    """
+    Enable or disable a scheduled job.
+    
+    ## Parameters
+    - **job_id**: The unique identifier of the job to update
+    - **enabled**: Boolean value to enable (true) or disable (false) the job
+    
+    ## Returns
+    The updated job object with all details
+    
+    ## Example Request
+    ```json
+    {
+      "enabled": true
+    }
+    ```
+    
+    ## Errors
+    - **404**: Job with the specified ID was not found
+    - **500**: Server error during status update
+    """
+    job_service = JobService(db)
+    return job_service.toggle_job_status(job_id, enabled)
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT, responses={
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponse,
+        "description": "Job not found"
+    },
+    status.HTTP_500_INTERNAL_SERVER_ERROR: {
+        "model": ErrorResponse,
+        "description": "Error deleting job"
+    }
+})
 def delete_job(job_id: int = Path(..., description="The ID of the job to delete"), db: Session = Depends(get_db)):
     """
     Delete a scheduled job.
     
     ## Parameters
     - **job_id**: The unique identifier of the job to delete
-    
     ## Returns
     No content (204) on successful deletion
     
@@ -343,8 +466,19 @@ def delete_job(job_id: int = Path(..., description="The ID of the job to delete"
     """
     job_service = JobService(db)
     
-    if not job_service.delete_job(job_id):
+    # Check if job exists
+    existing_job = job_service.get_job(job_id)
+    if not existing_job:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job with ID {job_id} not found"
+        )
+    
+    try:
+        job_service.delete_job(job_id)
+        return None
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting job: {str(e)}"
         )

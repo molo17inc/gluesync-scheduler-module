@@ -91,7 +91,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cron \
     curl \
     openssl && \
     apt-get clean && \
@@ -101,29 +100,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /wheels /wheels
 COPY --from=builder /build/gluesync-sdk /app/gluesync-sdk
 
-# Copy only necessary application files
+# Copy requirements and setup files
 COPY ./requirements.txt .
+COPY ./setup.py .
 COPY ./entrypoint.sh .
-COPY ./app.py .
-COPY ./config.py .
-COPY ./models.py .
-COPY ./schemas.py .
-COPY ./play_pause.py .
-COPY ./gluesync_sdk_client.py .
-COPY ./database.py .
+COPY ./README.md .
 
-# Copy API and services directories
-COPY ./api ./api
-COPY ./services ./services
+# Copy the restructured package
+COPY ./gluesync_scheduler ./gluesync_scheduler
 
-# Copy the job_runner.py and run_job.sh scripts
-COPY ./job_runner.py /app/job_runner.py
-COPY ./run_job.sh /app/run_job.sh
+# Copy main entry points and scripts
+COPY ./main.py .
+COPY ./run_scheduler.py .
 
 # Make scripts executable
-RUN chmod +x /app/entrypoint.sh && \
-    chmod +x /app/job_runner.py && \
-    chmod +x /app/run_job.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Install SDK dependencies one by one to avoid issues
 RUN python -m pip install --upgrade pip && \
@@ -159,5 +150,5 @@ EXPOSE 1717
 ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Command to run the application
-# Use python directly to ensure our SSL extraction code runs
-CMD ["python", "app.py"]
+# Use python3 directly to ensure our SSL extraction code runs
+CMD ["python3", "run_scheduler.py"]

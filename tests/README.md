@@ -30,7 +30,7 @@ To run the tests locally, you'll need to have Python 3.9+ installed and the requ
    DEBUG=True
    CORE_HUB_URL=http://localhost:8080
    GLUESYNC_LICENSE_FILE=gs-license.dat
-   GLUESYNC_MODULE_TAG=scheduler-module
+   GLUESYNC_MODULE_TAG=chronos
    SSL_ENABLED=False
    ```
 

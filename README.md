@@ -1,4 +1,6 @@
-# Gluesync Scheduler Module (aka Chronos)
+# Gluesync Scheduler Module (Chronos)
+
+A scheduling module for Gluesync pipelines, allowing automated execution of pipeline operations based on cron schedules. (aka Chronos)
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![License](https://img.shields.io/badge/license-Dual-green)
@@ -9,6 +11,7 @@ A backend service that provides a set of REST APIs for scheduling and managing c
 
 - **Comprehensive REST API**: Full CRUD operations for scheduled jobs
 - **Flexible Job Scheduling**: Choose between user-friendly schedule format or standard cron expressions
+- **In-Memory Job Scheduling**: Uses APScheduler for reliable job execution in containerized environments
 - **Multiple Task Types**:
   - Start/stop entities
   - Start/stop entire pipelines
@@ -21,8 +24,44 @@ A backend service that provides a set of REST APIs for scheduling and managing c
 ## Prerequisites
 
 - Python 3.8+
-- Access to crontab (for Unix-based systems)
 - Gluesync Core Hub instance
+
+## Job Scheduling Architecture
+
+The module uses APScheduler for reliable in-memory job scheduling, which is particularly well-suited for containerized environments:
+
+- **In-Memory Scheduler**: Jobs are stored and executed in memory, eliminating the need for system crontab access
+- **Persistent Storage**: Job definitions are stored in the database for persistence across restarts
+- **Automatic Recovery**: On application startup, all enabled jobs are automatically loaded from the database into the scheduler
+- **Timezone Support**: All jobs respect the configured timezone setting
+- **Detailed Logging**: Each job execution is logged with timestamps and results
+
+This architecture ensures that jobs continue to run reliably even in containerized environments where traditional cron services may not be available or may lose state between container restarts.
+
+## Project Structure
+
+The project follows a standard Python package structure:
+
+```python
+gluesync-scheduler-module/
+├── gluesync_scheduler/         # Main package directory
+│   ├── api/                   # API endpoints and routers
+│   ├── cli/                   # Command-line interfaces
+│   ├── config/                # Configuration settings
+│   ├── core/                  # Core application logic
+│   ├── db/                    # Database models and connections
+│   ├── models/                # Data models and schemas
+│   ├── services/              # Business logic services
+│   └── utils/                 # Utility functions
+├── tests/                     # Test directory
+├── data/                      # Data storage directory
+├── logs/                      # Log files directory
+├── main.py                    # Main entry point
+├── run_scheduler.py           # Script to run the scheduler
+├── run_job.sh                 # Script to run jobs
+├── setup.py                   # Package setup file
+└── requirements.txt           # Dependencies
+```
 
 ## Installation
 
@@ -42,22 +81,16 @@ A backend service that provides a set of REST APIs for scheduling and managing c
    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
    ```
 
-3. Install dependencies:
+3. Install the package in development mode:
 
    ```bash
-   pip install -r requirements.txt
+   pip3 install -e .
    ```
 
-4. Initialize the database:
+4. Run the application:
 
    ```bash
-   python init_db.py
-   ```
-
-5. Run the application:
-
-   ```bash
-   uvicorn app:app --reload
+   python3 run_scheduler.py
    ```
 
 ### Docker Deployment
@@ -99,7 +132,7 @@ Additional environment variables for the Gluesync SDK integration:
 | `GLUESYNC_KEYSTORE_PATH` | Path to JKS keystore file for SSL | `None` |
 | `GLUESYNC_KEYSTORE_PASSWORD` | Password for JKS keystore | `None` |
 
-> **Note**: The module identifier (`GLUESYNC_MODULE_TAG`) is hardcoded as `scheduler-module` and cannot be changed externally.
+> **Note**: The module identifier (`GLUESYNC_MODULE_TAG`) is hardcoded as `chronos` and cannot be changed externally.
 
 You can set these in a `.env` file in the project root.
 
@@ -120,7 +153,7 @@ To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with
 
    ```text
    GLUESYNC_LICENSE_FILE=gs-license.dat
-   GLUESYNC_MODULE_TAG=scheduler-module
+   GLUESYNC_MODULE_TAG=chronos
    SSL_ENABLED=False
    GLUESYNC_SECURITY_CONFIG=/path/to/security-config.json
    DB_URL=sqlite:///./data/test_scheduler.db
@@ -364,6 +397,26 @@ The module includes comprehensive tests to ensure functionality and reliability.
 1. **Cron Job Tests**: Tests the creation, updating, and execution of cron jobs through the scheduler module.
 2. **CoreHub Integration Tests**: Tests the integration with the CoreHub API through the SDK.
 3. **API Tests**: Tests the REST API endpoints for managing scheduled jobs.
+
+### Running a Job Manually
+
+You can manually trigger a job using the API:
+
+```bash
+curl -X POST "http://localhost:1717/api/jobs/{job_id}/run"
+```
+
+Or using the CLI module directly:
+
+```bash
+python3 -m gluesync_scheduler.cli.job_runner <job_identifier>
+```
+
+Or using the provided shell script:
+
+```bash
+./run_job.sh <job_identifier>
+```
 
 ### Running Tests Locally
 

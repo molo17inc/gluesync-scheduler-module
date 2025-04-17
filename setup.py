@@ -21,25 +21,35 @@
  * Copyright (C) 2025 MOLO17. All rights reserved.
 """
 
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from setuptools import setup, find_packages
 
-from config import settings
+with open("README.md", "r") as fh:
+    long_description = fh.read()
 
-# Create SQLAlchemy engine
-engine = create_engine(settings.DB_URL, connect_args={"check_same_thread": False})
+with open("requirements.txt", "r") as fh:
+    requirements = fh.read().splitlines()
 
-# Create SessionLocal class
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create Base class
-Base = declarative_base()
-
-# Database dependency
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+setup(
+    name="gluesync-scheduler-module",
+    version="1.0.0",
+    author="MOLO17",
+    author_email="info@molo17.com",
+    description="Scheduler module for Gluesync pipelines",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    url="https://github.com/molo17-public/gluesync/gluesync-scheduler-module",
+    packages=find_packages(),
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+        "Operating System :: OS Independent",
+    ],
+    python_requires=">=3.8",
+    install_requires=requirements,
+    entry_points={
+        "console_scripts": [
+            "gluesync-scheduler=run_scheduler:main",
+            "gluesync-job-runner=gluesync_scheduler.cli.job_runner:main",
+        ],
+    },
+)

@@ -27,9 +27,8 @@ from sqlalchemy import Column, Integer, String, DateTime, Enum, Text, Boolean
 from sqlalchemy.sql.expression import text
 from sqlalchemy.sql.sqltypes import TIMESTAMP
 
-from config import settings
-
-from database import Base
+from gluesync_scheduler.config.settings import settings
+from gluesync_scheduler.db.database import Base
 
 
 class TaskType(enum.Enum):
@@ -43,14 +42,14 @@ class TaskType(enum.Enum):
 
 class ScheduledJob(Base):
     __tablename__ = "scheduled_jobs"
-
+    
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     task_type = Column(Enum(TaskType), nullable=False)
     cron_expression = Column(String, nullable=False)
     pipeline_id = Column(String, nullable=False)
-    entity_ids = Column(Text, nullable=True)  # Stored as JSON string of entity IDs
+    entity_ids = Column(Text, nullable=True)
     with_snapshot = Column(Boolean, default=False)
     enabled = Column(Boolean, default=True)
     command = Column(Text, nullable=False)
@@ -62,3 +61,4 @@ class ScheduledJob(Base):
     last_successful_run = Column(DateTime(timezone=True), nullable=True)
     last_error_message = Column(Text, nullable=True)
     last_run_error_time = Column(DateTime(timezone=True), nullable=True)
+    start_time = Column(String, nullable=True)
