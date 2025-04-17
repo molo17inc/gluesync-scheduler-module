@@ -284,14 +284,12 @@ class CoreHubClient:
                     self.base_url = settings.CORE_HUB_URL
                     logger.info(f"Using CoreHub URL from settings: {self.base_url}")
             
-            # If we still don't have a URL, use a hardcoded one from the logs
+            # If we still don't have a URL, provide a clear error message with troubleshooting steps
             if not self.base_url:
-                # From the logs we can see the CoreHub was discovered at 172.18.0.3
-                self.base_url = "http://172.18.0.3:1717"
-                logger.info(f"Using hardcoded CoreHub URL from logs: {self.base_url}")
-                # Also update the class variable
-                CoreHubClient._shared_base_url = self.base_url
-                CoreHubClient._corehub_url_discovered = True
+                logger.error("CoreHub URL discovery failed. Please ensure one of the following is configured:")
+                logger.error("1. The SDK client is properly initialized and connected")
+                logger.error("2. CORE_HUB_URL is set in environment variables or configuration")
+                logger.error("3. The CoreHub is accessible and responding to discovery requests")
                 
             # If we still don't have a URL, we can't proceed
             if not self.base_url:
