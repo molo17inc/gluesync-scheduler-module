@@ -118,7 +118,10 @@ class SchedulerService:
                 trigger=trigger,
                 id=job_id,
                 replace_existing=True,
-                args=[job.id, job.name]
+                args=[job.id, job.name],
+                misfire_grace_time=None,  # Don't execute missed runs
+                coalesce=True,            # Only run once if multiple executions are missed
+                next_run_time=None        # Don't run immediately, wait for next scheduled time
             )
             
             logger.info(f"Created scheduled job: {job_id} with expression: {job.cron_expression}")
