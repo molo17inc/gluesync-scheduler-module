@@ -32,9 +32,10 @@ import pytz
 from fastapi import FastAPI, Request
 import fastapi
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response, JSONResponse
 from fastapi.encoders import jsonable_encoder
 from starlette.middleware.base import BaseHTTPMiddleware
+from typing import Any, Dict, List, Set
 
 from gluesync_scheduler.api.router import router
 from gluesync_scheduler.api.pipeline_router import router as pipeline_router
@@ -56,14 +57,109 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Define a safe JSON encoder to prevent recursion errors
+class SafeJSONEncoder:
+    """Custom JSON encoder that prevents recursion errors.
+    
+    This encoder creates a simplified representation of complex objects and limits the depth of nested objects
+    to prevent maximum recursion depth errors.
+    """
+    def __init__(self, max_depth=10):
+        self.max_depth = max_depth
+        self.current_depth = 0
+        self.visited = set()  # Keep track of objects to detect cycles
+    
+    def encode(self, obj: Any) -> Any:
+        """Safely encode an object to prevent recursion errors"""
+        # Base case: Return primitives directly
+        if obj is None or isinstance(obj, (str, int, float, bool)):
+            return obj
+        
+        # Check for recursion depth limit
+        if self.current_depth >= self.max_depth:
+            return str(obj)[:100] + "..." if len(str(obj)) > 100 else str(obj)
+        
+        # Check for cycles
+        obj_id = id(obj)
+        if obj_id in self.visited:
+            return f"<Circular reference to {type(obj).__name__} at {hex(obj_id)}>"
+        
+        self.visited.add(obj_id)
+        self.current_depth += 1
+        
+        try:
+            # Handle different types
+            if isinstance(obj, dict):
+                result = {}
+                for k, v in list(obj.items())[:20]:  # Limit number of items
+                    k_str = str(k) if not isinstance(k, (str, int, float, bool)) else k
+                    result[k_str] = self.encode(v)
+                if len(obj) > 20:
+                    result["..."] = f"<{len(obj) - 20} more items>"
+                return result
+            
+            elif isinstance(obj, (list, tuple, set)):
+                result = []
+                for item in list(obj)[:20]:  # Limit number of items
+                    result.append(self.encode(item))
+                if len(obj) > 20:
+                    result.append(f"<{len(obj) - 20} more items>")
+                return result
+            
+            # Handle other objects by converting them to a string representation
+            return str(obj)[:100] + "..." if len(str(obj)) > 100 else str(obj)
+        
+        finally:
+            # Clean up
+            self.visited.remove(obj_id)
+            self.current_depth -= 1
+
+# Custom middleware to handle recursion errors in responses
+class SafeJSONMiddleware(BaseHTTPMiddleware):
+    """Middleware that prevents recursion errors in JSON responses"""
+    
+    async def dispatch(self, request: Request, call_next):
+        try:
+            # Process the request normally
+            response = await call_next(request)
+            return response
+        except RecursionError as e:
+            # If a recursion error occurs, return a simplified error response
+            logger.error(f"Recursion error in response: {str(e)}")
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "Internal server error",
+                    "message": "Response too complex to process",
+                    "detail": str(e),
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
+# Create a custom JSON Response class that uses our safe encoder
+class SafeJSONResponse(JSONResponse):
+    """Custom JSONResponse that uses SafeJSONEncoder to prevent recursion errors"""
+    
+    def render(self, content: Any) -> bytes:
+        try:
+            # First try with the default JSON encoder
+            return super().render(content)
+        except RecursionError:
+            # If that fails, use our safe encoder
+            logger.warning("Using SafeJSONEncoder to handle complex response")
+            encoder = SafeJSONEncoder()
+            safe_content = encoder.encode(content)
+            return super().render(safe_content)
+
 # Create FastAPI app
 app = FastAPI(
     title="Gluesync Scheduler Module",
-    description="API for scheduling and managing Gluesync pipeline operations",
+    description="API for scheduling and managing pipelines in Gluesync",
     version="1.0.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json"
+    openapi_url="/api/openapi.json",
+    default_response_class=SafeJSONResponse  # Use our safe response class by default
 )
 
 # Add CORS middleware
@@ -74,6 +170,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add the SafeJSONMiddleware to prevent recursion errors
+app.add_middleware(SafeJSONMiddleware)
 
 # Middleware to catch any uncaught exceptions
 async def catch_exceptions_middleware(request: Request, call_next):

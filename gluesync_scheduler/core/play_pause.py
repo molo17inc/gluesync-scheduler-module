@@ -31,7 +31,8 @@ from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
 
 import requests
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse, urljoin
+import uuid
 
 from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
@@ -429,9 +430,15 @@ class CoreHubClient:
                 self.base_url = CoreHubClient._shared_base_url
                 logger.debug(f"Using shared CoreHub URL in resync_entity: {self.base_url}")
             else:
-                # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
-                logger.error("CoreHub URL not available - resync_entity cannot proceed")
-                return False
+                # Try to get it from settings
+                from gluesync_scheduler.config.settings import settings
+                if settings.CORE_HUB_URL:
+                    self.base_url = settings.CORE_HUB_URL
+                    logger.debug(f"Using settings CoreHub URL in resync_entity: {self.base_url}")
+                else:
+                    # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
+                    logger.error("CoreHub URL not available - resync_entity cannot proceed")
+                    return False
         
         path = f'/pipelines/{pipeline_id}/entities/{entity_id}/commands/sync/one-time-snapshot'
         body = {
@@ -514,9 +521,15 @@ class CoreHubClient:
                 self.base_url = CoreHubClient._shared_base_url
                 logger.debug(f"Using shared CoreHub URL in resync_pipeline: {self.base_url}")
             else:
-                # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
-                logger.error("CoreHub URL not available - resync_pipeline cannot proceed")
-                return False
+                # Try to get it from settings
+                from gluesync_scheduler.config.settings import settings
+                if settings.CORE_HUB_URL:
+                    self.base_url = settings.CORE_HUB_URL
+                    logger.debug(f"Using settings CoreHub URL in resync_pipeline: {self.base_url}")
+                else:
+                    # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
+                    logger.error("CoreHub URL not available - resync_pipeline cannot proceed")
+                    return False
             
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         body = {
