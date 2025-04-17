@@ -169,6 +169,8 @@ class GluesyncSDKClient:
                             if host and port:
                                 self._corehub_url = self._build_corehub_url(host, port, use_ssl)
                                 logger.info(f"Discovered CoreHub URL: {self._corehub_url}")
+                                # Update settings with the discovered URL
+                                settings.update_corehub_url(self._corehub_url)
                         # If that fails, try to get it from the discovery result
                         elif hasattr(self._client, '_discovery_result') and self._client._discovery_result:
                             host = self._client._discovery_result.get('host')
@@ -178,10 +180,32 @@ class GluesyncSDKClient:
                             if host and port:
                                 self._corehub_url = self._build_corehub_url(host, port, use_ssl)
                                 logger.info(f"Discovered CoreHub URL from discovery result: {self._corehub_url}")
+                                # Update settings with the discovered URL
+                                settings.update_corehub_url(self._corehub_url)
                         # If all else fails, use the default CoreHub URL from settings if available
                         elif settings.CORE_HUB_URL:
                             self._corehub_url = settings.CORE_HUB_URL
                             logger.info(f"Using CoreHub URL from settings: {self._corehub_url}")
+                        
+                        # If we still don't have a CoreHub URL, try to extract it from the websocket URL
+                        if not self._corehub_url and hasattr(self._client, '_ws_url') and self._client._ws_url:
+                            # Extract protocol, host and port from WebSocket URL
+                            ws_url = self._client._ws_url
+                            logger.info(f"Attempting to extract CoreHub URL from WebSocket URL: {ws_url}")
+                            
+                            # Parse WebSocket URL to extract HTTP URL components
+                            import re
+                            match = re.match(r'(wss?)://([^:/]+)(?::([0-9]+))?', ws_url)
+                            if match:
+                                ws_protocol, ws_host, ws_port = match.groups()
+                                use_ssl = (ws_protocol == 'wss')
+                                http_protocol = 'https' if use_ssl else 'http'
+                                port = ws_port or ('443' if use_ssl else '80')
+                                
+                                self._corehub_url = f"{http_protocol}://{ws_host}:{port}"
+                                logger.info(f"Extracted CoreHub URL from WebSocket URL: {self._corehub_url}")
+                                # Update settings with the discovered URL
+                                settings.update_corehub_url(self._corehub_url)
                     except Exception as e:
                         logger.error(f"Error during CoreHub discovery: {str(e)}")
                     

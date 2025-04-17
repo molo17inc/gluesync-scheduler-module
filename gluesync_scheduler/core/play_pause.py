@@ -45,7 +45,13 @@ class CoreHubClient:
     
     def __init__(self):
         """Initialize the Core Hub client with configuration from settings"""
+        # Try to get CoreHub URL from settings
         self.base_url = settings.CORE_HUB_URL
+        
+        # If no URL is set, try to discover it immediately
+        if not self.base_url:
+            self._discover_corehub_url()
+            
         self.entity_start_timeout = settings.ENTITY_START_TIMEOUT  # seconds to wait between entity operations
         self.token = None
         
@@ -67,6 +73,76 @@ class CoreHubClient:
             logger.error(f"Failed to initialize Gluesync SDK client: {e}")
             logger.warning("Will attempt to continue without SDK initialization")
     
+    def _discover_corehub_url(self):
+        """Discover the CoreHub URL using various methods"""
+        # Method 1: Try to get from SDK client's corehub_url property
+        if gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
+            self.base_url = gluesync_sdk_client.corehub_url
+            settings.update_corehub_url(self.base_url)
+            logger.info(f"Discovered CoreHub URL from SDK property: {self.base_url}")
+            return True
+        
+        # Method 2: Try to extract from SDK client's internal properties
+        if gluesync_sdk_client.is_initialized and gluesync_sdk_client.client:
+            client = gluesync_sdk_client.client
+            
+            # Try to get from _host and _port
+            if hasattr(client, '_host') and client._host:
+                host = client._host
+                port = getattr(client, '_port', 1717)  # Default to 1717 if not available
+                use_ssl = getattr(client, '_use_ssl', False)
+                
+                protocol = 'https' if use_ssl else 'http'
+                self.base_url = f"{protocol}://{host}:{port}"
+                settings.update_corehub_url(self.base_url)
+                logger.info(f"Discovered CoreHub URL from SDK client host/port: {self.base_url}")
+                return True
+            
+            # Try to get from _discovery_result
+            if hasattr(client, '_discovery_result') and client._discovery_result:
+                discovery = client._discovery_result
+                host = discovery.get('host')
+                port = discovery.get('port', 1717)
+                use_ssl = discovery.get('ssl', False)
+                
+                if host and port:
+                    protocol = 'https' if use_ssl else 'http'
+                    self.base_url = f"{protocol}://{host}:{port}"
+                    settings.update_corehub_url(self.base_url)
+                    logger.info(f"Discovered CoreHub URL from SDK discovery result: {self.base_url}")
+                    return True
+            
+            # Try to extract from WebSocket URL
+            if hasattr(client, '_ws_url') and client._ws_url:
+                ws_url = client._ws_url
+                logger.info(f"Attempting to extract CoreHub URL from WebSocket URL: {ws_url}")
+                
+                # Parse WebSocket URL to extract HTTP URL components
+                import re
+                match = re.match(r'(wss?)://([^:/]+)(?::([0-9]+))?', ws_url)
+                if match:
+                    ws_protocol, ws_host, ws_port = match.groups()
+                    use_ssl = (ws_protocol == 'wss')
+                    http_protocol = 'https' if use_ssl else 'http'
+                    port = ws_port or ('443' if use_ssl else '80')
+                    
+                    self.base_url = f"{http_protocol}://{ws_host}:{port}"
+                    settings.update_corehub_url(self.base_url)
+                    logger.info(f"Extracted CoreHub URL from WebSocket URL: {self.base_url}")
+                    return True
+        
+        # Method 3: Fall back to settings if available
+        if settings.CORE_HUB_URL:
+            self.base_url = settings.CORE_HUB_URL
+            logger.info(f"Using CoreHub URL from settings: {self.base_url}")
+            return True
+        
+        # Method 4: Use a hardcoded fallback URL
+        self.base_url = "http://localhost:1717"
+        logger.warning(f"Using fallback CoreHub URL: {self.base_url}")
+        settings.update_corehub_url(self.base_url)
+        return True
+        
     def _try_sdk_token(self):
         """Try to get token from Gluesync SDK client if it's initialized"""
         try:
@@ -96,13 +172,9 @@ class CoreHubClient:
         """
         # Check if we have a valid base URL
         if not self.base_url:
-            # Try to update from SDK if available
-            if gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
-                self.base_url = gluesync_sdk_client.corehub_url
-                settings.update_corehub_url(self.base_url)
-                logger.info(f"Updated CoreHub URL from SDK: {self.base_url}")
-            else:
-                logger.error("CoreHub URL is not set and could not be obtained from SDK")
+            # Use our comprehensive discovery method
+            if not self._discover_corehub_url():
+                logger.error("Failed to discover CoreHub URL")
                 return None
                 
         # Try to get the SDK token first if we don't have one yet
