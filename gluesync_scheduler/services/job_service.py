@@ -450,8 +450,9 @@ class JobService:
                 logger.info(f"Response status code: {response.status_code}")
                 logger.info(f"Response headers: {response.headers}")
                 
-                # Log the first 500 characters of the response for debugging
-                response_preview = response.text[:500] + '...' if len(response.text) > 500 else response.text
+                # Log a limited preview of the response for debugging
+                # This prevents large responses from flooding the logs
+                response_preview = response.text[:100] + '...' if len(response.text) > 100 else response.text
                 logger.info(f"Response preview: {response_preview}")
             except requests.exceptions.RequestException as e:
                 logger.error(f"HTTP request failed: {str(e)}")
@@ -464,20 +465,16 @@ class JobService:
                 success_msg = f"Job executed successfully with status code {response.status_code}"
                 logger.info(success_msg)
                 
-                # Return a minimal response with just primitive types
-                # Avoid including any complex objects that might cause recursion
+                # Create a new, completely flat response with only primitive types
+                # This completely eliminates the possibility of recursion errors
                 result = {
-                    "status_code": response.status_code,
-                    "success": True,
-                    "timestamp": datetime.now().isoformat()
+                    "status": "success",
+                    "code": str(response.status_code),
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
                 
-                # Include a very limited preview of the response text
-                if response.text:
-                    preview = response.text[:50]
-                    if len(response.text) > 50:
-                        preview += '...'
-                    result["response_preview"] = preview
+                # We don't even include the response preview in the result
+                # Just log it and return a simple success flag
                 
                 return True, success_msg, result
             else:

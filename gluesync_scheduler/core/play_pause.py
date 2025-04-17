@@ -47,6 +47,9 @@ class CoreHubClient:
     # Singleton instance
     _instance = None
     
+    # Store settings directly in the class
+    from gluesync_scheduler.config.settings import settings as _settings
+    
     # Class variable to track if CoreHub URL has been discovered
     _corehub_url_discovered = False
     
@@ -430,11 +433,11 @@ class CoreHubClient:
                 self.base_url = CoreHubClient._shared_base_url
                 logger.debug(f"Using shared CoreHub URL in resync_entity: {self.base_url}")
             else:
-                # Try to get it from settings
-                from gluesync_scheduler.config.settings import settings
-                if settings.CORE_HUB_URL:
-                    self.base_url = settings.CORE_HUB_URL
-                    logger.debug(f"Using settings CoreHub URL in resync_entity: {self.base_url}")
+                # Use the class-level settings 
+                core_hub_url = CoreHubClient._settings.CORE_HUB_URL
+                if core_hub_url:
+                    self.base_url = core_hub_url
+                    logger.debug(f"Using class-level settings CoreHub URL in resync_entity: {self.base_url}")
                 else:
                     # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
                     logger.error("CoreHub URL not available - resync_entity cannot proceed")
@@ -521,11 +524,11 @@ class CoreHubClient:
                 self.base_url = CoreHubClient._shared_base_url
                 logger.debug(f"Using shared CoreHub URL in resync_pipeline: {self.base_url}")
             else:
-                # Try to get it from settings
-                from gluesync_scheduler.config.settings import settings
-                if settings.CORE_HUB_URL:
-                    self.base_url = settings.CORE_HUB_URL
-                    logger.debug(f"Using settings CoreHub URL in resync_pipeline: {self.base_url}")
+                # Use the class-level settings 
+                core_hub_url = CoreHubClient._settings.CORE_HUB_URL
+                if core_hub_url:
+                    self.base_url = core_hub_url
+                    logger.debug(f"Using class-level settings CoreHub URL in resync_pipeline: {self.base_url}")
                 else:
                     # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
                     logger.error("CoreHub URL not available - resync_pipeline cannot proceed")
