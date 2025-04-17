@@ -26,7 +26,7 @@ import logging
 import requests
 import uuid
 import pytz
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any, Union
 
 from gluesync_scheduler.config.settings import settings
