@@ -42,10 +42,9 @@ class CronService:
     def __init__(self):
         """Initialize the cron service with the user's crontab"""
         try:
-            # Use the current user if CRONTAB_USER is not specified
-            crontab_user = settings.CRONTAB_USER or True
-            logger.info(f"Initializing crontab for user: {crontab_user}")
-            self.crontab = CronTab(user=crontab_user)
+            # Always use the current user for crontab to avoid permission issues
+            logger.info("Initializing crontab for current user")
+            self.crontab = CronTab(user=True)
         except Exception as e:
             logger.error(f"Error initializing crontab: {str(e)}")
             raise HTTPException(
@@ -78,10 +77,8 @@ class CronService:
         log_file = os.path.join(settings.CRON_LOG_DIR, f"{job.cron_job_identifier}.log")
         error_file = os.path.join(settings.CRON_LOG_DIR, f"{job.cron_job_identifier}.error.log")
         
-        # Add timestamp and job info to the log
-        command = f"echo '[$(date)] Running job {job.id}: {job.name}' >> {log_file} && \
-                  curl -s -X POST '{api_url}' -w '\n%{{http_code}}' >> {log_file} 2>> {error_file} || \
-                  echo '[$(date)] Failed to execute job {job.id}' >> {error_file}"
+        # Add timestamp and job info to the log - IMPORTANT: Keep this as a single line for crontab compatibility
+        command = f"echo '[$(date)] Running job {job.id}: {job.name}' >> {log_file} && curl -s -X POST '{api_url}' -w '%{{http_code}}' >> {log_file} 2>> {error_file} || echo '[$(date)] Failed to execute job {job.id}' >> {error_file}"
         
         return command
 

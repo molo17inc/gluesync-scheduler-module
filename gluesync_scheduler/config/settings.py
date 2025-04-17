@@ -67,6 +67,7 @@ class Settings:
     DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
     
     # Cron settings
+    # Use current user for crontab by default (True), or specific user if provided
     CRONTAB_USER = os.getenv('CRONTAB_USER', '')
     CRON_LOG_DIR = os.getenv('CRON_LOG_DIR', './logs')
 
