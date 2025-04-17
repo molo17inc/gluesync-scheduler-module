@@ -110,7 +110,7 @@ class CoreHubClient:
             self.base_url = CoreHubClient._discovered_url
             logger.debug(f"Using previously discovered CoreHub URL: {self.base_url}")
             return
-            
+        
         # No URL found - base_url remains None
         logger.warning("No CoreHub URL available - API operations will fail until a URL is provided")
     
@@ -270,30 +270,32 @@ class CoreHubClient:
     
     def start_entity(self, pipeline_id: str, entity_id: str, with_snapshot: bool = False) -> bool:
         """Start a specific entity in a pipeline"""
-        path = f'/pipelines/{pipeline_id}/entities/{entity_id}/commands/lifecycle/start'
-        body = {}
-        
-        if with_snapshot:
-            body['withSnapshot'] = True
+        path = f'/pipelines/{pipeline_id}/commands/sync/start'
+        params = {
+            'entity': entity_id,
+            'withSnapshot': 'true' if with_snapshot else 'false'
+        }
             
-        response = self.fetch_core_hub(path, method='POST', body=body)
+        response = self.fetch_core_hub(path, method='POST', params=params)
         return response is not None
     
     def stop_entity(self, pipeline_id: str, entity_id: str) -> bool:
         """Stop a specific entity in a pipeline"""
-        path = f'/pipelines/{pipeline_id}/entities/{entity_id}/commands/lifecycle/stop'
-        response = self.fetch_core_hub(path, method='POST')
+        path = f'/pipelines/{pipeline_id}/commands/sync/stop'
+        params = {'entity': entity_id}
+        response = self.fetch_core_hub(path, method='POST', params=params)
         return response is not None
     
     def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for a specific entity"""
-        path = f'/pipelines/{pipeline_id}/entities/{entity_id}/commands/sync/one-time-snapshot'
-        body = {
+        path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
+        params = {
+            'entity': entity_id,
             'snapshotWriteMethod': snapshot_write_method
         }
         
         try:
-            response = self.fetch_core_hub(path, method='POST', body=body)
+            response = self.fetch_core_hub(path, method='POST', params=params)
             success = response is not None
             if success:
                 logger.info(f"Successfully resynced entity {entity_id} in pipeline {pipeline_id}")
@@ -305,14 +307,13 @@ class CoreHubClient:
     
     def start_pipeline(self, pipeline_id: str, with_snapshot: bool = False) -> bool:
         """Start all entities in a pipeline"""
-        path = f'/pipelines/{pipeline_id}/commands/lifecycle/start'
-        body = {}
-        
-        if with_snapshot:
-            body['withSnapshot'] = True
+        path = f'/pipelines/{pipeline_id}/commands/sync/start'
+        params = {
+            'withSnapshot': 'true' if with_snapshot else 'false'
+        }
             
         try:
-            response = self.fetch_core_hub(path, method='POST', body=body)
+            response = self.fetch_core_hub(path, method='POST', params=params)
             success = response is not None
             if success:
                 logger.info(f"Successfully started pipeline {pipeline_id}")
@@ -324,7 +325,7 @@ class CoreHubClient:
     
     def stop_pipeline(self, pipeline_id: str) -> bool:
         """Stop all entities in a pipeline"""
-        path = f'/pipelines/{pipeline_id}/commands/lifecycle/stop'
+        path = f'/pipelines/{pipeline_id}/commands/sync/stop'
         
         try:
             response = self.fetch_core_hub(path, method='POST')
@@ -340,12 +341,12 @@ class CoreHubClient:
     def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for all entities in a pipeline"""
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
-        body = {
+        params = {
             'snapshotWriteMethod': snapshot_write_method
         }
         
         try:
-            response = self.fetch_core_hub(path, method='POST', body=body)
+            response = self.fetch_core_hub(path, method='POST', params=params)
             success = response is not None
             if success:
                 logger.info(f"Successfully resynced pipeline {pipeline_id}")
