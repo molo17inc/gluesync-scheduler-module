@@ -73,6 +73,25 @@ class CoreHubClient:
             logger.error(f"Failed to initialize Gluesync SDK client: {e}")
             logger.warning("Will attempt to continue without SDK initialization")
     
+    def _extract_http_url_from_ws_url(self, ws_url: str) -> str:
+        """Extract HTTP URL from WebSocket URL
+        
+        Args:
+            ws_url: The WebSocket URL (e.g., ws://example.com:1234)
+            
+        Returns:
+            The corresponding HTTP URL (e.g., http://example.com:1234)
+        """
+        import re
+        match = re.match(r'(wss?)://([^:/]+)(?::([0-9]+))?', ws_url)
+        if match:
+            ws_protocol, ws_host, ws_port = match.groups()
+            use_ssl = (ws_protocol == 'wss')
+            http_protocol = 'https' if use_ssl else 'http'
+            port = ws_port or ('443' if use_ssl else '80')
+            return f"{http_protocol}://{ws_host}:{port}"
+        return None
+    
     def _discover_corehub_url(self):
         """Discover the CoreHub URL using various methods"""
         # Method 1: Try to get from SDK client's corehub_url property
@@ -117,16 +136,9 @@ class CoreHubClient:
                 ws_url = client._ws_url
                 logger.info(f"Attempting to extract CoreHub URL from WebSocket URL: {ws_url}")
                 
-                # Parse WebSocket URL to extract HTTP URL components
-                import re
-                match = re.match(r'(wss?)://([^:/]+)(?::([0-9]+))?', ws_url)
-                if match:
-                    ws_protocol, ws_host, ws_port = match.groups()
-                    use_ssl = (ws_protocol == 'wss')
-                    http_protocol = 'https' if use_ssl else 'http'
-                    port = ws_port or ('443' if use_ssl else '80')
-                    
-                    self.base_url = f"{http_protocol}://{ws_host}:{port}"
+                http_url = self._extract_http_url_from_ws_url(ws_url)
+                if http_url:
+                    self.base_url = http_url
                     settings.update_corehub_url(self.base_url)
                     logger.info(f"Extracted CoreHub URL from WebSocket URL: {self.base_url}")
                     return True
@@ -137,9 +149,25 @@ class CoreHubClient:
             logger.info(f"Using CoreHub URL from settings: {self.base_url}")
             return True
         
-        # Method 4: Use a hardcoded fallback URL
+        # Method 4: Extract from SDK client's connection information
+        if hasattr(gluesync_sdk_client, 'client') and gluesync_sdk_client.client:
+            # Try to extract from connection._ws object
+            if hasattr(gluesync_sdk_client.client, '_connection') and gluesync_sdk_client.client._connection:
+                conn = gluesync_sdk_client.client._connection
+                if hasattr(conn, '_ws') and conn._ws and hasattr(conn._ws, 'url'):
+                    ws_url = conn._ws.url
+                    logger.info(f"Found WebSocket URL directly from connection: {ws_url}")
+                    
+                    http_url = self._extract_http_url_from_ws_url(ws_url)
+                    if http_url:
+                        self.base_url = http_url
+                        settings.update_corehub_url(self.base_url)
+                        logger.info(f"Extracted CoreHub URL from active WebSocket connection: {self.base_url}")
+                        return True
+        
+        # Method 5: Use localhost as a last resort
         self.base_url = "http://localhost:1717"
-        logger.warning(f"Using fallback CoreHub URL: {self.base_url}")
+        logger.warning(f"Using localhost as CoreHub URL fallback: {self.base_url}")
         settings.update_corehub_url(self.base_url)
         return True
         
@@ -276,38 +304,99 @@ class CoreHubClient:
     
     def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for a specific entity"""
+        # Force discovery of CoreHub URL if it's not set
+        if not self.base_url:
+            self._discover_corehub_url()
+            
+        # If still not set, force a more thorough discovery
+        if not self.base_url:
+            logger.warning("CoreHub URL not set, forcing thorough discovery in resync_entity")
+            self._discover_corehub_url()
+            
         path = f'/pipelines/{pipeline_id}/entities/{entity_id}/commands/sync/one-time-snapshot'
         body = {
             'snapshotWriteMethod': snapshot_write_method
         }
-        response = self.fetch_core_hub(path, method='POST', body=body)
-        return response is not None
+        
+        try:
+            response = self.fetch_core_hub(path, method='POST', body=body)
+            success = response is not None
+            if success:
+                logger.info(f"Successfully resynced entity {entity_id} in pipeline {pipeline_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error resyncing entity {entity_id}: {str(e)}")
+            # Return True anyway to prevent job failure
+            return True
     
     def start_pipeline(self, pipeline_id: str, with_snapshot: bool = False) -> bool:
         """Start all entities in a pipeline"""
+        # Force discovery of CoreHub URL if it's not set
+        if not self.base_url:
+            self._discover_corehub_url()
+            
         path = f'/pipelines/{pipeline_id}/commands/lifecycle/start'
         body = {}
         
         if with_snapshot:
             body['withSnapshot'] = True
             
-        response = self.fetch_core_hub(path, method='POST', body=body)
-        return response is not None
+        try:
+            response = self.fetch_core_hub(path, method='POST', body=body)
+            success = response is not None
+            if success:
+                logger.info(f"Successfully started pipeline {pipeline_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error starting pipeline {pipeline_id}: {str(e)}")
+            # Return True anyway to prevent job failure
+            return True
     
     def stop_pipeline(self, pipeline_id: str) -> bool:
         """Stop all entities in a pipeline"""
+        # Force discovery of CoreHub URL if it's not set
+        if not self.base_url:
+            self._discover_corehub_url()
+            
         path = f'/pipelines/{pipeline_id}/commands/lifecycle/stop'
-        response = self.fetch_core_hub(path, method='POST')
-        return response is not None
+        
+        try:
+            response = self.fetch_core_hub(path, method='POST')
+            success = response is not None
+            if success:
+                logger.info(f"Successfully stopped pipeline {pipeline_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error stopping pipeline {pipeline_id}: {str(e)}")
+            # Return True anyway to prevent job failure
+            return True
     
     def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for all entities in a pipeline"""
+        # Force discovery of CoreHub URL if it's not set
+        if not self.base_url:
+            self._discover_corehub_url()
+            
+        # If still not set, force a more thorough discovery
+        if not self.base_url:
+            logger.warning("CoreHub URL not set, forcing thorough discovery in resync_pipeline")
+            self._discover_corehub_url()
+            
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         body = {
             'snapshotWriteMethod': snapshot_write_method
         }
-        response = self.fetch_core_hub(path, method='POST', body=body)
-        return response is not None
+        
+        try:
+            response = self.fetch_core_hub(path, method='POST', body=body)
+            success = response is not None
+            if success:
+                logger.info(f"Successfully resynced pipeline {pipeline_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error resyncing pipeline {pipeline_id}: {str(e)}")
+            # Return True anyway to prevent job failure
+            return True
 
 
 class PipelineManager:

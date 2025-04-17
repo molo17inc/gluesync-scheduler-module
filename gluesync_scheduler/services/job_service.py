@@ -333,24 +333,12 @@ class JobService:
             db_job.updated_at = now
             self.db.commit()
             
-            # Return a simple dictionary to avoid recursion issues
-            result = {
+            # Return a very simple dictionary to avoid recursion issues
+            return {
                 "success": success,
-                "message": message,
+                "message": "Job executed successfully" if success else "Job execution failed",
                 "job_id": job_id
             }
-            
-            # Only add details if they're not too complex
-            if isinstance(details, dict):
-                for key, value in details.items():
-                    # Only add simple values to avoid recursion
-                    if isinstance(value, (str, int, float, bool, type(None))):
-                        result[key] = value
-                    else:
-                        # Convert complex values to strings
-                        result[key] = str(value)
-            
-            return result
         except Exception as e:
             self.db.rollback()
             logger.error(f"Error running job: {str(e)}")
@@ -358,6 +346,41 @@ class JobService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error running job: {str(e)}"
             )
+    
+    def _safe_response(self, response_text: str) -> dict:
+        """
+        Safely handle API response to avoid recursion issues
+        
+        Args:
+            response_text: The response text from the API
+            
+        Returns:
+            A simplified dictionary with only primitive types
+        """
+        try:
+            # Try to parse as JSON
+            import json
+            data = json.loads(response_text)
+            
+            # Create a new simple dictionary with only primitive types
+            result = {}
+            
+            # Only include simple values to avoid recursion
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if isinstance(value, (str, int, float, bool, type(None))):
+                        result[key] = value
+                    else:
+                        # Convert complex values to strings
+                        result[key] = str(value)[:100]  # Limit string length
+            else:
+                # If not a dict, just return a simple message
+                result = {"data": str(data)[:100]}
+                
+            return result
+        except Exception:
+            # If parsing fails, return a simple string
+            return {"text": str(response_text)[:100]}
     
     def _execute_job_logic(self, job: ScheduledJob) -> tuple[bool, str, dict]:
         """
@@ -416,20 +439,9 @@ class JobService:
             
             # Check the response
             if response.status_code in [200, 202]:
-                # Extract only the essential information from the response to avoid recursion issues
-                try:
-                    # Try to parse JSON response
-                    resp_data = response.json()
-                    # Extract only simple data types to avoid recursion
-                    simple_response = {
-                        "success": resp_data.get("success", True),
-                        "message": resp_data.get("message", "Operation completed successfully")
-                    }
-                    success_msg = f"Job executed successfully: {simple_response}"
-                except Exception:
-                    # If parsing fails, use a simple string representation
-                    success_msg = f"Job executed successfully with status code {response.status_code}"
-                
+                # Use our safe response handler to avoid recursion issues
+                safe_resp = self._safe_response(response.text)
+                success_msg = f"Job executed successfully with status code {response.status_code}"
                 logger.info(success_msg)
                 return True, success_msg, {"status_code": response.status_code}
             else:
