@@ -289,6 +289,79 @@ class JobService:
                 detail=f"Error updating job status: {str(e)}"
             )
 
+    def run_job(self, job_id: int) -> Dict[str, Any]:
+        """
+        Run a job manually
+        
+        Args:
+            job_id: The ID of the job to run
+            
+        Returns:
+            Dict with success status and message
+            
+        Raises:
+            HTTPException: If job not found or error running
+        """
+        db_job = self.db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+        if not db_job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job with ID {job_id} not found"
+            )
+        
+        try:
+            # Update last run time
+            now = datetime.utcnow()
+            db_job.last_run = now
+            
+            # Execute the command
+            logger.info(f"Manually running job {job_id}: {db_job.name}")
+            logger.info(f"Executing command: {db_job.command}")
+            
+            # Use subprocess to run the command
+            import subprocess
+            process = subprocess.Popen(
+                db_job.command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            stdout, stderr = process.communicate()
+            exit_code = process.returncode
+            
+            # Update job status based on execution result
+            if exit_code == 0:
+                db_job.last_successful_run = now
+                db_job.last_error_message = None
+                db_job.last_run_error_time = None
+                success = True
+                message = "Job executed successfully"
+            else:
+                db_job.last_error_message = stderr.decode('utf-8') if stderr else f"Exit code: {exit_code}"
+                db_job.last_run_error_time = now
+                success = False
+                message = f"Job execution failed: {db_job.last_error_message}"
+            
+            # Save changes to database
+            db_job.updated_at = now
+            self.db.commit()
+            
+            return {
+                "success": success,
+                "message": message,
+                "job_id": job_id,
+                "exit_code": exit_code,
+                "stdout": stdout.decode('utf-8') if stdout else "",
+                "stderr": stderr.decode('utf-8') if stderr else ""
+            }
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error running job: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error running job: {str(e)}"
+            )
+
     def delete_job(self, job_id: int) -> None:
         """
         Delete a job

@@ -350,6 +350,57 @@ async def update_job(job_id: int = Path(..., description="The ID of the job to u
             )
 
 
+@router.post("/{job_id}/run", responses={
+    status.HTTP_200_OK: {
+        "description": "Job execution result",
+        "content": {
+            "application/json": {
+                "example": {
+                    "success": True,
+                    "message": "Job executed successfully",
+                    "job_id": 1,
+                    "exit_code": 0,
+                    "stdout": "Pipeline started successfully",
+                    "stderr": ""
+                }
+            }
+        }
+    },
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponse,
+        "description": "Job not found"
+    },
+    status.HTTP_500_INTERNAL_SERVER_ERROR: {
+        "model": ErrorResponse,
+        "description": "Error running job"
+    }
+})
+def run_job(
+    job_id: int = Path(..., description="The ID of the job to run"),
+    db: Session = Depends(get_db)
+):
+    """
+    Run a job manually.
+    
+    ## Parameters
+    - **job_id**: The unique identifier of the job to run
+    
+    ## Returns
+    A dictionary with the execution results:
+    - **success**: Whether the job executed successfully
+    - **message**: A message describing the result
+    - **job_id**: The ID of the job that was run
+    - **exit_code**: The exit code of the command
+    - **stdout**: The standard output of the command
+    - **stderr**: The standard error of the command
+    
+    ## Errors
+    - **404**: Job with the specified ID was not found
+    - **500**: Server error during job execution
+    """
+    job_service = JobService(db)
+    return job_service.run_job(job_id)
+
 @router.patch("/{job_id}/status", response_model=Job, responses={
     status.HTTP_404_NOT_FOUND: {
         "model": ErrorResponse,
