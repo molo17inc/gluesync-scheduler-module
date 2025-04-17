@@ -380,7 +380,7 @@ def run_job(
     db: Session = Depends(get_db)
 ):
     """
-    Run a job manually.
+    Run a job.
     
     ## Parameters
     - **job_id**: The unique identifier of the job to run

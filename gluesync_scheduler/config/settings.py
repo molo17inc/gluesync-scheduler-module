@@ -64,6 +64,7 @@ class Settings:
     # Logging settings
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     LOG_DIR = os.getenv('LOG_DIR', './logs')
+    DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
     
     # Cron settings
     CRONTAB_USER = os.getenv('CRONTAB_USER', '')

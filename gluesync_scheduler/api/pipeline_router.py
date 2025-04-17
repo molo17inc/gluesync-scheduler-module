@@ -184,10 +184,11 @@ async def play_pipeline(
             except Exception as e:
                 logger.error(f"Error updating job status: {str(e)}")
         
+        # Return a simplified response to avoid recursion issues
         return {
             "success": True,
             "message": message,
-            "details": details
+            "data": None  # Use None instead of complex details object
         }
     except Exception as e:
         logger.error(f"Error starting pipeline: {str(e)}")
@@ -290,10 +291,11 @@ async def pause_pipeline(
             except Exception as e:
                 logger.error(f"Error updating job status: {str(e)}")
         
+        # Return a simplified response to avoid recursion issues
         return {
             "success": True,
             "message": message,
-            "details": details
+            "data": None  # Use None instead of complex details object
         }
     except Exception as e:
         logger.error(f"Error stopping pipeline: {str(e)}")
@@ -406,10 +408,11 @@ async def resync_pipeline(
             except Exception as e:
                 logger.error(f"Error updating job status: {str(e)}")
         
+        # Return a simplified response to avoid recursion issues
         return {
             "success": True,
             "message": message,
-            "details": details
+            "data": None  # Use None instead of complex details object
         }
     except Exception as e:
         logger.error(f"Error resyncing pipeline: {str(e)}")

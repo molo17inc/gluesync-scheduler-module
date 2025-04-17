@@ -291,7 +291,7 @@ class JobService:
 
     def run_job(self, job_id: int) -> dict:
         """
-        Run a job manually
+        Run a job
         
         Args:
             job_id: The ID of the job to run
