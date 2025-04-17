@@ -109,6 +109,16 @@ async def startup_event():
         if gluesync_sdk_client.corehub_url:
             settings.update_corehub_url(gluesync_sdk_client.corehub_url)
             logger.info(f"Updated CoreHub URL from SDK: {settings.CORE_HUB_URL}")
+        elif hasattr(gluesync_sdk_client, '_client') and gluesync_sdk_client._client:
+            # Try to extract CoreHub URL from the client's connection
+            if hasattr(gluesync_sdk_client._client, '_host') and gluesync_sdk_client._client._host:
+                host = gluesync_sdk_client._client._host
+                port = getattr(gluesync_sdk_client._client, '_port', 1717)
+                use_ssl = getattr(gluesync_sdk_client._client, '_use_ssl', False)
+                protocol = 'https' if use_ssl else 'http'
+                corehub_url = f"{protocol}://{host}:{port}"
+                settings.update_corehub_url(corehub_url)
+                logger.info(f"Extracted CoreHub URL from client connection: {settings.CORE_HUB_URL}")
     except Exception as e:
         logger.error(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("The application will continue, but some functionality may be limited")

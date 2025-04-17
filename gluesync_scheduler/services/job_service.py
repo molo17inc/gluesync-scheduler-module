@@ -401,7 +401,9 @@ class JobService:
                 except json.JSONDecodeError:
                     logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
             
-            base_url = f"http://{settings.HOST}:{settings.PORT}/api"
+            # Use localhost for internal API calls, not the binding address (0.0.0.0)
+            base_url = f"http://localhost:{settings.PORT}/api"
+            logger.info(f"Using internal API URL: {base_url}")
             
             # Determine the endpoint based on task type
             if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:

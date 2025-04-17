@@ -165,11 +165,10 @@ class CoreHubClient:
                         logger.info(f"Extracted CoreHub URL from active WebSocket connection: {self.base_url}")
                         return True
         
-        # Method 5: Use localhost as a last resort
-        self.base_url = "http://localhost:1717"
-        logger.warning(f"Using localhost as CoreHub URL fallback: {self.base_url}")
-        settings.update_corehub_url(self.base_url)
-        return True
+        # At this point, we've tried all discovery methods and still don't have a URL
+        # This should never happen if the SDK client is properly initialized
+        logger.error("Failed to discover CoreHub URL after trying all methods")
+        return False
         
     def _try_sdk_token(self):
         """Try to get token from Gluesync SDK client if it's initialized"""
