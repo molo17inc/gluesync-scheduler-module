@@ -314,33 +314,20 @@ class JobService:
             now = datetime.utcnow()
             db_job.last_run = now
             
-            # Execute the command
+            # Log job execution
             logger.info(f"Manually running job {job_id}: {db_job.name}")
-            logger.info(f"Executing command: {db_job.command}")
             
-            # Use subprocess to run the command
-            import subprocess
-            process = subprocess.Popen(
-                db_job.command,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            stdout, stderr = process.communicate()
-            exit_code = process.returncode
+            # Execute the job logic directly instead of running the command
+            success, message, details = self._execute_job_logic(db_job)
             
             # Update job status based on execution result
-            if exit_code == 0:
+            if success:
                 db_job.last_successful_run = now
                 db_job.last_error_message = None
                 db_job.last_run_error_time = None
-                success = True
-                message = "Job executed successfully"
             else:
-                db_job.last_error_message = stderr.decode('utf-8') if stderr else f"Exit code: {exit_code}"
+                db_job.last_error_message = message
                 db_job.last_run_error_time = now
-                success = False
-                message = f"Job execution failed: {db_job.last_error_message}"
             
             # Save changes to database
             db_job.updated_at = now
@@ -350,9 +337,7 @@ class JobService:
                 "success": success,
                 "message": message,
                 "job_id": job_id,
-                "exit_code": exit_code,
-                "stdout": stdout.decode('utf-8') if stdout else "",
-                "stderr": stderr.decode('utf-8') if stderr else ""
+                **details
             }
         except Exception as e:
             self.db.rollback()
@@ -361,6 +346,76 @@ class JobService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error running job: {str(e)}"
             )
+    
+    def _execute_job_logic(self, job: ScheduledJob) -> tuple[bool, str, dict]:
+        """
+        Execute the job logic based on its type and parameters
+        
+        Args:
+            job: The scheduled job to execute
+            
+        Returns:
+            Tuple of (success, message, details)
+        """
+        try:
+            # Parse entity_ids if present
+            entity_ids = []
+            if job.entity_ids:
+                try:
+                    entity_ids = json.loads(job.entity_ids)
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
+            
+            base_url = f"http://{settings.HOST}:{settings.PORT}/api"
+            
+            # Determine the endpoint based on task type
+            if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
+                endpoint = f"{base_url}/pipelines/{job.pipeline_id}/play"
+            elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
+                endpoint = f"{base_url}/pipelines/{job.pipeline_id}/pause"
+            elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
+                endpoint = f"{base_url}/pipelines/{job.pipeline_id}/resync"
+            else:
+                error_msg = f"Unknown task type: {job.task_type}"
+                logger.error(error_msg)
+                return False, error_msg, {}
+            
+            # Prepare the JSON payload
+            json_data = {}
+            
+            # Add entity_ids to the payload if present
+            if entity_ids:
+                json_data["entity_ids"] = entity_ids
+            
+            # Add with_snapshot for start operations if needed
+            if job.with_snapshot and job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
+                json_data["with_snapshot"] = True
+            
+            # Log the request details
+            logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
+            logger.info(f"Endpoint: POST {endpoint}")
+            logger.info(f"JSON Payload: {json_data}")
+            
+            # Make the API request with JSON payload
+            import requests
+            headers = {"Content-Type": "application/json"}
+            
+            response = requests.post(endpoint, json=json_data, headers=headers)
+            
+            # Check the response
+            if response.status_code in [200, 202]:
+                success_msg = f"Job executed successfully: {response.text}"
+                logger.info(success_msg)
+                return True, success_msg, {"response": response.text}
+            else:
+                error_msg = f"Job execution failed with status {response.status_code}: {response.text}"
+                logger.error(error_msg)
+                return False, error_msg, {"status_code": response.status_code, "response": response.text}
+                
+        except Exception as e:
+            error_msg = f"Error executing job: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg, {"exception": str(e)}
 
     def delete_job(self, job_id: int) -> None:
         """
