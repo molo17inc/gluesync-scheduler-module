@@ -47,11 +47,8 @@ class CoreHubClient:
     # Singleton instance
     _instance = None
     
-    # Class variable to track if CoreHub URL has been discovered
-    _corehub_url_discovered = False
-    
-    # Class variable to store the discovered URL
-    _shared_base_url = None
+    # Shared discovered URL to persist across method calls
+    _discovered_url = None
     
     def __new__(cls):
         """Implement singleton pattern"""
@@ -61,70 +58,75 @@ class CoreHubClient:
             cls._instance._initialized = False
         return cls._instance
     
-    def __init__(self):
-        """Initialize the Core Hub client with configuration from settings"""
-        # Skip initialization if already done
+    def __init__(self, provided_url=None):
+        """Initialize the Core Hub client with configuration from settings
+        
+        Args:
+            provided_url: Optional explicitly provided URL that takes highest priority
+        """
+        # Skip initialization if already done (singleton pattern)
         if getattr(self, '_initialized', False):
+            # If a URL is provided to an already initialized instance, update it
+            if provided_url is not None:
+                self.base_url = provided_url
+                CoreHubClient._discovered_url = provided_url
+                logger.debug(f"Updating singleton base URL to: {provided_url}")
             return
-            
+        
         logger.info("Initializing CoreHubClient")
         
-        # First try to get the URL from the SDK client directly
-        from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
-        sdk_url = None
-        if hasattr(gluesync_sdk_client, 'corehub_url') and gluesync_sdk_client.corehub_url:
-            sdk_url = gluesync_sdk_client.corehub_url
-            logger.info(f"Found CoreHub URL from SDK client: {sdk_url}")
-            
-        # Then try class variable or settings
-        self.base_url = sdk_url or CoreHubClient._shared_base_url or settings.CORE_HUB_URL
-        
-        # If we have a URL from any source, store it and mark discovery as complete
-        if self.base_url:
-            # Store the URL in the class variable if not already set
-            if not CoreHubClient._shared_base_url:
-                CoreHubClient._shared_base_url = self.base_url
-            CoreHubClient._corehub_url_discovered = True
-            logger.info(f"Using CoreHub URL: {self.base_url}")
-            
-            # Also update settings if needed
-            if not settings.CORE_HUB_URL:
-                settings.update_corehub_url(self.base_url)
-                logger.info(f"Updated CoreHub URL in settings: {settings.CORE_HUB_URL}")
-        # If no URL is set, try to discover it
-        else:
-            # Only attempt discovery if we haven't already done it
-            if not CoreHubClient._corehub_url_discovered:
-                logger.info("No CoreHub URL found, attempting discovery")
-                self._discover_corehub_url()
-                if self.base_url:
-                    # Store the discovered URL in the class variable
-                    CoreHubClient._shared_base_url = self.base_url
-                    CoreHubClient._corehub_url_discovered = True
-                    logger.info(f"CoreHub URL discovered and stored: {self.base_url}")
-                    
-                    # Also update settings
-                    settings.update_corehub_url(self.base_url)
-                    logger.info(f"Updated CoreHub URL in settings: {settings.CORE_HUB_URL}")
-                else:
-                    logger.error("Failed to discover CoreHub URL")
-                    CoreHubClient._corehub_url_discovered = True  # Mark as attempted
-            else:
-                # If we've already tried discovery but still don't have a URL,
-                # log a warning but don't try again
-                logger.warning("CoreHub URL not available despite previous discovery attempts")
-            
-        self.entity_start_timeout = settings.ENTITY_START_TIMEOUT  # seconds to wait between entity operations
+        # Initialize core properties
+        self.base_url = provided_url  # Use provided URL if available
         self.token = None
+        self.entity_start_timeout = settings.ENTITY_START_TIMEOUT
+        
+        # If no URL was explicitly provided, try discovery options
+        if self.base_url is None:
+            self._initialize_corehub_url()
+        else:
+            # Store explicitly provided URL in class variable
+            CoreHubClient._discovered_url = self.base_url
+            logger.info(f"Using provided CoreHub URL: {self.base_url}")
+        
+        # Get the token once we have a valid base URL
+        if self.base_url:
+            self._initialize_token()
+        
+        # Mark as initialized to avoid duplicate initialization
         self._initialized = True
         
-        # Initialize the SDK client if running as standalone script
-        if __name__ == "__main__":
-            # Run the async initialization in a synchronous context
-            asyncio.run(self._initialize_sdk())
+    def _initialize_corehub_url(self):
+        """Initialize the CoreHub URL from the best available source"""
+        # Priority 1: Check for already discovered URL in the singleton
+        if settings.CORE_HUB_URL:
+            self.base_url = settings.CORE_HUB_URL
+            # Store in class variable for future use
+            CoreHubClient._discovered_url = self.base_url
+            logger.info(f"Using CoreHub URL from settings: {self.base_url}")
+            return
+        
+        # Priority 2: Use the previously discovered URL
+        if CoreHubClient._discovered_url is not None:
+            self.base_url = CoreHubClient._discovered_url
+            logger.debug(f"Using previously discovered CoreHub URL: {self.base_url}")
+            return
             
-        # Try to get token from gluesync SDK client
-        self._try_sdk_token()
+        # No URL found - base_url remains None
+        logger.warning("No CoreHub URL available - API operations will fail until a URL is provided")
+    
+    def _initialize_token(self):
+        """Initialize the token for API authentication"""
+        try:
+            from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+            if hasattr(gluesync_sdk_client, 'token') and gluesync_sdk_client.token:
+                self.token = gluesync_sdk_client.token
+                logger.info("Using authentication token from SDK client")
+                return True
+        except Exception as e:
+            logger.warning(f"Could not get token from SDK client: {str(e)}")
+        
+        logger.warning("No authentication token available - API calls may fail")
+        return False
         
     async def _initialize_sdk(self):
         """Initialize the SDK client if not already initialized"""
@@ -136,114 +138,9 @@ class CoreHubClient:
             logger.error(f"Failed to initialize Gluesync SDK client: {e}")
             logger.warning("Will attempt to continue without SDK initialization")
     
-    def _extract_http_url_from_ws_url(self, ws_url: str) -> str:
-        """Extract HTTP URL from WebSocket URL
+    # These methods are replaced by _initialize_corehub_url
         
-        Args:
-            ws_url: The WebSocket URL (e.g., ws://example.com:1234)
-            
-        Returns:
-            The corresponding HTTP URL (e.g., http://example.com:1234)
-        """
-        import re
-        match = re.match(r'(wss?)://([^:/]+)(?::([0-9]+))?', ws_url)
-        if match:
-            ws_protocol, ws_host, ws_port = match.groups()
-            use_ssl = (ws_protocol == 'wss')
-            http_protocol = 'https' if use_ssl else 'http'
-            port = ws_port or ('443' if use_ssl else '80')
-            return f"{http_protocol}://{ws_host}:{port}"
-        return None
-    
-    def _discover_corehub_url(self):
-        """Discover the CoreHub URL using various methods"""
-        # Method 1: Try to get from SDK client's corehub_url property
-        if gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
-            self.base_url = gluesync_sdk_client.corehub_url
-            settings.update_corehub_url(self.base_url)
-            logger.info(f"Discovered CoreHub URL from SDK property: {self.base_url}")
-            return True
-        
-        # Method 2: Try to extract from SDK client's internal properties
-        if gluesync_sdk_client.is_initialized and gluesync_sdk_client.client:
-            client = gluesync_sdk_client.client
-            
-            # Try to get from _host and _port
-            if hasattr(client, '_host') and client._host:
-                host = client._host
-        if settings.CORE_HUB_URL:
-            self.base_url = settings.CORE_HUB_URL
-            logger.info(f"Using CoreHub URL from settings: {self.base_url}")
-            return True
-        
-        # Method 2: Try to get directly from the SDK client
-        try:
-            from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
-            
-            # Try to get token from SDK client
-            if hasattr(gluesync_sdk_client, 'token') and gluesync_sdk_client.token:
-                self.token = gluesync_sdk_client.token
-                logger.info("Using token from Gluesync SDK client")
-            
-            # Try to get URL from SDK client's corehub_url property
-            if hasattr(gluesync_sdk_client, 'corehub_url') and gluesync_sdk_client.corehub_url:
-                self.base_url = gluesync_sdk_client.corehub_url
-                settings.update_corehub_url(self.base_url)
-                logger.info(f"Using CoreHub URL from SDK client: {self.base_url}")
-                return True
-            
-            # Try to get URL from SDK client's connection
-            if hasattr(gluesync_sdk_client, '_client') and gluesync_sdk_client._client:
-                # Try to get host and port directly
-                if hasattr(gluesync_sdk_client._client, 'host') and gluesync_sdk_client._client.host:
-                    host = gluesync_sdk_client._client.host
-                    port = getattr(gluesync_sdk_client._client, 'port', 1717)
-                    use_ssl = getattr(gluesync_sdk_client._client, 'use_ssl', False)
-                    
-                    scheme = "https" if use_ssl else "http"
-                    self.base_url = f"{scheme}://{host}:{port}"
-                    settings.update_corehub_url(self.base_url)
-                    logger.info(f"Using CoreHub URL from SDK client host: {self.base_url}")
-                    return True
-                
-                # Try to get from connection object
-                if hasattr(gluesync_sdk_client._client, 'connection') and gluesync_sdk_client._client.connection:
-                    conn = gluesync_sdk_client._client.connection
-                    if hasattr(conn, 'url'):
-                        ws_url = conn.url
-                        logger.info(f"Found WebSocket URL from SDK connection: {ws_url}")
-                        
-                        # Parse the WebSocket URL to extract host and port
-                        parsed_url = urlparse(ws_url)
-                        host = parsed_url.hostname
-                        port = parsed_url.port or 1717
-                        use_ssl = parsed_url.scheme == 'wss'
-                        
-                        scheme = "https" if use_ssl else "http"
-                        self.base_url = f"{scheme}://{host}:{port}"
-                        settings.update_corehub_url(self.base_url)
-                        logger.info(f"Extracted CoreHub URL from SDK WebSocket: {self.base_url}")
-                        return True
-        except Exception as e:
-            logger.error(f"Error extracting CoreHub URL from SDK client: {str(e)}")
-        
-        # At this point, we've tried all discovery methods and still don't have a URL
-        logger.error("Failed to discover CoreHub URL after trying all methods")
-        return False
-        
-    def _try_sdk_token(self):
-        """Try to get token from Gluesync SDK client if it's initialized"""
-        try:
-            if gluesync_sdk_client.is_initialized and gluesync_sdk_client.token:
-                self.token = gluesync_sdk_client.token
-                logger.info("Using token from Gluesync SDK client")
-                return True
-            else:
-                logger.warning("SDK client is not initialized or token is not available")
-                logger.info(f"SDK initialized: {gluesync_sdk_client.is_initialized}, Token available: {gluesync_sdk_client.token is not None}")
-        except Exception as e:
-            logger.warning(f"Could not get token from Gluesync SDK client: {e}")
-        return False
+    # This method is replaced by _initialize_token
             
     def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict[str, Any]] = None, 
                        params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -258,49 +155,18 @@ class CoreHubClient:
         Returns:
             Response data as dictionary or None if request failed
         """
-        # Check if we have a valid base URL
+        # Simple null check - fail fast if we don't have a URL
         if not self.base_url:
-            # First try to get it from the SDK client directly
-            try:
-                from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
-                if hasattr(gluesync_sdk_client, 'corehub_url') and gluesync_sdk_client.corehub_url:
-                    self.base_url = gluesync_sdk_client.corehub_url
-                    logger.info(f"Using CoreHub URL from SDK client: {self.base_url}")
-                    # Also update the class variable
-                    CoreHubClient._shared_base_url = self.base_url
-                    CoreHubClient._corehub_url_discovered = True
-            except Exception as e:
-                logger.warning(f"Error getting URL from SDK client: {str(e)}")
-                
-            # Then try the shared URL
-            if not self.base_url and CoreHubClient._shared_base_url:
-                self.base_url = CoreHubClient._shared_base_url
-                logger.info(f"Using shared CoreHub URL: {self.base_url}")
+            logger.error("CoreHub URL not available - API request cannot proceed")
+            logger.error("Please ensure CoreHub URL is configured before making API calls")
+            return None
             
-            # Then try settings
-            if not self.base_url:
-                from gluesync_scheduler.config.settings import settings
-                if settings.CORE_HUB_URL:
-                    self.base_url = settings.CORE_HUB_URL
-                    logger.info(f"Using CoreHub URL from settings: {self.base_url}")
-            
-            # If we still don't have a URL, provide a clear error message with troubleshooting steps
-            if not self.base_url:
-                logger.error("CoreHub URL discovery failed. Please ensure one of the following is configured:")
-                logger.error("1. The SDK client is properly initialized and connected")
-                logger.error("2. CORE_HUB_URL is set in environment variables or configuration")
-                logger.error("3. The CoreHub is accessible and responding to discovery requests")
-                
-            # If we still don't have a URL, we can't proceed
-            if not self.base_url:
-                logger.error("CoreHub URL not available - API request cannot proceed")
-                return None
-                
-        # Try to get the SDK token first if we don't have one yet
+        # Authentication check
         if not self.token:
-            if not self._try_sdk_token():
-                logger.error("Authentication requires SDK token - ensure the gluesync_sdk_client is properly initialized")
-                return None
+            # Try one more time to get the token
+            self._initialize_token()
+            if not self.token:
+                logger.warning("No authentication token - proceeding with unauthenticated request")
             
         url = f"{self.base_url}{path}"
         headers = {
@@ -421,24 +287,6 @@ class CoreHubClient:
     
     def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for a specific entity"""
-        # Check if we have a valid base URL
-        if not self.base_url:
-            # Use the shared URL if available
-            if CoreHubClient._shared_base_url:
-                self.base_url = CoreHubClient._shared_base_url
-                logger.debug(f"Using shared CoreHub URL in resync_entity: {self.base_url}")
-            else:
-                # Import settings directly here to avoid any variable access issues
-                from gluesync_scheduler.config.settings import settings
-                
-                if settings.CORE_HUB_URL:
-                    self.base_url = settings.CORE_HUB_URL
-                    logger.debug(f"Using settings CoreHub URL in resync_entity: {self.base_url}")
-                else:
-                    # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
-                    logger.error("CoreHub URL not available - resync_entity cannot proceed")
-                    return False
-        
         path = f'/pipelines/{pipeline_id}/entities/{entity_id}/commands/sync/one-time-snapshot'
         body = {
             'snapshotWriteMethod': snapshot_write_method
@@ -457,24 +305,6 @@ class CoreHubClient:
     
     def start_pipeline(self, pipeline_id: str, with_snapshot: bool = False) -> bool:
         """Start all entities in a pipeline"""
-        # Check if we have a valid base URL
-        if not self.base_url:
-            # Use the shared URL if available
-            if CoreHubClient._shared_base_url:
-                self.base_url = CoreHubClient._shared_base_url
-                logger.debug(f"Using shared CoreHub URL in start_pipeline: {self.base_url}")
-            else:
-                # Import settings directly here to avoid any variable access issues
-                from gluesync_scheduler.config.settings import settings
-                
-                if settings.CORE_HUB_URL:
-                    self.base_url = settings.CORE_HUB_URL
-                    logger.debug(f"Using settings CoreHub URL in start_pipeline: {self.base_url}")
-                else:
-                    # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
-                    logger.error("CoreHub URL not available - start_pipeline cannot proceed")
-                    return False
-            
         path = f'/pipelines/{pipeline_id}/commands/lifecycle/start'
         body = {}
         
@@ -494,24 +324,6 @@ class CoreHubClient:
     
     def stop_pipeline(self, pipeline_id: str) -> bool:
         """Stop all entities in a pipeline"""
-        # Check if we have a valid base URL
-        if not self.base_url:
-            # Use the shared URL if available
-            if CoreHubClient._shared_base_url:
-                self.base_url = CoreHubClient._shared_base_url
-                logger.debug(f"Using shared CoreHub URL in stop_pipeline: {self.base_url}")
-            else:
-                # Import settings directly here to avoid any variable access issues
-                from gluesync_scheduler.config.settings import settings
-                
-                if settings.CORE_HUB_URL:
-                    self.base_url = settings.CORE_HUB_URL
-                    logger.debug(f"Using settings CoreHub URL in stop_pipeline: {self.base_url}")
-                else:
-                    # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
-                    logger.error("CoreHub URL not available - stop_pipeline cannot proceed")
-                    return False
-            
         path = f'/pipelines/{pipeline_id}/commands/lifecycle/stop'
         
         try:
@@ -527,24 +339,6 @@ class CoreHubClient:
     
     def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for all entities in a pipeline"""
-        # Check if we have a valid base URL
-        if not self.base_url:
-            # Use the shared URL if available
-            if CoreHubClient._shared_base_url:
-                self.base_url = CoreHubClient._shared_base_url
-                logger.debug(f"Using shared CoreHub URL in resync_pipeline: {self.base_url}")
-            else:
-                # Import settings directly here to avoid any variable access issues
-                from gluesync_scheduler.config.settings import settings
-                
-                if settings.CORE_HUB_URL:
-                    self.base_url = settings.CORE_HUB_URL
-                    logger.debug(f"Using settings CoreHub URL in resync_pipeline: {self.base_url}")
-                else:
-                    # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
-                    logger.error("CoreHub URL not available - resync_pipeline cannot proceed")
-                    return False
-            
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         body = {
             'snapshotWriteMethod': snapshot_write_method
