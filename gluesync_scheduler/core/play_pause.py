@@ -43,17 +43,62 @@ logger = logging.getLogger(__name__)
 class CoreHubClient:
     """Client for interacting with the Gluesync Core Hub API"""
     
+    # Singleton instance
+    _instance = None
+    
+    # Class variable to track if CoreHub URL has been discovered
+    _corehub_url_discovered = False
+    
+    # Class variable to store the discovered URL
+    _shared_base_url = None
+    
+    def __new__(cls):
+        """Implement singleton pattern"""
+        if cls._instance is None:
+            logger.info("Creating new CoreHubClient singleton instance")
+            cls._instance = super(CoreHubClient, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
     def __init__(self):
         """Initialize the Core Hub client with configuration from settings"""
-        # Try to get CoreHub URL from settings
-        self.base_url = settings.CORE_HUB_URL
+        # Skip initialization if already done
+        if getattr(self, '_initialized', False):
+            return
+            
+        logger.info("Initializing CoreHubClient")
+        
+        # Try to get CoreHub URL from settings or class variable
+        self.base_url = CoreHubClient._shared_base_url or settings.CORE_HUB_URL
         
         # If no URL is set, try to discover it immediately
         if not self.base_url:
-            self._discover_corehub_url()
+            # Only attempt discovery if we haven't already done it
+            if not CoreHubClient._corehub_url_discovered:
+                logger.info("No CoreHub URL found, attempting discovery")
+                self._discover_corehub_url()
+                if self.base_url:
+                    # Store the discovered URL in the class variable
+                    CoreHubClient._shared_base_url = self.base_url
+                    CoreHubClient._corehub_url_discovered = True
+                    logger.info(f"CoreHub URL discovered and stored: {self.base_url}")
+                else:
+                    logger.error("Failed to discover CoreHub URL")
+                    CoreHubClient._corehub_url_discovered = True  # Mark as attempted
+            else:
+                # If we've already tried discovery but still don't have a URL,
+                # log a warning but don't try again
+                logger.warning("CoreHub URL not available despite previous discovery attempts")
+        else:
+            # If we have a URL, mark discovery as complete and store it
+            if not CoreHubClient._shared_base_url:
+                CoreHubClient._shared_base_url = self.base_url
+            CoreHubClient._corehub_url_discovered = True
+            logger.info(f"Using CoreHub URL: {self.base_url}")
             
         self.entity_start_timeout = settings.ENTITY_START_TIMEOUT  # seconds to wait between entity operations
         self.token = None
+        self._initialized = True
         
         # Initialize the SDK client if running as standalone script
         if __name__ == "__main__":
@@ -199,9 +244,13 @@ class CoreHubClient:
         """
         # Check if we have a valid base URL
         if not self.base_url:
-            # Use our comprehensive discovery method
-            if not self._discover_corehub_url():
-                logger.error("Failed to discover CoreHub URL")
+            # Use the shared URL if available
+            if CoreHubClient._shared_base_url:
+                self.base_url = CoreHubClient._shared_base_url
+                logger.info(f"Using shared CoreHub URL: {self.base_url}")
+            else:
+                # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
+                logger.error("CoreHub URL not available - API request cannot proceed")
                 return None
                 
         # Try to get the SDK token first if we don't have one yet
@@ -303,15 +352,17 @@ class CoreHubClient:
     
     def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for a specific entity"""
-        # Force discovery of CoreHub URL if it's not set
+        # Check if we have a valid base URL
         if not self.base_url:
-            self._discover_corehub_url()
-            
-        # If still not set, force a more thorough discovery
-        if not self.base_url:
-            logger.warning("CoreHub URL not set, forcing thorough discovery in resync_entity")
-            self._discover_corehub_url()
-            
+            # Use the shared URL if available
+            if CoreHubClient._shared_base_url:
+                self.base_url = CoreHubClient._shared_base_url
+                logger.debug(f"Using shared CoreHub URL in resync_entity: {self.base_url}")
+            else:
+                # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
+                logger.error("CoreHub URL not available - resync_entity cannot proceed")
+                return False
+        
         path = f'/pipelines/{pipeline_id}/entities/{entity_id}/commands/sync/one-time-snapshot'
         body = {
             'snapshotWriteMethod': snapshot_write_method
@@ -330,9 +381,16 @@ class CoreHubClient:
     
     def start_pipeline(self, pipeline_id: str, with_snapshot: bool = False) -> bool:
         """Start all entities in a pipeline"""
-        # Force discovery of CoreHub URL if it's not set
+        # Check if we have a valid base URL
         if not self.base_url:
-            self._discover_corehub_url()
+            # Use the shared URL if available
+            if CoreHubClient._shared_base_url:
+                self.base_url = CoreHubClient._shared_base_url
+                logger.debug(f"Using shared CoreHub URL in start_pipeline: {self.base_url}")
+            else:
+                # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
+                logger.error("CoreHub URL not available - start_pipeline cannot proceed")
+                return False
             
         path = f'/pipelines/{pipeline_id}/commands/lifecycle/start'
         body = {}
@@ -353,9 +411,16 @@ class CoreHubClient:
     
     def stop_pipeline(self, pipeline_id: str) -> bool:
         """Stop all entities in a pipeline"""
-        # Force discovery of CoreHub URL if it's not set
+        # Check if we have a valid base URL
         if not self.base_url:
-            self._discover_corehub_url()
+            # Use the shared URL if available
+            if CoreHubClient._shared_base_url:
+                self.base_url = CoreHubClient._shared_base_url
+                logger.debug(f"Using shared CoreHub URL in stop_pipeline: {self.base_url}")
+            else:
+                # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
+                logger.error("CoreHub URL not available - stop_pipeline cannot proceed")
+                return False
             
         path = f'/pipelines/{pipeline_id}/commands/lifecycle/stop'
         
@@ -372,14 +437,16 @@ class CoreHubClient:
     
     def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for all entities in a pipeline"""
-        # Force discovery of CoreHub URL if it's not set
+        # Check if we have a valid base URL
         if not self.base_url:
-            self._discover_corehub_url()
-            
-        # If still not set, force a more thorough discovery
-        if not self.base_url:
-            logger.warning("CoreHub URL not set, forcing thorough discovery in resync_pipeline")
-            self._discover_corehub_url()
+            # Use the shared URL if available
+            if CoreHubClient._shared_base_url:
+                self.base_url = CoreHubClient._shared_base_url
+                logger.debug(f"Using shared CoreHub URL in resync_pipeline: {self.base_url}")
+            else:
+                # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
+                logger.error("CoreHub URL not available - resync_pipeline cannot proceed")
+                return False
             
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         body = {
