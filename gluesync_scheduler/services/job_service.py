@@ -409,7 +409,9 @@ class JobService:
             base_url = f"http://localhost:{settings.PORT}/api"
             logger.info(f"Using internal API URL: {base_url}")
             
-            # Determine the endpoint based on task type
+            # Determine the endpoint based on task type and set the HTTP method
+            method = "POST"  # All our endpoints use POST method
+            
             if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
                 endpoint = f"{base_url}/pipelines/{job.pipeline_id}/play"
             elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
@@ -456,16 +458,18 @@ class JobService:
                 return False, f"HTTP request failed: {str(e)}", {}
             
             # Check the response
-            if response.status_code in [200, 202]:
-                # Use our safe response handler to avoid recursion issues
-                safe_resp = self._safe_response(response.text)
+            if response.status_code in [200, 201, 202]:
+                # Don't try to parse the response, just return a simple success message
+                # This avoids any potential recursion issues
                 success_msg = f"Job executed successfully with status code {response.status_code}"
                 logger.info(success_msg)
                 return True, success_msg, {"status_code": response.status_code}
             else:
-                error_msg = f"Job execution failed with status {response.status_code}: {response.text}"
-                logger.error(error_msg)
-                return False, error_msg, {"status_code": response.status_code, "response": response.text}
+                # For error responses, just log the status code and a truncated response
+                truncated_response = response.text[:100] + '...' if len(response.text) > 100 else response.text
+                error_msg = f"Job execution failed with status {response.status_code}"
+                logger.error(f"{error_msg}: {truncated_response}")
+                return False, error_msg, {"status_code": response.status_code}
                 
         except Exception as e:
             error_msg = f"Error executing job: {str(e)}"

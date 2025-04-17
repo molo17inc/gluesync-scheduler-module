@@ -206,29 +206,42 @@ class SchedulerService:
             logger.info(f"Executing scheduled job {job_id}: {job_name}")
             logger.info(f"API URL: {api_url}")
             
-            # Make the API request
-            response = requests.post(
-                api_url,
-                headers={"Content-Type": "application/json"},
-                timeout=30
-            )
-            
-            # Log the response
-            with open(log_file, 'a') as f:
-                f.write(f"[{datetime.now()}] Response status: {response.status_code}\n")
+            # Make the API request with error handling
+            try:
+                response = requests.post(
+                    api_url,
+                    headers={"Content-Type": "application/json"},
+                    timeout=30
+                )
                 
-                # Log a preview of the response
-                response_preview = response.text[:500] + '...' if len(response.text) > 500 else response.text
-                f.write(f"Response: {response_preview}\n")
+                # Log the response
+                with open(log_file, 'a') as f:
+                    f.write(f"[{datetime.now()}] Response status: {response.status_code}\n")
+                    
+                    # Log a truncated preview of the response to avoid large logs
+                    response_preview = response.text[:200] + '...' if len(response.text) > 200 else response.text
+                    f.write(f"Response preview: {response_preview}\n")
+                
+                # Check if the request was successful
+                if response.status_code not in [200, 201, 202]:
+                    error_message = f"Error executing job {job_id}: HTTP {response.status_code}"
+                    
+                    # Log to error file with truncated response
+                    with open(error_file, 'a') as f:
+                        f.write(f"[{datetime.now()}] {error_message}\n")
+                        f.write(f"Response preview: {response_preview}\n")
+                    
+                    logger.error(error_message)
+                else:
+                    logger.info(f"Successfully executed job {job_id} with status {response.status_code}")
             
-            # Check if the request was successful
-            if response.status_code not in [200, 201, 202]:
+            except requests.exceptions.RequestException as e:
+                error_message = f"HTTP request failed when executing job {job_id}: {str(e)}"
+                logger.error(error_message)
+                
+                # Log to error file
                 with open(error_file, 'a') as f:
-                    f.write(f"[{datetime.now()}] Error executing job {job_id}: {response.status_code}\n")
-                    f.write(f"Response: {response.text}\n")
-                
-                logger.error(f"Error executing job {job_id}: {response.status_code}")
-                logger.error(f"Response: {response.text}")
+                    f.write(f"[{datetime.now()}] {error_message}\n")
             
         except Exception as e:
             logger.error(f"Error executing job {job_id}: {str(e)}")
