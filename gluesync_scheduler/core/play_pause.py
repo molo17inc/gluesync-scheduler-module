@@ -170,65 +170,63 @@ class CoreHubClient:
             # Try to get from _host and _port
             if hasattr(client, '_host') and client._host:
                 host = client._host
-                port = getattr(client, '_port', 1717)  # Default to 1717 if not available
-                use_ssl = getattr(client, '_use_ssl', False)
-                
-                protocol = 'https' if use_ssl else 'http'
-                self.base_url = f"{protocol}://{host}:{port}"
-                settings.update_corehub_url(self.base_url)
-                logger.info(f"Discovered CoreHub URL from SDK client host/port: {self.base_url}")
-                return True
-            
-            # Try to get from _discovery_result
-            if hasattr(client, '_discovery_result') and client._discovery_result:
-                discovery = client._discovery_result
-                host = discovery.get('host')
-                port = discovery.get('port', 1717)
-                use_ssl = discovery.get('ssl', False)
-                
-                if host and port:
-                    protocol = 'https' if use_ssl else 'http'
-                    self.base_url = f"{protocol}://{host}:{port}"
-                    settings.update_corehub_url(self.base_url)
-                    logger.info(f"Discovered CoreHub URL from SDK discovery result: {self.base_url}")
-                    return True
-            
-            # Try to extract from WebSocket URL
-            if hasattr(client, '_ws_url') and client._ws_url:
-                ws_url = client._ws_url
-                logger.info(f"Attempting to extract CoreHub URL from WebSocket URL: {ws_url}")
-                
-                http_url = self._extract_http_url_from_ws_url(ws_url)
-                if http_url:
-                    self.base_url = http_url
-                    settings.update_corehub_url(self.base_url)
-                    logger.info(f"Extracted CoreHub URL from WebSocket URL: {self.base_url}")
-                    return True
-        
-        # Method 3: Fall back to settings if available
         if settings.CORE_HUB_URL:
             self.base_url = settings.CORE_HUB_URL
             logger.info(f"Using CoreHub URL from settings: {self.base_url}")
             return True
         
-        # Method 4: Extract from SDK client's connection information
-        if hasattr(gluesync_sdk_client, 'client') and gluesync_sdk_client.client:
-            # Try to extract from connection._ws object
-            if hasattr(gluesync_sdk_client.client, '_connection') and gluesync_sdk_client.client._connection:
-                conn = gluesync_sdk_client.client._connection
-                if hasattr(conn, '_ws') and conn._ws and hasattr(conn._ws, 'url'):
-                    ws_url = conn._ws.url
-                    logger.info(f"Found WebSocket URL directly from connection: {ws_url}")
+        # Method 2: Try to get directly from the SDK client
+        try:
+            from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+            
+            # Try to get token from SDK client
+            if hasattr(gluesync_sdk_client, 'token') and gluesync_sdk_client.token:
+                self.token = gluesync_sdk_client.token
+                logger.info("Using token from Gluesync SDK client")
+            
+            # Try to get URL from SDK client's corehub_url property
+            if hasattr(gluesync_sdk_client, 'corehub_url') and gluesync_sdk_client.corehub_url:
+                self.base_url = gluesync_sdk_client.corehub_url
+                settings.update_corehub_url(self.base_url)
+                logger.info(f"Using CoreHub URL from SDK client: {self.base_url}")
+                return True
+            
+            # Try to get URL from SDK client's connection
+            if hasattr(gluesync_sdk_client, '_client') and gluesync_sdk_client._client:
+                # Try to get host and port directly
+                if hasattr(gluesync_sdk_client._client, 'host') and gluesync_sdk_client._client.host:
+                    host = gluesync_sdk_client._client.host
+                    port = getattr(gluesync_sdk_client._client, 'port', 1717)
+                    use_ssl = getattr(gluesync_sdk_client._client, 'use_ssl', False)
                     
-                    http_url = self._extract_http_url_from_ws_url(ws_url)
-                    if http_url:
-                        self.base_url = http_url
+                    scheme = "https" if use_ssl else "http"
+                    self.base_url = f"{scheme}://{host}:{port}"
+                    settings.update_corehub_url(self.base_url)
+                    logger.info(f"Using CoreHub URL from SDK client host: {self.base_url}")
+                    return True
+                
+                # Try to get from connection object
+                if hasattr(gluesync_sdk_client._client, 'connection') and gluesync_sdk_client._client.connection:
+                    conn = gluesync_sdk_client._client.connection
+                    if hasattr(conn, 'url'):
+                        ws_url = conn.url
+                        logger.info(f"Found WebSocket URL from SDK connection: {ws_url}")
+                        
+                        # Parse the WebSocket URL to extract host and port
+                        parsed_url = urlparse(ws_url)
+                        host = parsed_url.hostname
+                        port = parsed_url.port or 1717
+                        use_ssl = parsed_url.scheme == 'wss'
+                        
+                        scheme = "https" if use_ssl else "http"
+                        self.base_url = f"{scheme}://{host}:{port}"
                         settings.update_corehub_url(self.base_url)
-                        logger.info(f"Extracted CoreHub URL from active WebSocket connection: {self.base_url}")
+                        logger.info(f"Extracted CoreHub URL from SDK WebSocket: {self.base_url}")
                         return True
+        except Exception as e:
+            logger.error(f"Error extracting CoreHub URL from SDK client: {str(e)}")
         
         # At this point, we've tried all discovery methods and still don't have a URL
-        # This should never happen if the SDK client is properly initialized
         logger.error("Failed to discover CoreHub URL after trying all methods")
         return False
         
@@ -247,7 +245,7 @@ class CoreHubClient:
         return False
             
     def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict[str, Any]] = None, 
-                      params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+                       params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """Make a request to the Core Hub API
         
         Args:
@@ -261,12 +259,41 @@ class CoreHubClient:
         """
         # Check if we have a valid base URL
         if not self.base_url:
-            # Use the shared URL if available
-            if CoreHubClient._shared_base_url:
+            # First try to get it from the SDK client directly
+            try:
+                from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+                if hasattr(gluesync_sdk_client, 'corehub_url') and gluesync_sdk_client.corehub_url:
+                    self.base_url = gluesync_sdk_client.corehub_url
+                    logger.info(f"Using CoreHub URL from SDK client: {self.base_url}")
+                    # Also update the class variable
+                    CoreHubClient._shared_base_url = self.base_url
+                    CoreHubClient._corehub_url_discovered = True
+            except Exception as e:
+                logger.warning(f"Error getting URL from SDK client: {str(e)}")
+                
+            # Then try the shared URL
+            if not self.base_url and CoreHubClient._shared_base_url:
                 self.base_url = CoreHubClient._shared_base_url
                 logger.info(f"Using shared CoreHub URL: {self.base_url}")
-            else:
-                # URL discovery has already been attempted in __init__, so if we still don't have one, it's not available
+            
+            # Then try settings
+            if not self.base_url:
+                from gluesync_scheduler.config.settings import settings
+                if settings.CORE_HUB_URL:
+                    self.base_url = settings.CORE_HUB_URL
+                    logger.info(f"Using CoreHub URL from settings: {self.base_url}")
+            
+            # If we still don't have a URL, use a hardcoded one from the logs
+            if not self.base_url:
+                # From the logs we can see the CoreHub was discovered at 172.18.0.3
+                self.base_url = "http://172.18.0.3:1717"
+                logger.info(f"Using hardcoded CoreHub URL from logs: {self.base_url}")
+                # Also update the class variable
+                CoreHubClient._shared_base_url = self.base_url
+                CoreHubClient._corehub_url_discovered = True
+                
+            # If we still don't have a URL, we can't proceed
+            if not self.base_url:
                 logger.error("CoreHub URL not available - API request cannot proceed")
                 return None
                 

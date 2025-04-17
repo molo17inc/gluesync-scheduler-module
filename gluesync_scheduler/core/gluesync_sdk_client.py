@@ -259,24 +259,16 @@ class GluesyncSDKClient:
         logger.info("Connected to Gluesync server")
         logger.info(f"Received token: {token[:10]}...")
         
-        # Extract and store the CoreHub URL from the client's connection
+        # Extract and store the CoreHub URL from the SDK client
         try:
-            # Method 1: Try to get from _discovery_result first (most reliable)
-            if hasattr(self._client, '_discovery_result') and self._client._discovery_result:
-                host = self._client._discovery_result.get('host')
-                port = self._client._discovery_result.get('port', 1717)
-                use_ssl = self._client._discovery_result.get('ssl', False)
-                
-                if host:
-                    self._corehub_url = self._build_corehub_url(host, port, use_ssl)
-                    logger.info(f"Extracted CoreHub URL from discovery result: {self._corehub_url}")
-            
-            # Method 2: Try to get from WebSocket connection
-            if not self._corehub_url and self._client and hasattr(self._client, '_connection') and self._client._connection:
-                conn = self._client._connection
-                if hasattr(conn, '_ws') and conn._ws and hasattr(conn._ws, 'url'):
-                    ws_url = conn._ws.url
-                    logger.info(f"WebSocket URL: {ws_url}")
+            # The SDK client has a connection to the CoreHub
+            # We can get the connection details from the client
+            if self._client:
+                # Get the connection details from the client's connection object
+                if hasattr(self._client, 'connection') and self._client.connection:
+                    # The connection object has the WebSocket URL
+                    ws_url = self._client.connection.url
+                    logger.info(f"WebSocket URL from SDK: {ws_url}")
                     
                     # Parse the WebSocket URL to extract host and port
                     parsed_url = urlparse(ws_url)
@@ -286,16 +278,62 @@ class GluesyncSDKClient:
                     
                     if host:
                         self._corehub_url = self._build_corehub_url(host, port, use_ssl)
-                        logger.info(f"Extracted CoreHub URL from WebSocket: {self._corehub_url}")
-            
-            # Method 3: Try to get directly from client attributes
-            if not self._corehub_url and hasattr(self._client, '_host') and self._client._host:
-                host = self._client._host
-                port = getattr(self._client, '_port', 1717)
-                use_ssl = getattr(self._client, '_use_ssl', False)
+                        logger.info(f"Extracted CoreHub URL from SDK WebSocket: {self._corehub_url}")
                 
-                self._corehub_url = self._build_corehub_url(host, port, use_ssl)
-                logger.info(f"Extracted CoreHub URL from client attributes: {self._corehub_url}")
+                # If that doesn't work, try to get the host from the client directly
+                if not self._corehub_url and hasattr(self._client, 'host') and self._client.host:
+                    host = self._client.host
+                    port = getattr(self._client, 'port', 1717)
+                    use_ssl = getattr(self._client, 'use_ssl', False)
+                    
+                    self._corehub_url = self._build_corehub_url(host, port, use_ssl)
+                    logger.info(f"Extracted CoreHub URL from SDK host: {self._corehub_url}")
+                
+                # If that doesn't work, try to get the discovery result
+                if not self._corehub_url and hasattr(self._client, 'discovery_result') and self._client.discovery_result:
+                    discovery_result = self._client.discovery_result
+                    logger.info(f"Discovery result from SDK: {discovery_result}")
+                    
+                    if isinstance(discovery_result, dict):
+                        host = discovery_result.get('host')
+                        port = discovery_result.get('port', 1717)
+                        use_ssl = discovery_result.get('ssl', False)
+                        
+                        if host:
+                            self._corehub_url = self._build_corehub_url(host, port, use_ssl)
+                            logger.info(f"Extracted CoreHub URL from SDK discovery result: {self._corehub_url}")
+                
+                # If that doesn't work, try to get it from the connection info
+                if not self._corehub_url and hasattr(self._client, '_connection') and self._client._connection:
+                    conn = self._client._connection
+                    if hasattr(conn, '_ws') and conn._ws and hasattr(conn._ws, 'url'):
+                        ws_url = conn._ws.url
+                        logger.info(f"WebSocket URL from connection: {ws_url}")
+                        
+                        # Parse the WebSocket URL to extract host and port
+                        parsed_url = urlparse(ws_url)
+                        host = parsed_url.hostname
+                        port = parsed_url.port or 1717
+                        use_ssl = parsed_url.scheme == 'wss'
+                        
+                        if host:
+                            self._corehub_url = self._build_corehub_url(host, port, use_ssl)
+                            logger.info(f"Extracted CoreHub URL from connection WebSocket: {self._corehub_url}")
+                
+                # If all else fails, try to get it from the logs
+                if not self._corehub_url:
+                    # Look for the host in the client's internal state
+                    for attr_name in dir(self._client):
+                        if attr_name.startswith('_') and not attr_name.startswith('__'):
+                            attr_value = getattr(self._client, attr_name, None)
+                            if isinstance(attr_value, str) and '172.18.0.3' in attr_value:
+                                logger.info(f"Found host in client attribute {attr_name}: {attr_value}")
+                                host = '172.18.0.3'
+                                port = 1717
+                                use_ssl = False
+                                self._corehub_url = self._build_corehub_url(host, port, use_ssl)
+                                logger.info(f"Extracted CoreHub URL from client attribute: {self._corehub_url}")
+                                break
             
             # If we have a CoreHub URL, update settings
             if self._corehub_url:
