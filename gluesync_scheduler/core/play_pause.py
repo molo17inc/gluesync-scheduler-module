@@ -68,11 +68,30 @@ class CoreHubClient:
             
         logger.info("Initializing CoreHubClient")
         
-        # Try to get CoreHub URL from settings or class variable
-        self.base_url = CoreHubClient._shared_base_url or settings.CORE_HUB_URL
+        # First try to get the URL from the SDK client directly
+        from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+        sdk_url = None
+        if hasattr(gluesync_sdk_client, 'corehub_url') and gluesync_sdk_client.corehub_url:
+            sdk_url = gluesync_sdk_client.corehub_url
+            logger.info(f"Found CoreHub URL from SDK client: {sdk_url}")
+            
+        # Then try class variable or settings
+        self.base_url = sdk_url or CoreHubClient._shared_base_url or settings.CORE_HUB_URL
         
-        # If no URL is set, try to discover it immediately
-        if not self.base_url:
+        # If we have a URL from any source, store it and mark discovery as complete
+        if self.base_url:
+            # Store the URL in the class variable if not already set
+            if not CoreHubClient._shared_base_url:
+                CoreHubClient._shared_base_url = self.base_url
+            CoreHubClient._corehub_url_discovered = True
+            logger.info(f"Using CoreHub URL: {self.base_url}")
+            
+            # Also update settings if needed
+            if not settings.CORE_HUB_URL:
+                settings.update_corehub_url(self.base_url)
+                logger.info(f"Updated CoreHub URL in settings: {settings.CORE_HUB_URL}")
+        # If no URL is set, try to discover it
+        else:
             # Only attempt discovery if we haven't already done it
             if not CoreHubClient._corehub_url_discovered:
                 logger.info("No CoreHub URL found, attempting discovery")
@@ -82,6 +101,10 @@ class CoreHubClient:
                     CoreHubClient._shared_base_url = self.base_url
                     CoreHubClient._corehub_url_discovered = True
                     logger.info(f"CoreHub URL discovered and stored: {self.base_url}")
+                    
+                    # Also update settings
+                    settings.update_corehub_url(self.base_url)
+                    logger.info(f"Updated CoreHub URL in settings: {settings.CORE_HUB_URL}")
                 else:
                     logger.error("Failed to discover CoreHub URL")
                     CoreHubClient._corehub_url_discovered = True  # Mark as attempted
@@ -89,12 +112,6 @@ class CoreHubClient:
                 # If we've already tried discovery but still don't have a URL,
                 # log a warning but don't try again
                 logger.warning("CoreHub URL not available despite previous discovery attempts")
-        else:
-            # If we have a URL, mark discovery as complete and store it
-            if not CoreHubClient._shared_base_url:
-                CoreHubClient._shared_base_url = self.base_url
-            CoreHubClient._corehub_url_discovered = True
-            logger.info(f"Using CoreHub URL: {self.base_url}")
             
         self.entity_start_timeout = settings.ENTITY_START_TIMEOUT  # seconds to wait between entity operations
         self.token = None

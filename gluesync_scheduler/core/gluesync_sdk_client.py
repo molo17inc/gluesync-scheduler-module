@@ -261,7 +261,18 @@ class GluesyncSDKClient:
         
         # Extract and store the CoreHub URL from the client's connection
         try:
-            if self._client and hasattr(self._client, '_connection') and self._client._connection:
+            # Method 1: Try to get from _discovery_result first (most reliable)
+            if hasattr(self._client, '_discovery_result') and self._client._discovery_result:
+                host = self._client._discovery_result.get('host')
+                port = self._client._discovery_result.get('port', 1717)
+                use_ssl = self._client._discovery_result.get('ssl', False)
+                
+                if host:
+                    self._corehub_url = self._build_corehub_url(host, port, use_ssl)
+                    logger.info(f"Extracted CoreHub URL from discovery result: {self._corehub_url}")
+            
+            # Method 2: Try to get from WebSocket connection
+            if not self._corehub_url and self._client and hasattr(self._client, '_connection') and self._client._connection:
                 conn = self._client._connection
                 if hasattr(conn, '_ws') and conn._ws and hasattr(conn._ws, 'url'):
                     ws_url = conn._ws.url
@@ -273,14 +284,35 @@ class GluesyncSDKClient:
                     port = parsed_url.port or 1717
                     use_ssl = parsed_url.scheme == 'wss'
                     
-                    # Build and store the CoreHub URL
-                    self._corehub_url = self._build_corehub_url(host, port, use_ssl)
-                    logger.info(f"Extracted CoreHub URL: {self._corehub_url}")
-                    
-                    # Update settings
-                    from gluesync_scheduler.config.settings import settings
-                    settings.update_corehub_url(self._corehub_url)
-                    logger.info(f"Updated CoreHub URL in settings: {settings.CORE_HUB_URL}")
+                    if host:
+                        self._corehub_url = self._build_corehub_url(host, port, use_ssl)
+                        logger.info(f"Extracted CoreHub URL from WebSocket: {self._corehub_url}")
+            
+            # Method 3: Try to get directly from client attributes
+            if not self._corehub_url and hasattr(self._client, '_host') and self._client._host:
+                host = self._client._host
+                port = getattr(self._client, '_port', 1717)
+                use_ssl = getattr(self._client, '_use_ssl', False)
+                
+                self._corehub_url = self._build_corehub_url(host, port, use_ssl)
+                logger.info(f"Extracted CoreHub URL from client attributes: {self._corehub_url}")
+            
+            # If we have a CoreHub URL, update settings
+            if self._corehub_url:
+                from gluesync_scheduler.config.settings import settings
+                settings.update_corehub_url(self._corehub_url)
+                logger.info(f"Updated CoreHub URL in settings: {settings.CORE_HUB_URL}")
+                
+                # Also update the CoreHubClient class with this URL
+                try:
+                    from gluesync_scheduler.core.play_pause import CoreHubClient
+                    CoreHubClient._shared_base_url = self._corehub_url
+                    CoreHubClient._corehub_url_discovered = True
+                    logger.info(f"Updated CoreHubClient shared URL: {self._corehub_url}")
+                except Exception as e:
+                    logger.warning(f"Could not update CoreHubClient: {str(e)}")
+            else:
+                logger.warning("Failed to extract CoreHub URL from any source")
         except Exception as e:
             logger.error(f"Error extracting CoreHub URL: {str(e)}")
     

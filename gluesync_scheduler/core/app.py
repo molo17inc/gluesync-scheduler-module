@@ -109,17 +109,42 @@ async def startup_event():
         await gluesync_sdk_client.initialize()
         logger.info("Gluesync SDK client initialized successfully")
         
-        # The CoreHub URL is now automatically extracted and stored in the settings
-        # by the SDK client's _on_connected method. We just need to log it here.
+        # Wait a short time to ensure the SDK client has had time to extract the CoreHub URL
+        await asyncio.sleep(0.5)
+        
+        # Extract the CoreHub URL from the SDK client
+        corehub_url = None
+        if hasattr(gluesync_sdk_client, 'corehub_url') and gluesync_sdk_client.corehub_url:
+            corehub_url = gluesync_sdk_client.corehub_url
+            logger.info(f"Extracted CoreHub URL from SDK client: {corehub_url}")
+            
+            # Update settings with the discovered URL
+            settings.update_corehub_url(corehub_url)
+            logger.info(f"Updated CoreHub URL in settings: {settings.CORE_HUB_URL}")
+        
+        # If we have a CoreHub URL in settings, log it
         if settings.CORE_HUB_URL:
             logger.info(f"CoreHub URL is set to: {settings.CORE_HUB_URL}")
         else:
-            logger.warning("CoreHub URL is not set yet. It will be extracted when the SDK client connects.")
+            logger.warning("CoreHub URL is not set yet. Will attempt to extract it from the SDK client.")
             
-            # Create a CoreHubClient instance to initialize the singleton
-            from gluesync_scheduler.core.play_pause import CoreHubClient
-            client = CoreHubClient()
-            logger.info("Initialized CoreHubClient singleton for later use")
+            # Try to extract it directly from the SDK client connection
+            if hasattr(gluesync_sdk_client, '_client') and gluesync_sdk_client._client:
+                if hasattr(gluesync_sdk_client._client, '_discovery_result') and gluesync_sdk_client._client._discovery_result:
+                    host = gluesync_sdk_client._client._discovery_result.get('host')
+                    port = gluesync_sdk_client._client._discovery_result.get('port', 1717)
+                    use_ssl = gluesync_sdk_client._client._discovery_result.get('ssl', False)
+                    
+                    if host:
+                        scheme = "https" if use_ssl else "http"
+                        corehub_url = f"{scheme}://{host}:{port}"
+                        logger.info(f"Extracted CoreHub URL from discovery result: {corehub_url}")
+                        settings.update_corehub_url(corehub_url)
+            
+        # Create a CoreHubClient instance to initialize the singleton with the URL
+        from gluesync_scheduler.core.play_pause import CoreHubClient
+        client = CoreHubClient()
+        logger.info("Initialized CoreHubClient singleton for later use")
     except Exception as e:
         logger.error(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("The application will continue, but some functionality may be limited")
