@@ -138,8 +138,8 @@ class JobService:
                 entity_ids=json.dumps(job_data.entity_ids) if job_data.entity_ids else None,
                 with_snapshot=job_data.with_snapshot,
                 enabled=job_data.enabled,
-                created_at=datetime.now(datetime.timezone.utc),
-                updated_at=datetime.now(datetime.timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
                 # Set a placeholder command to satisfy NOT NULL constraint
                 command="pending",
                 # Add start_time field
@@ -208,7 +208,7 @@ class JobService:
                 setattr(db_job, key, value)
                 
             # Always update the updated_at timestamp
-            db_job.updated_at = datetime.now(datetime.timezone.utc)
+            db_job.updated_at = datetime.now(timezone.utc)
             
             # Update in database
             self.db.commit()
@@ -314,7 +314,7 @@ class JobService:
         
         try:
             # Update last run time
-            now = datetime.now(datetime.timezone.utc)
+            now = datetime.now(timezone.utc)
             db_job.last_run = now
             
             # Log job execution
@@ -343,7 +343,7 @@ class JobService:
                 "success": success,
                 "message": message,
                 "job_id": job_id,
-                "timestamp": str(datetime.now(datetime.timezone.utc))
+                "timestamp": str(datetime.now(timezone.utc))
             }
         except Exception as e:
             self.db.rollback()
@@ -373,14 +373,14 @@ class JobService:
             return {
                 "status": "success",
                 "response_size": len(response_text),
-                "timestamp": datetime.now(datetime.timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
         except Exception as e:
             # If parsing fails, return a simple error message
             return {
                 "status": "error",
                 "error": str(e)[:100],
-                "timestamp": datetime.now(datetime.timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
     
     def _execute_job_logic(self, job: ScheduledJob) -> tuple[bool, str, dict]:
@@ -470,7 +470,7 @@ class JobService:
                 result = {
                     "status": "success",
                     "code": str(response.status_code),
-                    "timestamp": datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 }
                 
                 # We don't even include the response preview in the result
@@ -489,7 +489,7 @@ class JobService:
                     "status_code": response.status_code,
                     "success": False,
                     "error": truncated_response,
-                    "timestamp": datetime.now(datetime.timezone.utc).isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 
                 return False, error_msg, result

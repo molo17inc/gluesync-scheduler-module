@@ -24,7 +24,7 @@
 import logging
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from typing import Dict, Optional, List, Any
 
@@ -113,7 +113,7 @@ class SchedulerService:
             )
             
             # Calculate the next run time based on the trigger
-            from datetime import datetime, timedelta
+            from datetime import datetime, timezone, timedelta
             import pytz
             
             # Add the job to the scheduler with proper next run time calculation
@@ -206,7 +206,7 @@ class SchedulerService:
             
             # Log the job execution
             with open(log_file, 'a') as f:
-                f.write(f"[{datetime.now()}] Running job {job_id}: {job_name}\n")
+                f.write(f"[{datetime.now(timezone.utc)}] Running job {job_id}: {job_name}\n")
             
             # DIRECTLY execute the job logic instead of making an HTTP request
             # This avoids any potential recursion issues with JSON serialization
@@ -226,7 +226,7 @@ class SchedulerService:
                 
                 # Log the results without serializing the entire response
                 with open(log_file, 'a') as f:
-                    f.write(f"[{datetime.now()}] Job execution {'succeeded' if success else 'failed'}\n")
+                    f.write(f"[{datetime.now(timezone.utc)}] Job execution {'succeeded' if success else 'failed'}\n")
                     f.write(f"Message: {message}\n")
                     
                     # Only log a limited set of details to avoid recursion issues
@@ -243,7 +243,7 @@ class SchedulerService:
                 else:
                     error_message = f"Error in job {job_id}: {message}"
                     with open(error_file, 'a') as f:
-                        f.write(f"[{datetime.now()}] {error_message}\n")
+                        f.write(f"[{datetime.now(timezone.utc)}] {error_message}\n")
                     logger.error(error_message)
             
             except Exception as e:
@@ -260,7 +260,7 @@ class SchedulerService:
             # Log the error to the error file
             try:
                 with open(error_file, 'a') as f:
-                    f.write(f"[{datetime.now()}] Error executing job {job_id}: {str(e)}\n")
+                    f.write(f"[{datetime.now(timezone.utc)}] Error executing job {job_id}: {str(e)}\n")
             except Exception:
                 pass
 
