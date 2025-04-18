@@ -156,7 +156,8 @@ class GluesyncSDKClient:
         security_config = settings.GLUESYNC_SECURITY_CONFIG
         if security_config and os.path.exists(security_config):
             logger.info(f"Using security config from: {security_config}")
-            use_ssl = True
+            if not settings.SSL_ENABLED:
+                logger.warning("Security config found but SSL is disabled. Enable SSL in settings to use security config.")
         elif security_config:
             logger.warning(f"Security config file not found at {security_config}, will use default settings")
             security_config = None

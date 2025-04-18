@@ -96,8 +96,15 @@ class CoreHubClient:
         self._initialized = True
         
     def _initialize_corehub_url(self):
-        """Initialize the CoreHub URL from the best available source"""
-        # Priority 1: Check for already discovered URL in the singleton
+        """Initialize the CoreHub URL for API requests
+        
+        The URL is determined using the following priority order:
+        1. settings.CORE_HUB_URL
+        2. Previously discovered URL
+        3. URL from SDK client 
+        4. Default URL (localhost:1717)
+        """
+        # Priority 1: Use the URL from settings
         if settings.CORE_HUB_URL:
             self.base_url = settings.CORE_HUB_URL
             # Store in class variable for future use
@@ -110,9 +117,24 @@ class CoreHubClient:
             self.base_url = CoreHubClient._discovered_url
             logger.debug(f"Using previously discovered CoreHub URL: {self.base_url}")
             return
+            
+        # Priority 3: Try to get URL from SDK client
+        try:
+            if gluesync_sdk_client and gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
+                self.base_url = gluesync_sdk_client.corehub_url
+                CoreHubClient._discovered_url = self.base_url
+                logger.info(f"Using CoreHub URL from SDK client: {self.base_url}")
+                return
+        except Exception as e:
+            logger.debug(f"Could not get URL from SDK client: {e}")
         
-        # No URL found - base_url remains None
-        logger.warning("No CoreHub URL available - API operations will fail until a URL is provided")
+        # Priority 4: Use default URL for localhost
+        # This is a fallback to ensure requests can still work within the same container
+        protocol = "https" if settings.SSL_ENABLED else "http"
+        default_url = f"{protocol}://localhost:1717"
+        self.base_url = default_url
+        CoreHubClient._discovered_url = self.base_url
+        logger.info(f"Using default CoreHub URL: {self.base_url}")
     
     def _initialize_token(self):
         """Initialize the token for API authentication"""
