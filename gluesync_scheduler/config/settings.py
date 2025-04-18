@@ -54,11 +54,11 @@ class Settings:
     
     # SSL settings
     SSL_ENABLED = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+    SSL_SKIP_VERIFY = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
     
     # Gluesync SDK settings
     GLUESYNC_LICENSE_FILE = os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')
     GLUESYNC_MODULE_TAG = os.getenv('GLUESYNC_MODULE_TAG', 'chronos')
-    GLUESYNC_USE_SSL = os.getenv('GLUESYNC_USE_SSL', 'False').lower() in ('true', '1', 't')
     GLUESYNC_SECURITY_CONFIG = os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')
     
     # Logging settings

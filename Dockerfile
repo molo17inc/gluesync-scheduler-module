@@ -126,14 +126,8 @@ RUN python -m pip install --upgrade pip && \
     python -m pip install pydantic>=1.8.1 && \
     python -m pip install typing-extensions>=3.7.4.3
 
-# Create mock modules for problematic dependencies
-# Mock for twofish
-RUN mkdir -p /usr/local/lib/python3.11/site-packages/twofish && \
-    echo "class TwofishCipher:\n    def __init__(self, *args, **kwargs):\n        pass\n    def encrypt(self, data):\n        return data\n    def decrypt(self, data):\n        return data\n\nTwofish = TwofishCipher" > /usr/local/lib/python3.11/site-packages/twofish/__init__.py
-
-# Mock for jks
-RUN mkdir -p /usr/local/lib/python3.11/site-packages/jks && \
-    echo "def loads(data):\n    return {}\n\ndef load(filename):\n    return {}\n\nclass KeyStore:\n    def __init__(self):\n        self.entries = {}\n        self.private_keys = {}\n        self.certs = {}\n        self.secret_keys = {}" > /usr/local/lib/python3.11/site-packages/jks/__init__.py
+# Install OpenSSL for certificate handling and required dependencies
+RUN apt-get update && apt-get install -y openssl build-essential libssl-dev
 
 # Create Python path file for SDK
 RUN mkdir -p /usr/local/lib/python3.11/site-packages/gluesync_sdk && \

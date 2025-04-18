@@ -186,6 +186,35 @@ async def catch_exceptions_middleware(request: Request, call_next):
             media_type="application/json"
         )
 
+# Middleware to redirect HTTP to HTTPS when SSL_ENABLED is true
+class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Only redirect if SSL is enabled and the request is not using HTTPS
+        if settings.SSL_ENABLED and request.url.scheme != "https":
+            # Get the host from the request
+            host = request.headers.get("host", "")
+            
+            # If the host includes a port, remove it
+            if ":" in host:
+                host = host.split(":")[0]
+            
+            # Determine the HTTPS port (default is 443)
+            https_port = 443
+            
+            # If we're using a non-standard HTTPS port, include it in the redirect URL
+            port_str = f":{https_port}" if https_port != 443 else ""
+            
+            # Construct the redirect URL
+            redirect_url = f"https://{host}{port_str}{request.url.path}"
+            if request.url.query:
+                redirect_url += f"?{request.url.query}"
+            
+            # Return a temporary redirect response
+            return RedirectResponse(url=redirect_url, status_code=307)
+        
+        # If not redirecting, continue with the request
+        return await call_next(request)
+
 # Add HTTPS redirect middleware if SSL is enabled
 if settings.SSL_ENABLED:
     app.add_middleware(HTTPSRedirectMiddleware)
@@ -306,35 +335,6 @@ async def shutdown_event():
             logger.info("Scheduler shut down successfully")
     except Exception as e:
         logger.error(f"Error shutting down scheduler: {e}")
-
-# Middleware to redirect HTTP to HTTPS when SSL_ENABLED is true
-class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # Only redirect if SSL is enabled and the request is not using HTTPS
-        if settings.SSL_ENABLED and request.url.scheme != "https":
-            # Get the host from the request
-            host = request.headers.get("host", "")
-            
-            # If the host includes a port, remove it
-            if ":" in host:
-                host = host.split(":")[0]
-            
-            # Determine the HTTPS port (default is 443)
-            https_port = 443
-            
-            # If we're using a non-standard HTTPS port, include it in the redirect URL
-            port_str = f":{https_port}" if https_port != 443 else ""
-            
-            # Construct the redirect URL
-            redirect_url = f"https://{host}{port_str}{request.url.path}"
-            if request.url.query:
-                redirect_url += f"?{request.url.query}"
-            
-            # Return a temporary redirect response
-            return RedirectResponse(url=redirect_url, status_code=307)
-        
-        # If not redirecting, continue with the request
-        return await call_next(request)
 
 # Middleware class for HTTPS redirection is defined above
 
