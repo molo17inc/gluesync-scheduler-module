@@ -108,9 +108,7 @@ class GluesyncSDKClient:
         
         # Load security config if available
         ssl_config = {}
-        # Use SSL if either SSL_ENABLED or GLUESYNC_USE_SSL is true
-        use_ssl = settings.SSL_ENABLED or settings.GLUESYNC_USE_SSL
-        if use_ssl and settings.GLUESYNC_SECURITY_CONFIG:
+        if settings.GLUESYNC_USE_SSL and settings.GLUESYNC_SECURITY_CONFIG:
             try:
                 if os.path.exists(settings.GLUESYNC_SECURITY_CONFIG):
                     with open(settings.GLUESYNC_SECURITY_CONFIG, 'r') as f:
