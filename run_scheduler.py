@@ -24,18 +24,49 @@
 import os
 import sys
 import uvicorn
+import importlib
 from gluesync_scheduler.config.settings import settings
 
 def main():
     """Run the Gluesync Scheduler Module"""
     # Check if SSL is enabled
     if settings.SSL_ENABLED:
-        # Get SSL certificate paths from environment
-        cert_file = os.getenv('SSL_CERT_FILE')
-        key_file = os.getenv('SSL_KEY_FILE')
+        # First try to extract certificate and key from PKCS12/JKS file
+        # Import the app module to access the extract_from_pkcs12 function
+        try:
+            # We need to import the app module to access the extract_from_pkcs12 function
+            # But we can't import it directly as it would create a circular import
+            app_module = importlib.import_module('gluesync_scheduler.core.app')
+            
+            # Call the extract_from_pkcs12 function to get the certificate and key files
+            print("Attempting to extract certificate and key from PKCS12/JKS file...")
+            cert_file, key_file = app_module.extract_from_pkcs12()
+            
+            if cert_file and key_file:
+                print(f"Successfully extracted certificate and key from PKCS12/JKS file")
+                print(f"Certificate: {cert_file}")
+                print(f"Key: {key_file}")
+            else:
+                print("Could not extract certificate and key from PKCS12/JKS file")
+                # Fall back to environment variables
+                cert_file = os.getenv('SSL_CERT_FILE')
+                key_file = os.getenv('SSL_KEY_FILE')
+                print(f"Falling back to environment variables:")
+                print(f"  SSL_CERT_FILE: {cert_file}")
+                print(f"  SSL_KEY_FILE: {key_file}")
+        except Exception as e:
+            print(f"Error extracting certificate and key: {e}")
+            # Fall back to environment variables
+            cert_file = os.getenv('SSL_CERT_FILE')
+            key_file = os.getenv('SSL_KEY_FILE')
+            print(f"Falling back to environment variables:")
+            print(f"  SSL_CERT_FILE: {cert_file}")
+            print(f"  SSL_KEY_FILE: {key_file}")
         
+        # Check if both certificate files exist
         if cert_file and key_file and os.path.exists(cert_file) and os.path.exists(key_file):
             # Run with SSL
+            print(f"Starting with SSL using cert: {cert_file} and key: {key_file}")
             uvicorn.run(
                 "gluesync_scheduler.core.app:app", 
                 host=settings.HOST, 
@@ -46,6 +77,8 @@ def main():
         else:
             # Fall back to HTTP if certificate files are missing
             print("Warning: SSL_ENABLED is True but certificate files not found. Falling back to HTTP.")
+            # Set SSL_ENABLED to False in settings to ensure consistency
+            settings.SSL_ENABLED = False
             uvicorn.run("gluesync_scheduler.core.app:app", host=settings.HOST, port=settings.PORT)
     else:
         # Run without SSL
