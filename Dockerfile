@@ -124,10 +124,11 @@ RUN python -m pip install --upgrade pip && \
     python -m pip install PyJWT>=2.0.1 && \
     python -m pip install cryptography>=3.4.6 && \
     python -m pip install pydantic>=1.8.1 && \
-    python -m pip install typing-extensions>=3.7.4.3
+    python -m pip install typing-extensions>=3.7.4.3 && \
+    python -m pip install pyjks
 
-# Install OpenSSL for certificate handling
-RUN apt-get update && apt-get install -y openssl
+# Install OpenSSL for certificate handling and required dependencies
+RUN apt-get update && apt-get install -y openssl build-essential libssl-dev
 
 # Create Python path file for SDK
 RUN mkdir -p /usr/local/lib/python3.11/site-packages/gluesync_sdk && \
