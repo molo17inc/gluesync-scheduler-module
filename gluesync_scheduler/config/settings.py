@@ -59,7 +59,6 @@ class Settings:
     # Gluesync SDK settings
     GLUESYNC_LICENSE_FILE = os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')
     GLUESYNC_MODULE_TAG = os.getenv('GLUESYNC_MODULE_TAG', 'chronos')
-    GLUESYNC_USE_SSL = os.getenv('GLUESYNC_USE_SSL', 'False').lower() in ('true', '1', 't')
     GLUESYNC_SECURITY_CONFIG = os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')
     
     # Logging settings

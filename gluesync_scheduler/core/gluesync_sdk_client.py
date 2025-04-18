@@ -137,30 +137,42 @@ class GluesyncSDKClient:
         if not os.path.exists(license_file_path):
             logger.warning(f"License file not found at {license_file_path}, will attempt to proceed without it")
         
-        # SSL configuration - sync with web server settings
-        use_ssl = settings.SSL_ENABLED or settings.GLUESYNC_USE_SSL
+        # Check if SSL is explicitly disabled in settings
+        ssl_explicitly_disabled = settings.SSL_ENABLED is False
         
-        # If CORE_HUB_URL is https://, force SSL
-        if settings.CORE_HUB_URL and parsed_url and parsed_url.scheme == "https":
-            use_ssl = True
-            logger.info("Enforcing SSL because CoreHub URL uses HTTPS scheme")
-        
-        # If certificate files exist, force SSL
-        cert_file = os.getenv('SSL_CERT_FILE')
-        key_file = os.getenv('SSL_KEY_FILE')
-        if cert_file and os.path.exists(cert_file) and key_file and os.path.exists(key_file):
-            use_ssl = True
-            logger.info(f"Enforcing SSL because certificate files exist: {cert_file} and {key_file}")
+        if ssl_explicitly_disabled:
+            # If SSL is explicitly disabled, force it off regardless of other settings
+            use_ssl = False
+            logger.info("SSL is explicitly disabled in settings")
+        else:
+            # SSL configuration - sync with web server settings
+            use_ssl = settings.SSL_ENABLED
+            
+            # If CORE_HUB_URL is https://, consider using SSL
+            if settings.CORE_HUB_URL and parsed_url and parsed_url.scheme == "https":
+                use_ssl = True
+                logger.info("Enforcing SSL because CoreHub URL uses HTTPS scheme")
+            
+            # If certificate files exist, consider using SSL
+            cert_file = os.getenv('SSL_CERT_FILE')
+            key_file = os.getenv('SSL_KEY_FILE')
+            if cert_file and os.path.exists(cert_file) and key_file and os.path.exists(key_file):
+                use_ssl = True
+                logger.info(f"Enforcing SSL because certificate files exist: {cert_file} and {key_file}")
         
         # Security configuration
-        security_config = settings.GLUESYNC_SECURITY_CONFIG
-        if security_config and os.path.exists(security_config):
-            logger.info(f"Using security config from: {security_config}")
-            if not settings.SSL_ENABLED:
-                logger.warning("Security config found but SSL is disabled. Enable SSL in settings to use security config.")
-        elif security_config:
-            logger.warning(f"Security config file not found at {security_config}, will use default settings")
-            security_config = None
+        security_config = None
+        if settings.SSL_ENABLED or use_ssl:  # Only process security config if SSL is enabled
+            config_path = settings.GLUESYNC_SECURITY_CONFIG
+            if config_path and os.path.exists(config_path):
+                logger.info(f"Using security config from: {config_path}")
+                security_config = config_path
+            elif config_path:
+                logger.warning(f"Security config file not found at {config_path}, will use default settings")
+        else:
+            # SSL is disabled, so don't use security config even if it exists
+            if settings.GLUESYNC_SECURITY_CONFIG and os.path.exists(settings.GLUESYNC_SECURITY_CONFIG):
+                logger.info(f"Security config found at {settings.GLUESYNC_SECURITY_CONFIG} but SSL is disabled - ignoring security config")
             
         # Create the client
         self._client = GluesyncClient(
