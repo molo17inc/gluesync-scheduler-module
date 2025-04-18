@@ -409,21 +409,27 @@ class JobService:
             # Use HTTPS protocol when SSL is enabled
             protocol = "https" if settings.SSL_ENABLED else "http"
             base_url = f"{protocol}://localhost:{settings.PORT}/api"
-            logger.info(f"Using internal API URL: {base_url} (SSL: {settings.SSL_ENABLED})")
+            
+            # Clean log output to remove any potential hidden characters
+            logger.info(f"Using internal API URL: {protocol}://localhost:{settings.PORT}/api (SSL: {settings.SSL_ENABLED})")
             
             # Determine the endpoint based on task type and set the HTTP method
             method = "POST"  # All our endpoints use POST method
             
+            # Determine the action for the endpoint path
             if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
-                endpoint = f"{base_url}/pipelines/{job.pipeline_id}/play"
+                action = "play"
             elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
-                endpoint = f"{base_url}/pipelines/{job.pipeline_id}/pause"
+                action = "pause"
             elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
-                endpoint = f"{base_url}/pipelines/{job.pipeline_id}/resync"
+                action = "resync"
             else:
                 error_msg = f"Unknown task type: {job.task_type}"
                 logger.error(error_msg)
                 return False, error_msg, {}
+                
+            # Construct the full endpoint URL
+            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
             
             # Prepare the JSON payload
             json_data = {}
@@ -438,24 +444,40 @@ class JobService:
             
             # Log the request details
             logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
-            logger.info(f"Endpoint: {method} {endpoint}")
+            # Use a clean format to avoid any hidden characters
+            logger.info(f"Endpoint: {method} {protocol}://localhost:{settings.PORT}/api/pipelines/{job.pipeline_id}/{action}")
             logger.info(f"JSON Payload: {json_data}")
             
             try:
-                # Skip SSL verification if SSL_SKIP_VERIFY is enabled
-                verify = not settings.SSL_SKIP_VERIFY if settings.SSL_ENABLED else True
+                # Determine SSL verification settings
+                # For HTTPS, we may need to skip verification if using self-signed certs
+                if protocol == "https":
+                    # Skip verification if SSL_SKIP_VERIFY is enabled
+                    verify = not settings.SSL_SKIP_VERIFY
+                    logger.info(f"Using HTTPS with SSL verification: {verify}")
+                else:
+                    # For HTTP, verification is not applicable
+                    verify = True
                 
+                # Add certificate paths if available and using HTTPS
+                cert = None
+                if protocol == "https":
+                    cert_file = os.environ.get('SSL_CERT_FILE')
+                    key_file = os.environ.get('SSL_KEY_FILE')
+                    if cert_file and os.path.exists(cert_file) and key_file and os.path.exists(key_file):
+                        cert = (cert_file, key_file)
+                        logger.info(f"Using certificate files for HTTPS request: {cert_file} and {key_file}")
+                
+                # Make the HTTP request
                 response = requests.request(
                     method=method,
                     url=endpoint,
                     json=json_data,
                     headers={"Content-Type": "application/json"},
                     timeout=30,  # Add timeout to prevent hanging requests
-                    verify=verify  # Control SSL certificate verification
+                    verify=verify,  # Control SSL certificate verification
+                    cert=cert  # Include certificates for client authentication if available
                 )
-                
-                # Log the verification setting for debugging
-                logger.debug(f"SSL verification: {verify}")
                 logger.info(f"Response status code: {response.status_code}")
                 logger.info(f"Response headers: {response.headers}")
                 
