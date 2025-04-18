@@ -54,6 +54,7 @@ class Settings:
     
     # SSL settings
     SSL_ENABLED = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+    SSL_SKIP_VERIFY = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
     
     # Gluesync SDK settings
     GLUESYNC_LICENSE_FILE = os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')

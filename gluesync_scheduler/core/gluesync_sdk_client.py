@@ -169,7 +169,7 @@ class GluesyncSDKClient:
             module_tag=settings.GLUESYNC_MODULE_TAG,
             use_ssl=use_ssl,
             security_config=security_config,
-            verify_ssl=not settings.SSL_SKIP_VERIFY,
+            verify_ssl=not settings.SSL_SKIP_VERIFY,  # This setting is now properly defined
         )
         
         # Set up event handlers
