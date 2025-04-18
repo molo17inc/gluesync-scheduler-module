@@ -204,7 +204,6 @@ class GluesyncSDKClient:
                         else:
                             # If no host was discovered, raise an error to trigger retry
                             raise GluesyncConnectionError("UDP discovery did not find a CoreHub")
-                    
                 except GluesyncConnectionError as e:
                     if host and port:
                         # If we have a specific host/port and can't connect, don't retry
@@ -285,7 +284,7 @@ class GluesyncSDKClient:
     
     async def shutdown(self):
         """Shutdown the Gluesync client"""
-        if self._client and self._client.is_connected:
+        if self._client and hasattr(self._client, 'is_connected') and self._client.is_connected:
             logger.info("Disconnecting from CoreHub...")
             await self._client.disconnect()
             self._is_initialized = False
@@ -316,192 +315,10 @@ class GluesyncSDKClient:
         """
         Handle the error event.
         
-    
-    Args:
-        reason: The reason for disconnection
-    """
-    self._token = None
-    self._is_initialized = False
-    logger.info(f"Disconnected from CoreHub: {reason}")
-
-async def _on_error(self, error):
-    """
-    Handle the error event.
-    
-    Args:
-        error: The exception that occurred
-    """
-    logger.error(f"Error in connection: {error}")
-
-async def _on_connected(self, token):
-    """
-    Handle the connected event.
-    
-    Args:
-        token: The JWT token received from the server
-    """
-    self._token = token
-    logger.info("Connected to Gluesync server")
-    logger.info(f"Received token: {token[:10]}...")
-    
-    # Extract and store the CoreHub URL from the SDK client
-    try:
-        # The SDK client has a connection to the CoreHub
-        # We can get the connection details from the client
-        if self._client:
-            # Get the connection details from the client's connection object
-            if hasattr(self._client, 'connection') and self._client.connection:
-                # The connection object has the WebSocket URL
-                ws_url = self._client.connection.url
-                logger.info(f"WebSocket URL from SDK: {ws_url}")
-                
-                # Parse the WebSocket URL to extract host and port
-                parsed_url = urlparse(ws_url)
-                host = parsed_url.hostname
-                port = parsed_url.port or 1717
-                use_ssl = parsed_url.scheme == 'wss'
-                
-                if host:
-                    self._corehub_url = self._build_corehub_url(host, port, use_ssl)
-                    logger.info(f"Extracted CoreHub URL from SDK WebSocket: {self._corehub_url}")
-            
-            # If that doesn't work, try to get the host from the client directly
-            if not self._corehub_url and hasattr(self._client, 'host') and self._client.host:
-                host = self._client.host
-                port = getattr(self._client, 'port', 1717)
-                use_ssl = getattr(self._client, 'use_ssl', False)
-                
-                self._corehub_url = self._build_corehub_url(host, port, use_ssl)
-                logger.info(f"Extracted CoreHub URL from SDK host: {self._corehub_url}")
-            
-            # If that doesn't work, try to get the discovery result
-            if not self._corehub_url and hasattr(self._client, 'discovery_result') and self._client.discovery_result:
-                discovery_result = self._client.discovery_result
-                logger.info(f"Discovery result from SDK: {discovery_result}")
-                
-                if isinstance(discovery_result, dict):
-                    host = discovery_result.get('host')
-                    port = discovery_result.get('port', 1717)
-                    use_ssl = discovery_result.get('ssl', False)
-                    
-                    if host:
-                        self._corehub_url = self._build_corehub_url(host, port, use_ssl)
-                        logger.info(f"Extracted CoreHub URL from SDK discovery result: {self._corehub_url}")
-            
-            # If that doesn't work, try to get it from the connection info
-            if not self._corehub_url and hasattr(self._client, '_connection') and self._client._connection:
-                conn = self._client._connection
-                if hasattr(conn, '_ws') and conn._ws and hasattr(conn._ws, 'url'):
-                    ws_url = conn._ws.url
-                    logger.info(f"WebSocket URL from connection: {ws_url}")
-                    
-                    # Parse the WebSocket URL to extract host and port
-                    parsed_url = urlparse(ws_url)
-                    host = parsed_url.hostname
-                    port = parsed_url.port or 1717
-                    use_ssl = parsed_url.scheme == 'wss'
-                    
-                    if host:
-                        self._corehub_url = self._build_corehub_url(host, port, use_ssl)
-                        logger.info(f"Extracted CoreHub URL from connection WebSocket: {self._corehub_url}")
-                # If that doesn't work, try to get it from the connection info
-                if not self._corehub_url and hasattr(self._client, '_connection') and self._client._connection:
-                    conn = self._client._connection
-                    if hasattr(conn, '_ws') and conn._ws and hasattr(conn._ws, 'url'):
-                        ws_url = conn._ws.url
-                        logger.info(f"WebSocket URL from connection: {ws_url}")
-                        
-                        # Parse the WebSocket URL to extract host and port
-                        parsed_url = urlparse(ws_url)
-                        host = parsed_url.hostname
-                        port = parsed_url.port or 1717
-                        use_ssl = parsed_url.scheme == 'wss'
-                        
-                        if host:
-                            self._corehub_url = self._build_corehub_url(host, port, use_ssl)
-                            logger.info(f"Extracted CoreHub URL from connection WebSocket: {self._corehub_url}")
-                
-                # If all else fails, try to get it from the logs
-                if not self._corehub_url:
-                    # Look for the host in the client's internal state
-                    for attr_name in dir(self._client):
-                        if attr_name.startswith('_') and not attr_name.startswith('__'):
-                            attr_value = getattr(self._client, attr_name, None)
-                            if isinstance(attr_value, str) and '172.18.0.3' in attr_value:
-                                logger.info(f"Found host in client attribute {attr_name}: {attr_value}")
-                                host = '172.18.0.3'
-                                port = 1717
-                                use_ssl = False
-                                self._corehub_url = self._build_corehub_url(host, port, use_ssl)
-                                logger.info(f"Extracted CoreHub URL from client attribute: {self._corehub_url}")
-                                break
-            
-            # If we have a CoreHub URL, update settings
-            if self._corehub_url:
-                from gluesync_scheduler.config.settings import settings
-                settings.update_corehub_url(self._corehub_url)
-                logger.info(f"Updated CoreHub URL in settings: {settings.CORE_HUB_URL}")
-                
-                # Also update the CoreHubClient class with this URL
-                try:
-                    from gluesync_scheduler.core.play_pause import CoreHubClient
-                    CoreHubClient._shared_base_url = self._corehub_url
-                    CoreHubClient._corehub_url_discovered = True
-                    logger.info(f"Updated CoreHubClient shared URL: {self._corehub_url}")
-                except Exception as e:
-                    logger.warning(f"Could not update CoreHubClient: {str(e)}")
-            else:
-                logger.warning("Failed to extract CoreHub URL from any source")
-        except Exception as e:
-            logger.error(f"Error extracting CoreHub URL: {str(e)}")
-    
-    def _on_disconnected(self, reason):
-        """
-        Handle the disconnected event.
-        
-        Args:
-            reason: The reason for disconnection
-        """
-        logger.warning(f"Disconnected from Gluesync server: {reason}")
-        self._token = None
-        
-        # Attempt to reconnect if not shutting down
-        if self._is_initialized:
-            logger.info("Attempting to reconnect...")
-            asyncio.create_task(self._reconnect())
-    
-    async def _reconnect(self):
-        """Attempt to reconnect to the Gluesync server"""
-        retry_delay = 1  # Start with 1 second delay
-        max_delay = 30   # Maximum delay of 30 seconds
-        
-        while self._is_initialized:
-            try:
-                logger.info("Attempting to reconnect to Gluesync...")
-                await self._client.connect()
-                
-                # If we get here, reconnection was successful
-                logger.info("Reconnected to Gluesync server")
-                break
-            except Exception as e:
-                logger.warning(f"Reconnection failed: {str(e)}")
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                await asyncio.sleep(retry_delay)
-                
-                # Exponential backoff with reset
-                retry_delay = min(retry_delay * 2, max_delay)
-                if retry_delay == max_delay:
-                    # Reset back to 1 second after reaching max delay
-                    retry_delay = 1
-    
-    def _on_error(self, error):
-        """
-        Handle the error event.
-        
         Args:
             error: The exception that occurred
         """
-        logger.error(f"Gluesync SDK error: {str(error)}")
+        logger.error(f"Error in connection: {error}")
         
 # Create a global instance for easy import
 gluesync_sdk_client = GluesyncSDKClient.get_instance()
