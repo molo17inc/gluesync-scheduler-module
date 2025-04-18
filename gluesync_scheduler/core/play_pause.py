@@ -204,16 +204,24 @@ class CoreHubClient:
             logger.debug(f"Body: {body}")
             logger.debug(f"Params: {params}")
         
+        # Determine SSL verification settings based on SSL_SKIP_VERIFY
+        verify = not settings.SSL_SKIP_VERIFY if url.startswith('https://') else True
+        if url.startswith('https://') and not verify:
+            logger.info(f"SSL verification disabled for request to {url}")
+            # Suppress insecure request warnings
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
         try:
-            # Make the request
+            # Make the request with SSL verification setting
             if method == 'GET':
-                response = requests.get(url, headers=headers, params=params)
+                response = requests.get(url, headers=headers, params=params, verify=verify)
             elif method == 'POST':
-                response = requests.post(url, headers=headers, json=body, params=params)
+                response = requests.post(url, headers=headers, json=body, params=params, verify=verify)
             elif method == 'PUT':
-                response = requests.put(url, headers=headers, json=body, params=params)
+                response = requests.put(url, headers=headers, json=body, params=params, verify=verify)
             elif method == 'DELETE':
-                response = requests.delete(url, headers=headers, json=body, params=params)
+                response = requests.delete(url, headers=headers, json=body, params=params, verify=verify)
             else:
                 logger.error(f"Unsupported HTTP method: {method}")
                 return None
