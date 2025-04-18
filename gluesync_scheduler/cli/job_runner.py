@@ -166,7 +166,10 @@ def execute_job(job: ScheduledJob) -> bool:
             except json.JSONDecodeError:
                 logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
         
-        base_url = f"http://{settings.HOST}:{settings.PORT}/api"
+        # Use HTTPS protocol when SSL is enabled
+        protocol = "https" if settings.SSL_ENABLED else "http"
+        base_url = f"{protocol}://{settings.HOST}:{settings.PORT}/api"
+        logger.info(f"Using API URL: {base_url} (SSL: {settings.SSL_ENABLED})")
         
         # Determine the endpoint based on task type
         if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
@@ -200,7 +203,18 @@ def execute_job(job: ScheduledJob) -> bool:
             "Content-Type": "application/json"
         }
         
-        response = requests.post(endpoint, json=json_data, headers=headers)
+        # Skip SSL verification if SSL_SKIP_VERIFY is enabled
+        verify = not settings.SSL_SKIP_VERIFY if settings.SSL_ENABLED else True
+        logger.info(f"SSL verification: {verify}")
+        
+        # Add timeout to prevent hanging requests
+        response = requests.post(
+            endpoint, 
+            json=json_data, 
+            headers=headers, 
+            verify=verify,
+            timeout=30
+        )
         
         # Check the response
         if response.status_code in [200, 202]:

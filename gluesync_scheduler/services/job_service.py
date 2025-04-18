@@ -406,8 +406,10 @@ class JobService:
                     logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
             
             # Use localhost for internal API calls, not the binding address (0.0.0.0)
-            base_url = f"http://localhost:{settings.PORT}/api"
-            logger.info(f"Using internal API URL: {base_url}")
+            # Use HTTPS protocol when SSL is enabled
+            protocol = "https" if settings.SSL_ENABLED else "http"
+            base_url = f"{protocol}://localhost:{settings.PORT}/api"
+            logger.info(f"Using internal API URL: {base_url} (SSL: {settings.SSL_ENABLED})")
             
             # Determine the endpoint based on task type and set the HTTP method
             method = "POST"  # All our endpoints use POST method
@@ -440,13 +442,20 @@ class JobService:
             logger.info(f"JSON Payload: {json_data}")
             
             try:
+                # Skip SSL verification if SSL_SKIP_VERIFY is enabled
+                verify = not settings.SSL_SKIP_VERIFY if settings.SSL_ENABLED else True
+                
                 response = requests.request(
                     method=method,
                     url=endpoint,
                     json=json_data,
                     headers={"Content-Type": "application/json"},
-                    timeout=30  # Add timeout to prevent hanging requests
+                    timeout=30,  # Add timeout to prevent hanging requests
+                    verify=verify  # Control SSL certificate verification
                 )
+                
+                # Log the verification setting for debugging
+                logger.debug(f"SSL verification: {verify}")
                 logger.info(f"Response status code: {response.status_code}")
                 logger.info(f"Response headers: {response.headers}")
                 
