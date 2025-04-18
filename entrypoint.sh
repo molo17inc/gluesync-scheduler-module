@@ -18,9 +18,9 @@ if [ -f "/app/run_scheduler.py" ]; then
     chmod +x /app/run_scheduler.py
 fi
 
-# Install the package in development mode
-echo "Installing the package in development mode..."
-pip3 install -e . || {
+# Install the package in normal mode
+echo "Installing the package in normal mode..."
+pip3 install . --break-system-packages || {
     echo "Error installing the package"
     exit 1
 }
@@ -33,8 +33,6 @@ DATA_DIR=/app/data DB_URL=sqlite:////${DATA_DIR}/scheduler.db python3 -c "from g
     exit 1
 }
 echo "Database schema initialized successfully"
-
-# No longer need to start cron service as we're using APScheduler
 
 # Execute the CMD command
 echo "Starting application..."
