@@ -233,6 +233,13 @@ class Job(JobBase):
             cron_iter = croniter(cron, now)
             next_datetime = cron_iter.get_next(datetime)
             
+            # Make sure the datetime has the correct timezone
+            if next_datetime.tzinfo is None:
+                next_datetime = tz.localize(next_datetime)
+            elif str(next_datetime.tzinfo) != str(tz):
+                # Convert to the configured timezone
+                next_datetime = next_datetime.astimezone(tz)
+            
             return next_datetime
         except Exception as e:
             # If croniter is not available or other error, return current time + 1 day as fallback
