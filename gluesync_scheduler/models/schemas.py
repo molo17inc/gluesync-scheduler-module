@@ -206,6 +206,39 @@ class Job(JobBase):
         except Exception:
             # On any error, return empty list
             return []
+    
+    # Calculate next_run based on cron_expression
+    @validator('next_run', always=True)
+    def calculate_next_run(cls, v, values):
+        """Calculate next run time based on cron expression"""
+        # If next_run is already set, use it
+        if v is not None:
+            return v
+            
+        # Calculate based on cron expression
+        cron = values.get('cron_expression')
+        if not cron:
+            return None  # No cron, no next_run
+            
+        try:
+            from datetime import datetime, timezone
+            import pytz
+            from croniter import croniter
+            
+            # Get current time in the configured timezone
+            tz = pytz.timezone(settings.TIMEZONE)
+            now = datetime.now(tz)
+            
+            # Use croniter to calculate the next run time
+            cron_iter = croniter(cron, now)
+            next_datetime = cron_iter.get_next(datetime)
+            
+            return next_datetime
+        except Exception as e:
+            # If croniter is not available or other error, return current time + 1 day as fallback
+            # This ensures we at least have a value for next_run
+            from datetime import datetime, timezone, timedelta
+            return datetime.now(timezone.utc) + timedelta(days=1)
     start_time: Optional[str] = Field(None, description="Current time with timezone information when the job data was retrieved", example="2025-04-14T23:19:46+0200")
     
     @validator('entity_ids', pre=True)
