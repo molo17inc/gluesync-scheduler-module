@@ -125,6 +125,63 @@ class JobService:
             HTTPException: If there's an error creating the job
         """
         try:
+            # Validate that cron_expression is provided (required by database schema)
+            if not job_data.cron_expression:
+                # If no cron_expression, check if we have a schedule to convert to cron
+                if job_data.schedule:
+                    # Convert schedule to cron expression
+                    try:
+                        # Log the received schedule for debugging
+                        logger.info(f"Schedule data received: {job_data.schedule}")
+                        
+                        # Access schedule components directly
+                        schedule_dict = job_data.schedule.dict()
+                        minute = schedule_dict.get('minute')
+                        hour = schedule_dict.get('hour')
+                        days_of_week = schedule_dict.get('days_of_week', [])
+                        
+                        # Validate required fields
+                        if minute is None or hour is None:
+                            raise ValueError("Schedule must include both hour and minute")
+                            
+                        logger.info(f"Schedule components: hour={hour}, minute={minute}, days={days_of_week}")
+                        
+                        # Convert days of week to cron format (0-6, where 0 is Sunday)
+                        dow_map = {
+                            "sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3,
+                            "thursday": 4, "friday": 5, "saturday": 6
+                        }
+                        
+                        # Handle days of week (could be strings or DayOfWeek enums)
+                        if days_of_week:
+                            dow_values = []
+                            for day in days_of_week:
+                                # Handle both string and enum values
+                                day_str = day.lower() if isinstance(day, str) else day.value.lower()
+                                if day_str in dow_map:
+                                    dow_values.append(str(dow_map[day_str]))
+                        else:
+                            dow_values = ["*"]  # All days
+                            
+                        dow_string = ",".join(dow_values)
+                        
+                        # Create cron expression (minute hour * * day_of_week)
+                        cron_expression = f"{minute} {hour} * * {dow_string}"
+                        job_data.cron_expression = cron_expression
+                        
+                        logger.info(f"Generated cron expression from schedule: {job_data.cron_expression}")
+                    except Exception as e:
+                        logger.error(f"Failed to convert schedule to cron expression: {e}")
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Failed to convert schedule to cron expression: {str(e)}"
+                        )
+                else:
+                    # Neither cron_expression nor schedule provided
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="A cron expression or schedule is required for job creation"
+                    )
             # Get current time with timezone for start_time
             current_time = datetime.now(pytz.timezone(settings.TIMEZONE))
             formatted_time = current_time.strftime("%Y-%m-%dT%H:%M:%S%z")
