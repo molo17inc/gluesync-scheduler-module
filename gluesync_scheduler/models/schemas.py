@@ -156,7 +156,56 @@ class Job(JobBase):
     last_run_error_time: Optional[datetime] = Field(None, description="Timestamp of the last error (null if no errors occurred)")
     next_run: Optional[datetime] = Field(None, description="Timestamp of the next scheduled execution")
     command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
-    schedule_days: Optional[List[str]] = Field(None, description="Array of days when the job is scheduled to run (e.g., ['monday', 'wednesday', 'friday'])")
+    schedule_days: List[str] = Field(default_factory=list, description="Array of days when the job is scheduled to run (e.g., ['monday', 'wednesday', 'friday'])")
+    
+    # Ensure schedule_days is always populated
+    @validator('schedule_days', always=True)
+    def extract_days_from_cron(cls, v, values):
+        """Extract days from cron expression if schedule_days is empty"""
+        # If we already have schedule_days, use them
+        if v and isinstance(v, list):
+            return v
+            
+        # If we have a cron expression, extract days from it
+        cron = values.get('cron_expression')
+        if not cron:
+            return []  # Empty list if no cron expression
+            
+        try:
+            # Parse cron expression (minute hour day_of_month month day_of_week)
+            parts = cron.split()
+            if len(parts) != 5:
+                return []  # Invalid cron format
+                
+            dow_part = parts[4]  # 5th part is day of week
+            
+            # Map from cron day nums (0-6) to day names
+            day_map = {
+                "0": "sunday", "1": "monday", "2": "tuesday", "3": "wednesday",
+                "4": "thursday", "5": "friday", "6": "saturday"
+            }
+            
+            # Handle different dow formats
+            if dow_part == "*":
+                # All days
+                return list(day_map.values())
+            
+            # Extract specific days
+            result = []
+            for day in dow_part.split(','):
+                # Handle ranges (e.g., 1-5)
+                if '-' in day:
+                    start, end = day.split('-')
+                    for d in range(int(start), int(end) + 1):
+                        if str(d) in day_map:
+                            result.append(day_map[str(d)])
+                # Single day
+                elif day in day_map:
+                    result.append(day_map[day])
+            return result
+        except Exception:
+            # On any error, return empty list
+            return []
     start_time: Optional[str] = Field(None, description="Current time with timezone information when the job data was retrieved", example="2025-04-14T23:19:46+0200")
     
     @validator('entity_ids', pre=True)

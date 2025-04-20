@@ -49,6 +49,56 @@ class JobService:
         self.db = db
         # Use the singleton scheduler service instance
         self.scheduler_service = scheduler_service
+        
+    def _extract_days_from_cron(self, cron_expression: str) -> List[str]:
+        """Extract days of week from cron expression and convert to day names
+        
+        Args:
+            cron_expression: Cron expression to parse
+            
+        Returns:
+            List of day names (e.g., ['monday', 'wednesday', 'friday'])
+        """
+        if not cron_expression:
+            return []  # Empty array if no cron expression
+            
+        try:
+            # Parse the cron expression
+            # Format: minute hour day_of_month month day_of_week
+            parts = cron_expression.split()
+            if len(parts) != 5:
+                logger.warning(f"Invalid cron expression format: {cron_expression}")
+                return []
+                
+            day_of_week_part = parts[4]  # 5th part is day of week
+            
+            # Convert cron dow format (0-6) to day names
+            day_names = {
+                "0": "sunday", "1": "monday", "2": "tuesday", "3": "wednesday",
+                "4": "thursday", "5": "friday", "6": "saturday"
+            }
+            
+            # Handle different formats of day_of_week_part
+            if day_of_week_part == "*":
+                # All days
+                return list(day_names.values())
+            else:
+                # Specific days
+                days = []
+                for day in day_of_week_part.split(','):
+                    # Handle ranges like 1-5
+                    if '-' in day:
+                        start, end = day.split('-')
+                        for d in range(int(start), int(end) + 1):
+                            if str(d) in day_names:
+                                days.append(day_names[str(d)])
+                    # Single day
+                    elif day in day_names:
+                        days.append(day_names[day])
+                return days
+        except Exception as e:
+            logger.error(f"Error parsing cron expression: {e}")
+            return []  # Return empty array on error
 
     def get_jobs(
         self, 
@@ -88,7 +138,14 @@ class JobService:
         jobs = query.offset(skip).limit(limit).all()
         
         # Convert to Pydantic models
-        return [Job.from_orm(job) for job in jobs], total
+        # Convert ORM objects to Pydantic models and add schedule_days
+        job_responses = []
+        for job in jobs:
+            job_model = Job.from_orm(job)
+            job_model.schedule_days = self._extract_days_from_cron(job.cron_expression)
+            job_responses.append(job_model)
+            
+        return job_responses, total
 
     def get_job_by_id(self, job_id: int) -> Job:
         """
