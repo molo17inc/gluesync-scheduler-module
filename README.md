@@ -120,6 +120,7 @@ Configure the application using environment variables:
 | `DB_URL` | Database connection URL | `sqlite:///./scheduler.db` |
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
+| `TIMEZONE` | Timezone value to be used when storing/retrieve dates | `UTC` |
 
 ### Gluesync SDK Configuration
 
