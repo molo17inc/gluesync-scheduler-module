@@ -287,12 +287,17 @@ class Job(JobBase):
     )
     
     @field_serializer('created_at', 'updated_at', 'last_run', 'last_successful_run', 'last_run_error_time', 'next_run')
-    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+    def serialize_datetime(self, dt: Optional[datetime], info) -> Optional[str]:
         if dt is None:
             return None
         # Ensure datetime has timezone information
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=pytz.UTC)
+        # For next_run, format as 'YYYY-MM-DDTHH:MM:SS+0000' (no colon in offset)
+        if info.field_name == 'next_run':
+            # Use strftime to format offset without colon
+            return dt.strftime('%Y-%m-%dT%H:%M:%S%z')
+        # For other fields, use ISO8601 (with colon)
         return dt.isoformat()
 
 

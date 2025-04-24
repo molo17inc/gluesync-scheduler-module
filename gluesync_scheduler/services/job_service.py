@@ -150,6 +150,18 @@ class JobService:
     def get_job_by_id(self, job_id: int) -> Job:
         """
         Get a job by its ID
+        """
+        job = self.db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job with ID {job_id} not found"
+            )
+        return Job.from_orm(job)
+
+    def get_job(self, job_id: int) -> Job:
+        """
+        Alias for get_job_by_id for compatibility with API router
         
         Args:
             job_id: The job ID to retrieve
@@ -160,13 +172,7 @@ class JobService:
         Raises:
             HTTPException: If job not found
         """
-        job = self.db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
-        if not job:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Job with ID {job_id} not found"
-            )
-        return Job.from_orm(job)
+        return self.get_job_by_id(job_id)
 
     def create_job(self, job_data: JobCreate) -> Job:
         """
@@ -239,9 +245,32 @@ class JobService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="A cron expression or schedule is required for job creation"
                     )
-            # Get current time with timezone for start_time
-            current_time = datetime.now(pytz.timezone(settings.TIMEZONE))
-            formatted_time = current_time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            # Calculate the next run time based on cron expression for start_time
+            next_run_time = None
+            if job_data.cron_expression:
+                try:
+                    from croniter import croniter
+                    # Get current time in the configured timezone
+                    tz = pytz.timezone(settings.TIMEZONE)
+                    now = datetime.now(tz)
+                    
+                    # Use croniter to calculate the next run time
+                    cron_iter = croniter(job_data.cron_expression, now)
+                    next_run_datetime = cron_iter.get_next(datetime)
+                    
+                    # Make sure the datetime has the correct timezone
+                    if next_run_datetime.tzinfo is None:
+                        next_run_datetime = tz.localize(next_run_datetime)
+                    elif str(next_run_datetime.tzinfo) != str(tz):
+                        # Convert to the configured timezone
+                        next_run_datetime = next_run_datetime.astimezone(tz)
+                    
+                    # Format the start_time in the required format
+                    next_run_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
+                    logger.info(f"Calculated next run time: {next_run_time}")
+                except Exception as e:
+                    logger.error(f"Error calculating next run time: {e}")
+                    # If calculation fails, we'll leave start_time as None
             
             # Create the database record
             db_job = ScheduledJob(
@@ -257,8 +286,8 @@ class JobService:
                 updated_at=datetime.now(timezone.utc),
                 # Set a placeholder command to satisfy NOT NULL constraint
                 command="pending",
-                # Add start_time field
-                start_time=formatted_time
+                # Set start_time to the calculated next run time
+                start_time=next_run_time
             )
             
             # Generate a unique identifier for the cron job
@@ -318,12 +347,41 @@ class JobService:
             if "entity_ids" in update_data:
                 update_data["entity_ids"] = json.dumps(update_data["entity_ids"]) if update_data["entity_ids"] else None
                 
+            # Check if cron_expression is being updated
+            cron_updated = "cron_expression" in update_data
+            
             # Update the job record
             for key, value in update_data.items():
                 setattr(db_job, key, value)
                 
             # Always update the updated_at timestamp
             db_job.updated_at = datetime.now(timezone.utc)
+            
+            # Recalculate start_time if cron_expression was updated
+            if cron_updated and db_job.cron_expression:
+                try:
+                    from croniter import croniter
+                    # Get current time in the configured timezone
+                    tz = pytz.timezone(settings.TIMEZONE)
+                    now = datetime.now(tz)
+                    
+                    # Use croniter to calculate the next run time
+                    cron_iter = croniter(db_job.cron_expression, now)
+                    next_run_datetime = cron_iter.get_next(datetime)
+                    
+                    # Make sure the datetime has the correct timezone
+                    if next_run_datetime.tzinfo is None:
+                        next_run_datetime = tz.localize(next_run_datetime)
+                    elif str(next_run_datetime.tzinfo) != str(tz):
+                        # Convert to the configured timezone
+                        next_run_datetime = next_run_datetime.astimezone(tz)
+                    
+                    # Format the start_time in the required format
+                    db_job.start_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
+                    logger.info(f"Recalculated next run time for job {job_id}: {db_job.start_time}")
+                except Exception as e:
+                    logger.error(f"Error recalculating next run time: {e}")
+                    # If calculation fails, we won't update start_time
             
             # Update in database
             self.db.commit()
