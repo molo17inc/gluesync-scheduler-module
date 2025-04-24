@@ -118,6 +118,8 @@ Configure the application using environment variables:
 | `PORT` | Port to bind the API server | `1717` |
 | `DEBUG` | Enable debug mode | `False` |
 | `DB_URL` | Database connection URL | `sqlite:///./scheduler.db` |
+| `DATA_DIR` | Directory for storing application data | `/app/data` |
+| `ENTITY_START_TIMEOUT` | Timeout in seconds for entity start operations | `2` |
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
 | `TIMEZONE` | Timezone value to be used when storing/retrieve dates | `UTC` |
@@ -130,6 +132,8 @@ Additional environment variables for the Gluesync SDK integration:
 |----------|-------------|----------|
 | `GLUESYNC_LICENSE_FILE` | Path to the Gluesync license file | `gs-license.dat` |
 | `SSL_ENABLED` | Whether to use SSL for CoreHub connection | `False` |
+| `SSL_SKIP_VERIFY` | Skip SSL certificate verification | `True` |
+| `GLUESYNC_SECURITY_CONFIG` | Path to security configuration file | `/opt/gluesync/data/security-config.json` |
 | `GLUESYNC_KEYSTORE_PATH` | Path to JKS keystore file for SSL | `None` |
 | `GLUESYNC_KEYSTORE_PASSWORD` | Password for JKS keystore | `None` |
 
