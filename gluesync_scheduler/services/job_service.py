@@ -100,6 +100,54 @@ class JobService:
             logger.error(f"Error parsing cron expression: {e}")
             return []  # Return empty array on error
 
+    def _apply_timezone_to_job(self, job_model: Job, db_job: ScheduledJob) -> Job:
+        """
+        Apply timezone information to job dates
+        
+        Args:
+            job_model: The Pydantic model to update
+            db_job: The database job with timezone information
+            
+        Returns:
+            Updated job model with proper timezone info
+        """
+        # Add schedule days
+        job_model.schedule_days = self._extract_days_from_cron(db_job.cron_expression)
+        
+        # If we have timezone information and dates, ensure they're properly formatted
+        if hasattr(db_job, 'timezone_name') and db_job.timezone_name:
+            # Get the timezone
+            try:
+                tz = pytz.timezone(db_job.timezone_name)
+                
+                # Process next_run/start_time if it exists
+                if job_model.next_run and isinstance(job_model.next_run, str):
+                    # Parse the datetime string
+                    try:
+                        # If it already has timezone info, just ensure it's in the right format
+                        if '+' in job_model.next_run or 'Z' in job_model.next_run:
+                            dt = datetime.fromisoformat(job_model.next_run.replace('Z', '+00:00'))
+                            # Convert to the configured timezone
+                            dt = dt.astimezone(tz)
+                            # Format with timezone info
+                            job_model.next_run = dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+                    except Exception as e:
+                        logger.warning(f"Error processing next_run timezone: {e}")
+                        
+                # Same for start_time
+                if job_model.start_time and isinstance(job_model.start_time, str):
+                    try:
+                        if '+' in job_model.start_time or 'Z' in job_model.start_time:
+                            dt = datetime.fromisoformat(job_model.start_time.replace('Z', '+00:00'))
+                            dt = dt.astimezone(tz)
+                            job_model.start_time = dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+                    except Exception as e:
+                        logger.warning(f"Error processing start_time timezone: {e}")
+            except Exception as e:
+                logger.warning(f"Error applying timezone to job: {e}")
+                
+        return job_model
+    
     def get_jobs(
         self, 
         skip: int = 0, 
@@ -137,12 +185,11 @@ class JobService:
         # Apply pagination
         jobs = query.offset(skip).limit(limit).all()
         
-        # Convert to Pydantic models
-        # Convert ORM objects to Pydantic models and add schedule_days
+        # Convert to Pydantic models with timezone handling
         job_responses = []
         for job in jobs:
             job_model = Job.from_orm(job)
-            job_model.schedule_days = self._extract_days_from_cron(job.cron_expression)
+            job_model = self._apply_timezone_to_job(job_model, job)
             job_responses.append(job_model)
             
         return job_responses, total
@@ -157,7 +204,8 @@ class JobService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Job with ID {job_id} not found"
             )
-        return Job.from_orm(job)
+        job_model = Job.from_orm(job)
+        return self._apply_timezone_to_job(job_model, job)
 
     def get_job(self, job_id: int) -> Job:
         """
@@ -265,9 +313,11 @@ class JobService:
                         # Convert to the configured timezone
                         next_run_datetime = next_run_datetime.astimezone(tz)
                     
-                    # Format the start_time in the required format
+                    # Format the start_time in the required format with explicit timezone info
                     next_run_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
-                    logger.info(f"Calculated next run time: {next_run_time}")
+                    # Store the timezone name as well for reference
+                    next_run_tz = settings.TIMEZONE
+                    logger.info(f"Calculated next run time: {next_run_time} in timezone {next_run_tz}")
                 except Exception as e:
                     logger.error(f"Error calculating next run time: {e}")
                     # If calculation fails, we'll leave start_time as None
@@ -287,7 +337,9 @@ class JobService:
                 # Set a placeholder command to satisfy NOT NULL constraint
                 command="pending",
                 # Set start_time to the calculated next run time
-                start_time=next_run_time
+                start_time=next_run_time,
+                # Store the timezone name
+                timezone_name=settings.TIMEZONE if next_run_time else None
             )
             
             # Generate a unique identifier for the cron job
@@ -376,9 +428,11 @@ class JobService:
                         # Convert to the configured timezone
                         next_run_datetime = next_run_datetime.astimezone(tz)
                     
-                    # Format the start_time in the required format
+                    # Format the start_time in the required format with explicit timezone info
                     db_job.start_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
-                    logger.info(f"Recalculated next run time for job {job_id}: {db_job.start_time}")
+                    # Store the timezone name as well
+                    db_job.timezone_name = settings.TIMEZONE
+                    logger.info(f"Recalculated next run time for job {job_id}: {db_job.start_time} in timezone {db_job.timezone_name}")
                 except Exception as e:
                     logger.error(f"Error recalculating next run time: {e}")
                     # If calculation fails, we won't update start_time

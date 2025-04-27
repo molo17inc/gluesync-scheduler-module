@@ -247,6 +247,7 @@ class Job(JobBase):
             from datetime import datetime, timezone, timedelta
             return datetime.now(timezone.utc) + timedelta(days=1)
     start_time: Optional[str] = Field(None, description="Current time with timezone information when the job data was retrieved", example="2025-04-14T23:19:46+0200")
+    timezone_name: Optional[str] = Field(None, description="Name of the timezone used for scheduling", example="Asia/Tokyo")
     
     @validator('entity_ids', pre=True)
     def parse_entity_ids(cls, v):
