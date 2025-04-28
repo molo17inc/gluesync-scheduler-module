@@ -102,14 +102,18 @@ class SchedulerService:
             # Create the job in the scheduler
             job_id = f"job_{job.id}"
             
-            # Create the trigger
+            # Get the job's timezone or fall back to the global timezone setting
+            job_timezone = job.timezone_name if hasattr(job, 'timezone_name') and job.timezone_name else settings.TIMEZONE
+            logger.info(f"Using timezone {job_timezone} for job {job_id}")
+            
+            # Create the trigger with the job's timezone
             trigger = CronTrigger(
                 minute=minute,
                 hour=hour,
                 day=day,
                 month=month,
                 day_of_week=day_of_week,
-                timezone=settings.TIMEZONE
+                timezone=job_timezone
             )
             
             # Calculate the next run time based on the trigger

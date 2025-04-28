@@ -338,8 +338,8 @@ class JobService:
                 command="pending",
                 # Set start_time to the calculated next run time
                 start_time=next_run_time,
-                # Store the timezone name
-                timezone_name=settings.TIMEZONE if next_run_time else None
+                # Always store the configured timezone name
+                timezone_name=settings.TIMEZONE
             )
             
             # Generate a unique identifier for the cron job
