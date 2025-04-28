@@ -32,6 +32,17 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 
 from gluesync_scheduler.config.settings import settings
 
+# Validate the configured timezone
+try:
+    pytz.timezone(settings.TIMEZONE)
+    logger = logging.getLogger(__name__)
+    logger.info(f"Using timezone: {settings.TIMEZONE}")
+except Exception as e:
+    logger = logging.getLogger(__name__)
+    logger.error(f"Invalid timezone configured: {settings.TIMEZONE}. Error: {str(e)}")
+    logger.warning("Falling back to UTC timezone")
+    settings.TIMEZONE = 'UTC'
+
 from fastapi import HTTPException, status
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -298,8 +309,16 @@ class JobService:
             if job_data.cron_expression:
                 try:
                     from croniter import croniter
-                    # Get current time in the configured timezone
-                    tz = pytz.timezone(settings.TIMEZONE)
+                    # Validate and get the configured timezone
+                    try:
+                        tz = pytz.timezone(settings.TIMEZONE)
+                        logger.info(f"Using timezone for calculation: {settings.TIMEZONE}")
+                    except Exception as e:
+                        logger.error(f"Invalid timezone: {settings.TIMEZONE}. Error: {str(e)}")
+                        logger.warning("Falling back to UTC timezone")
+                        tz = pytz.UTC
+                        settings.TIMEZONE = 'UTC'
+                    
                     now = datetime.now(tz)
                     
                     # Use croniter to calculate the next run time
@@ -413,8 +432,16 @@ class JobService:
             if cron_updated and db_job.cron_expression:
                 try:
                     from croniter import croniter
-                    # Get current time in the configured timezone
-                    tz = pytz.timezone(settings.TIMEZONE)
+                    # Validate and get the configured timezone
+                    try:
+                        tz = pytz.timezone(settings.TIMEZONE)
+                        logger.info(f"Using timezone for calculation: {settings.TIMEZONE}")
+                    except Exception as e:
+                        logger.error(f"Invalid timezone: {settings.TIMEZONE}. Error: {str(e)}")
+                        logger.warning("Falling back to UTC timezone")
+                        tz = pytz.UTC
+                        settings.TIMEZONE = 'UTC'
+                    
                     now = datetime.now(tz)
                     
                     # Use croniter to calculate the next run time

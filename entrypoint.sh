@@ -1,26 +1,31 @@
 #!/bin/bash
 set -e
 
-# --- Auto-detect host timezone and set TIMEZONE env variable ---
-# Linux: Try /etc/timezone
-if [ -f /etc/timezone ]; then
-    export TIMEZONE=$(cat /etc/timezone | tr -d '\n')
-# Linux: Try /etc/localtime symlink
-elif [ -L /etc/localtime ]; then
-    tz_path=$(readlink /etc/localtime)
-    case "$tz_path" in
-        *zoneinfo/*)
-            export TIMEZONE="${tz_path##*/zoneinfo/}"
-            ;;
-        *)
-            export TIMEZONE="UTC"
-            ;;
-    esac
-# Windows: Use TZ env if set (Docker for Windows sets this if --env TZ=...)
-elif [ ! -z "$TZ" ]; then
-    export TIMEZONE="$TZ"
+# Only auto-detect timezone if TIMEZONE isn't already set
+if [ -z "$TIMEZONE" ]; then
+    echo "TIMEZONE not set, auto-detecting..."
+    # Linux: Try /etc/timezone
+    if [ -f /etc/timezone ]; then
+        export TIMEZONE=$(cat /etc/timezone | tr -d '\n')
+    # Linux: Try /etc/localtime symlink
+    elif [ -L /etc/localtime ]; then
+        tz_path=$(readlink /etc/localtime)
+        case "$tz_path" in
+            *zoneinfo/*)
+                export TIMEZONE="${tz_path##*/zoneinfo/}"
+                ;;
+            *)
+                export TIMEZONE="UTC"
+                ;;
+        esac
+    # Windows: Use TZ env if set (Docker for Windows sets this if --env TZ=...)
+    elif [ ! -z "$TZ" ]; then
+        export TIMEZONE="$TZ"
+    else
+        export TIMEZONE="UTC"
+    fi
 else
-    export TIMEZONE="UTC"
+    echo "Using provided TIMEZONE: $TIMEZONE"
 fi
 
 echo "Detected TIMEZONE: $TIMEZONE"

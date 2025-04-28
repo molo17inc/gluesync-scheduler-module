@@ -51,11 +51,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install required system packages
+# Install required system packages including timezone data
 RUN apt-get update && apt-get install -y \
     cron \
     curl \
-    procps && \
+    procps \
+    tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 # Create Gluesync default directories and app data directory
@@ -109,12 +110,11 @@ COPY ./README.md .
 # Copy the restructured package
 COPY ./gluesync_scheduler ./gluesync_scheduler
 
-# Copy main entry points and scripts
-COPY ./main.py .
-COPY ./run_scheduler.py .
+# Copy app code
+COPY . .
 
 # Make scripts executable
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh
 
 # Install SDK dependencies one by one to avoid issues
 RUN python -m pip install --upgrade pip && \

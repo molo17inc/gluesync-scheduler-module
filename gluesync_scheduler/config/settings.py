@@ -22,8 +22,13 @@
 """
 
 import os
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file if it exists
 env_path = Path('.') / '.env'
@@ -52,6 +57,15 @@ class Settings:
     # Timezone settings
     TIMEZONE = os.getenv('TIMEZONE', 'Europe/Rome')
     
+    # Debug logging for timezone settings
+    def __init__(self):
+        # Log all environment variables
+        logger.info("Environment variables related to timezone:")
+        for k, v in os.environ.items():
+            if 'TIME' in k.upper() or 'TZ' in k.upper():
+                logger.info(f"  {k}={v}")
+        logger.info(f"Configured TIMEZONE: {self.TIMEZONE}")
+    
     # SSL settings
     SSL_ENABLED = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
     SSL_SKIP_VERIFY = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
@@ -73,3 +87,6 @@ class Settings:
 
 
 settings = Settings()
+
+# Log timezone settings
+logger.info(f"Actual configured timezone: {settings.TIMEZONE}")
