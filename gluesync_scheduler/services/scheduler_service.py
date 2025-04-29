@@ -157,11 +157,18 @@ class SchedulerService:
             HTTPException: If there's an error updating the job
         """
         try:
+            # Log more details about the job we're updating for debugging
+            logger.info(f"Updating scheduled job for job_id={job.id} with cron_expression={job.cron_expression}")
+            if hasattr(job, 'timezone_name') and job.timezone_name:
+                logger.info(f"Job timezone: {job.timezone_name}")
+            
             # Remove the existing job
             self.remove_job(job.id)
             
             # Create a new job with the updated settings
-            return self.create_job(job)
+            job_id = self.create_job(job)
+            logger.info(f"Job updated successfully with scheduler ID: {job_id}")
+            return job_id
             
         except Exception as e:
             logger.error(f"Error updating scheduled job: {str(e)}")

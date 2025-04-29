@@ -417,9 +417,59 @@ class JobService:
             # Special handling for entity_ids (convert to JSON string)
             if "entity_ids" in update_data:
                 update_data["entity_ids"] = json.dumps(update_data["entity_ids"]) if update_data["entity_ids"] else None
-                
-            # Check if cron_expression is being updated
-            cron_updated = "cron_expression" in update_data
+            
+            # Handle schedule conversion to cron_expression if schedule is provided
+            if "schedule" in update_data and update_data["schedule"]:
+                try:
+                    # Log the received schedule for debugging
+                    logger.info(f"Update includes schedule: {update_data['schedule']}")
+                    
+                    # Access schedule components directly
+                    schedule_dict = update_data["schedule"].dict()
+                    minute = schedule_dict.get('minute')
+                    hour = schedule_dict.get('hour')
+                    days_of_week = schedule_dict.get('days_of_week', [])
+                    
+                    # Validate required fields
+                    if minute is None or hour is None:
+                        raise ValueError("Schedule must include both hour and minute")
+                        
+                    logger.info(f"Schedule components in update: hour={hour}, minute={minute}, days={days_of_week}")
+                    
+                    # Convert days of week to cron format (0-6, where 0 is Sunday)
+                    dow_map = {
+                        "sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3,
+                        "thursday": 4, "friday": 5, "saturday": 6
+                    }
+                    
+                    # Handle days of week (could be strings or DayOfWeek enums)
+                    if days_of_week:
+                        dow_values = []
+                        for day in days_of_week:
+                            # Handle both string and enum values
+                            day_str = day.lower() if isinstance(day, str) else day.value.lower()
+                            if day_str in dow_map:
+                                dow_values.append(str(dow_map[day_str]))
+                    else:
+                        dow_values = ["*"]  # All days
+                        
+                    dow_string = ",".join(dow_values)
+                    
+                    # Create cron expression (minute hour * * day_of_week)
+                    cron_expression = f"{minute} {hour} * * {dow_string}"
+                    update_data["cron_expression"] = cron_expression
+                    
+                    logger.info(f"Generated cron expression from update schedule: {cron_expression}")
+                    cron_updated = True
+                except Exception as e:
+                    logger.error(f"Failed to convert schedule to cron expression in update: {e}")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Failed to convert schedule to cron expression: {str(e)}"
+                    )
+            else:
+                # Check if cron_expression is being updated
+                cron_updated = "cron_expression" in update_data
             
             # Update the job record
             for key, value in update_data.items():
@@ -471,10 +521,10 @@ class JobService:
             # Update the scheduled job
             if db_job.enabled:
                 # Update the job in the scheduler
-                self.scheduler_service.update_job(db_job)
+                job_id = self.scheduler_service.update_job(db_job)
                 
-                # No need to store command anymore as we're using in-memory scheduler
-                db_job.command = f"APScheduler job {db_job.id}"
+                # Use consistent command format for all jobs to ensure they're treated the same
+                db_job.command = f"Scheduled job ID: {job_id}"
                 self.db.commit()
                 self.db.refresh(db_job)
             else:
@@ -524,10 +574,17 @@ class JobService:
             
             # If enabling, create the cron job
             if enabled:
-                job_id = self.scheduler_service.create_job(job)
-                job.command = f"Scheduled job ID: {job_id}"
+                # Log detailed cron expression to help with debugging
+                logger.info(f"Enabling job {job_id} with cron expression: {job.cron_expression}")
+                if hasattr(job, 'timezone_name') and job.timezone_name:
+                    logger.info(f"Job timezone: {job.timezone_name}")
+                
+                scheduler_job_id = self.scheduler_service.create_job(job)
+                job.command = f"Scheduled job ID: {scheduler_job_id}"
+                logger.info(f"Job enabled with scheduler ID: {scheduler_job_id}")
             # If disabling, delete the scheduled job
             else:
+                logger.info(f"Disabling job {job_id}")
                 self.scheduler_service.remove_job(job.id)
                 # Ensure command is not NULL when disabling
                 if not job.command:
