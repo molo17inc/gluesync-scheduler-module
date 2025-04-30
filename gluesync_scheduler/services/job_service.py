@@ -442,14 +442,23 @@ class JobService:
                         "thursday": 4, "friday": 5, "saturday": 6
                     }
                     
+                    # Create reverse lookup for verification
+                    reverse_dow_map = {str(v): k for k, v in dow_map.items()}
+                    
+                    # Log the actual day of week values for debugging
+                    logger.info(f"Converting days of week: {days_of_week} to cron format")
+                    
                     # Handle days of week (could be strings or DayOfWeek enums)
                     if days_of_week:
                         dow_values = []
                         for day in days_of_week:
-                            # Handle both string and enum values
+                            # Handle both string and enum values 
                             day_str = day.lower() if isinstance(day, str) else day.value.lower()
                             if day_str in dow_map:
                                 dow_values.append(str(dow_map[day_str]))
+                                logger.info(f"Day {day_str} mapped to cron value {dow_map[day_str]}")
+                            else:
+                                logger.warning(f"Unknown day of week: {day}")
                     else:
                         dow_values = ["*"]  # All days
                         
@@ -460,6 +469,35 @@ class JobService:
                     update_data["cron_expression"] = cron_expression
                     
                     logger.info(f"Generated cron expression from update schedule: {cron_expression}")
+                    
+                    # Add validation to ensure cron expression correctly represents the requested schedule
+                    # This helps identify any issues with day mapping
+                    for day in days_of_week:
+                        day_str = day.lower() if isinstance(day, str) else day.value.lower()
+                        if day_str in dow_map and str(dow_map[day_str]) not in dow_string:
+                            logger.error(f"Day validation failed: {day_str} should be in cron expression but isn't")
+                            
+                    # Perform a reverse check to validate we can extract the correct days from the cron
+                    # This validates our round-trip conversion
+                    test_days = []
+                    for part in dow_string.split(','):
+                        if part in reverse_dow_map:
+                            test_days.append(reverse_dow_map[part])
+                    
+                    expected_days = [day.lower() if isinstance(day, str) else day.value.lower() for day in days_of_week]
+                    logger.info(f"Day validation - expected: {expected_days}, extracted: {test_days}")
+                    
+                    # If expected days don't match extracted days, log an error
+                    missing_days = [day for day in expected_days if day not in test_days]
+                    if missing_days:
+                        logger.error(f"Days missing in cron expression: {missing_days}")
+                        # Update dow_string to include the missing days
+                        for day in missing_days:
+                            if day in dow_map:
+                                dow_values.append(str(dow_map[day]))
+                        # Regenerate the dow_string
+                        dow_string = ','.join(dow_values)
+                    
                     cron_updated = True
                 except Exception as e:
                     logger.error(f"Failed to convert schedule to cron expression in update: {e}")
@@ -473,6 +511,13 @@ class JobService:
             
             # Update the job record
             for key, value in update_data.items():
+                # Special handling for schedule to preserve original days
+                if key == "schedule" and value is not None:
+                    # Store original schedule days for validation
+                    original_days = [d.lower() if isinstance(d, str) else d.value.lower() 
+                                    for d in value.days_of_week] if value.days_of_week else []
+                    logger.info(f"Setting schedule with original days: {original_days}")
+                
                 setattr(db_job, key, value)
                 
             # Always update the updated_at timestamp
@@ -494,6 +539,32 @@ class JobService:
                     
                     now = datetime.now(tz)
                     
+                    # Parse the cron expression to verify day of week values
+                    cron_parts = db_job.cron_expression.split()
+                    if len(cron_parts) == 5:
+                        dow_part = cron_parts[4]  # 5th part is day of week
+                        logger.info(f"Cron day of week part: {dow_part}")
+                        
+                        # Map from cron day nums (0-6) to day names for validation
+                        reverse_day_map = {
+                            "0": "sunday", "1": "monday", "2": "tuesday", "3": "wednesday",
+                            "4": "thursday", "5": "friday", "6": "saturday"
+                        }
+                        
+                        # Determine which days this cron will actually run on (for validation)
+                        actual_days = []
+                        if dow_part != "*":
+                            for part in dow_part.split(','):
+                                if "-" in part:
+                                    start, end = part.split("-")
+                                    for d in range(int(start), int(end) + 1):
+                                        if str(d) in reverse_day_map:
+                                            actual_days.append(reverse_day_map[str(d)])
+                                elif part in reverse_day_map:
+                                    actual_days.append(reverse_day_map[part])
+                        
+                        logger.info(f"Actual days job will run based on cron: {actual_days}")
+                    
                     # Use croniter to calculate the next run time
                     cron_iter = croniter(db_job.cron_expression, now)
                     next_run_datetime = cron_iter.get_next(datetime)
@@ -504,6 +575,10 @@ class JobService:
                     elif str(next_run_datetime.tzinfo) != str(tz):
                         # Convert to the configured timezone
                         next_run_datetime = next_run_datetime.astimezone(tz)
+                    
+                    # Log the day of week from the calculated next run - this helps debug timezone shift issues
+                    weekday_name = next_run_datetime.strftime("%A").lower()
+                    logger.info(f"Next run calculated for: {next_run_datetime}, which is a {weekday_name}")
                     
                     # Format the start_time in the required format with explicit timezone info
                     db_job.start_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")

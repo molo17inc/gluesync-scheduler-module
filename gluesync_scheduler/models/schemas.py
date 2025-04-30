@@ -185,6 +185,9 @@ class Job(JobBase):
                 "4": "thursday", "5": "friday", "6": "saturday"
             }
             
+            # Create a detailed log string to help with debugging
+            log_msg = f"Extracting days from cron expression: {cron}, day of week part: {dow_part}"
+            
             # Handle different dow formats
             if dow_part == "*":
                 # All days
@@ -202,10 +205,19 @@ class Job(JobBase):
                 # Single day
                 elif day in day_map:
                     result.append(day_map[day])
+                    
+            # Ensure we have at least one day in the result if dow_part is not '*'
+            # but we couldn't extract any days (e.g., due to parsing issues)
+            if not result and dow_part != "*" and dow_part.isdigit():
+                day_num = int(dow_part)
+                if 0 <= day_num <= 6 and str(day_num) in day_map:
+                    result.append(day_map[str(day_num)])
+                    
             return result
-        except Exception:
-            # On any error, return empty list
-            return []
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Error extracting days from cron: {e}")
+            return []  # Return empty array on error
     
     # Calculate next_run based on cron_expression
     @validator('next_run', always=True)

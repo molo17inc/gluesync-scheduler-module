@@ -99,12 +99,36 @@ class SchedulerService:
             
             minute, hour, day, month, day_of_week = cron_parts
             
+            # Log the cron component values for debugging
+            logger.info(f"Cron components - minute: {minute}, hour: {hour}, day: {day}, month: {month}, day_of_week: {day_of_week}")
+            
             # Create the job in the scheduler
             job_id = f"job_{job.id}"
             
             # Get the job's timezone or fall back to the global timezone setting
             job_timezone = job.timezone_name if hasattr(job, 'timezone_name') and job.timezone_name else settings.TIMEZONE
             logger.info(f"Using timezone {job_timezone} for job {job_id}")
+            
+            # Map from day numbers (0-6) to day names for validation/logging
+            day_map = {
+                "0": "sunday", "1": "monday", "2": "tuesday", "3": "wednesday",
+                "4": "thursday", "5": "friday", "6": "saturday"
+            }
+            
+            # Log the actual days of week this job will run on (for validation)
+            if day_of_week != "*":
+                day_names = []
+                for part in day_of_week.split(','):
+                    if "-" in part:
+                        start, end = part.split("-")
+                        for d in range(int(start), int(end) + 1):
+                            if str(d) in day_map:
+                                day_names.append(day_map[str(d)])
+                    elif part in day_map:
+                        day_names.append(day_map[part])
+                logger.info(f"Job will run on these days: {day_names}")
+            else:
+                logger.info("Job will run every day")
             
             # Create the trigger with the job's timezone
             trigger = CronTrigger(
@@ -119,6 +143,18 @@ class SchedulerService:
             # Calculate the next run time based on the trigger
             from datetime import datetime, timezone, timedelta
             import pytz
+            
+            # Get the next run time from the trigger (for validation)
+            tz = pytz.timezone(job_timezone)
+            now = datetime.now(tz)
+            next_run = trigger.get_next_fire_time(None, now)
+            
+            if next_run:
+                # Log the calculated next run time and day for validation
+                weekday_name = next_run.strftime("%A").lower()
+                logger.info(f"Next scheduled run will be: {next_run.strftime('%Y-%m-%d %H:%M:%S %z')} which is a {weekday_name}")
+            else:
+                logger.warning(f"Could not determine next run time for job {job_id} with cron expression {job.cron_expression}")
             
             # Add the job to the scheduler with proper next run time calculation
             # We want it to run on schedule but not immediately
