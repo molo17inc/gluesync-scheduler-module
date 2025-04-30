@@ -171,11 +171,28 @@ class SchedulerService:
                     
                 # Log the calculated next run time and day for validation
                 weekday_name = next_run.strftime("%A").lower()
+                weekday_number = next_run.weekday() # 0 is Monday, 6 is Sunday
+                # Convert to cron weekday where 0 is Sunday, 6 is Saturday
+                cron_weekday = (weekday_number + 1) % 7
                 logger.info(f"Next scheduled run will be: {next_run.strftime('%Y-%m-%d %H:%M:%S %z')} which is a {weekday_name}")
+                logger.info(f"Weekday validation - Cron format: {cron_dow}, Actual date weekday: {cron_weekday}")
                 
-                # Verify the day of week matches what we expect
-                if day_of_week != '*' and str(next_run.weekday()) != day_of_week:
-                    logger.warning(f"Warning: Next run time {next_run} is on {weekday_name} but cron expression specifies day {day_of_week}")
+                # Verify if the scheduled date actually matches the expected day of week
+                if cron_dow != '*' and str(cron_weekday) not in cron_dow.split(','):
+                    logger.warning(f"WARNING: Next run date {next_run.strftime('%Y-%m-%d')} is a {weekday_name} (cron weekday {cron_weekday}), but job is configured to run on cron weekdays: {cron_dow}. This may indicate a timezone issue.")
+                
+                # Python weekday() returns 0-6 where 0 is Monday
+                # Cron uses 0-6 where 0 is Sunday
+                # We need to convert between these two systems for proper comparison
+                python_weekday = next_run.weekday()  # 0=Monday, 1=Tuesday, ..., 6=Sunday
+                cron_equivalent = (python_weekday + 1) % 7  # Convert to cron format (0=Sunday)
+                
+                # Check if the scheduled day matches the expected cron day
+                if day_of_week != '*':
+                    cron_days = day_of_week.split(',')
+                    if str(cron_equivalent) not in cron_days:
+                        logger.warning(f"Warning: Next run time {next_run} is on {weekday_name} (Python weekday={python_weekday}, cron weekday={cron_equivalent}) but cron expression specifies days {day_of_week}")
+                        logger.warning(f"This may indicate a timezone alignment issue or that the next valid run time is in a future week")
             else:
                 logger.warning(f"Could not determine next run time for job {job_id} with cron expression {job.cron_expression}")
             
