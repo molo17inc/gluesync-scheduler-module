@@ -127,9 +127,25 @@ class SchedulerService:
                     elif part in day_map:
                         day_names.append(day_map[part])
                 logger.info(f"Job will run on these days: {day_names}")
-                # For APScheduler, we can use either the original numeric values or day abbreviations
-                # Let's stick with the numeric values since that's what we parsed from the cron expression
-                cron_dow = day_of_week  # Use the original numeric format (0-6)
+                # Convert from standard cron days (where 0=Sunday) to APScheduler day names
+                # because APScheduler has inconsistent handling of numeric weekdays
+                cron_day_to_name = {
+                    "0": "sun", "1": "mon", "2": "tue", "3": "wed", 
+                    "4": "thu", "5": "fri", "6": "sat"
+                }
+                
+                # Convert each day number to its name
+                dow_parts = day_of_week.split(',')
+                dow_names = []
+                for part in dow_parts:
+                    if part in cron_day_to_name:
+                        dow_names.append(cron_day_to_name[part])
+                    else:
+                        # Handle ranges or unknown parts by passing them through
+                        dow_names.append(part)
+                
+                # Use APScheduler's expected day names
+                cron_dow = ','.join(dow_names)  # e.g., "wed" instead of "3"
             else:
                 logger.info("Job will run every day")
                 cron_dow = "*"
@@ -180,20 +196,16 @@ class SchedulerService:
                 
                 # Verify if the scheduled date actually matches the expected day of week
                 expected_days = cron_dow.split(',')
-                # Convert Python's weekday to cron day of week for validation
-                # Python: 0=Monday, 1=Tuesday, ..., 6=Sunday
-                # Cron: 0=Sunday, 1=Monday, ..., 6=Saturday
+                # Convert the Python weekday to the same format we're using with APScheduler (day names)
                 python_weekday = next_run.weekday()  # 0=Monday, 1=Tuesday, ..., 6=Sunday
-                actual_day = str((python_weekday + 1) % 7)  # Convert to Cron format (0=Sunday)
-                if cron_dow != '*' and actual_day not in expected_days:
-                    logger.warning(f"WARNING: Next run date {next_run.strftime('%Y-%m-%d')} is a {weekday_name.upper()}, but job is configured to run on weekdays: {cron_dow}. This may indicate a timezone issue.")
                 
-                # Now check if our calculated next run date actually falls on one of the expected days
-                # Only perform check if we have specific days (not *)
-                # and if we haven't already shown a warning
+                # Map Python's weekday to day abbreviation
+                python_to_apscheduler = {
+                    0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"
+                }
+                actual_day = python_to_apscheduler[python_weekday]
                 if cron_dow != '*' and actual_day not in expected_days:
-                    logger.warning(f"Warning: Next run time {next_run} is on {weekday_name} (cron weekday {actual_day}), but job is configured to run on cron weekdays: {cron_dow}")
-                    logger.warning(f"This may indicate a timezone alignment issue or that the next valid run time is in a future week")
+                    logger.warning(f"WARNING: Next run date {next_run.strftime('%Y-%m-%d')} is a {weekday_name} ({actual_day}), but job is configured to run on weekdays: {cron_dow}. This may indicate a timezone issue or that the next valid run time is in a future week.")
             else:
                 logger.warning(f"Could not determine next run time for job {job_id} with cron expression {job.cron_expression}")
             
