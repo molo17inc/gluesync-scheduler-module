@@ -534,8 +534,13 @@ class JobService:
                 # Special handling for schedule to preserve original days
                 if key == "schedule" and value is not None:
                     # Store original schedule days for validation
+                    if isinstance(value, dict):
+                        days_of_week = value.get('days_of_week', [])
+                    else:
+                        days_of_week = value.days_of_week if hasattr(value, 'days_of_week') else []
+                    
                     original_days = [d.lower() if isinstance(d, str) else d.value.lower() 
-                                    for d in value.days_of_week] if value.days_of_week else []
+                                    for d in days_of_week] if days_of_week else []
                     logger.info(f"Setting schedule with original days: {original_days}")
                 
                 setattr(db_job, key, value)
