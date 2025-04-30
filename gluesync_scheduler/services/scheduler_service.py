@@ -127,8 +127,8 @@ class SchedulerService:
                     elif part in day_map:
                         day_names.append(day_map[part])
                 logger.info(f"Job will run on these days: {day_names}")
-                # APScheduler's CronTrigger expects uppercase day names
-                cron_dow = ",".join([day.upper() for day in day_names])
+                # Use original numeric values for CronTrigger
+                cron_dow = day_of_week  # Keep the original numeric format (0-6)
             else:
                 logger.info("Job will run every day")
                 cron_dow = "*"
