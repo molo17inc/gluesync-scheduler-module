@@ -48,7 +48,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from gluesync_scheduler.models.models import ScheduledJob, TaskType
-from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job
+from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 
 logger = logging.getLogger(__name__)
@@ -424,11 +424,15 @@ class JobService:
                     # Log the received schedule for debugging
                     logger.info(f"Update includes schedule: {update_data['schedule']}")
                     
-                    # Access schedule components directly
-                    schedule_dict = update_data["schedule"].dict()
-                    minute = schedule_dict.get('minute')
-                    hour = schedule_dict.get('hour')
-                    days_of_week = schedule_dict.get('days_of_week', [])
+                    # Convert schedule to ScheduleConfig if it's a dict
+                    schedule = update_data["schedule"]
+                    if isinstance(schedule, dict):
+                        schedule = ScheduleConfig(**schedule)
+                    
+                    # Now we can safely access the schedule components
+                    minute = schedule.minute
+                    hour = schedule.hour
+                    days_of_week = schedule.days_of_week
                     
                     # Validate required fields
                     if minute is None or hour is None:
