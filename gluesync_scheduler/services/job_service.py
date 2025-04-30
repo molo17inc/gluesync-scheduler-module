@@ -425,14 +425,30 @@ class JobService:
                     logger.info(f"Update includes schedule: {update_data['schedule']}")
                     
                     # Convert schedule to ScheduleConfig if it's a dict
-                    schedule = update_data["schedule"]
+                    schedule = update_data['schedule']
                     if isinstance(schedule, dict):
-                        schedule = ScheduleConfig(**schedule)
+                        try:
+                            schedule = ScheduleConfig(**schedule)
+                        except Exception as e:
+                            logger.error(f"Error converting schedule dict to ScheduleConfig: {e}")
+                            # Ensure we have the required fields with proper defaults
+                            if 'minute' not in schedule:
+                                schedule['minute'] = 0
+                            if 'hour' not in schedule:
+                                schedule['hour'] = 0
+                            if 'days_of_week' not in schedule:
+                                schedule['days_of_week'] = []
                     
                     # Now we can safely access the schedule components
-                    minute = schedule.minute
-                    hour = schedule.hour
-                    days_of_week = schedule.days_of_week
+                    # Handle both dict and ScheduleConfig objects
+                    if isinstance(schedule, dict):
+                        minute = schedule.get('minute', 0)
+                        hour = schedule.get('hour', 0)
+                        days_of_week = schedule.get('days_of_week', [])
+                    else:
+                        minute = schedule.minute
+                        hour = schedule.hour
+                        days_of_week = schedule.days_of_week
                     
                     # Validate required fields
                     if minute is None or hour is None:
