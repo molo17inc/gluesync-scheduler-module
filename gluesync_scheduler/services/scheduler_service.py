@@ -127,8 +127,9 @@ class SchedulerService:
                     elif part in day_map:
                         day_names.append(day_map[part])
                 logger.info(f"Job will run on these days: {day_names}")
-                # Use original numeric values for CronTrigger
-                cron_dow = day_of_week  # Keep the original numeric format (0-6)
+                # Use day NAMES for APScheduler instead of numbers to avoid confusion
+                # APScheduler uses a different numbering system (0=Monday) than standard cron (0=Sunday)
+                cron_dow = ",".join([day.upper() for day in day_names])  # Convert to uppercase day names for APScheduler
             else:
                 logger.info("Job will run every day")
                 cron_dow = "*"
@@ -178,21 +179,21 @@ class SchedulerService:
                 logger.info(f"Weekday validation - Cron format: {cron_dow}, Actual date weekday: {cron_weekday}")
                 
                 # Verify if the scheduled date actually matches the expected day of week
-                if cron_dow != '*' and str(cron_weekday) not in cron_dow.split(','):
-                    logger.warning(f"WARNING: Next run date {next_run.strftime('%Y-%m-%d')} is a {weekday_name} (cron weekday {cron_weekday}), but job is configured to run on cron weekdays: {cron_dow}. This may indicate a timezone issue.")
+                expected_days = cron_dow.split(',')
+                actual_day = weekday_name.upper() # Convert to uppercase for comparison
+                if cron_dow != '*' and actual_day not in expected_days:
+                    logger.warning(f"WARNING: Next run date {next_run.strftime('%Y-%m-%d')} is a {weekday_name.upper()}, but job is configured to run on weekdays: {cron_dow}. This may indicate a timezone issue.")
                 
-                # Python weekday() returns 0-6 where 0 is Monday
-                # Cron uses 0-6 where 0 is Sunday
-                # We need to convert between these two systems for proper comparison
-                python_weekday = next_run.weekday()  # 0=Monday, 1=Tuesday, ..., 6=Sunday
-                cron_equivalent = (python_weekday + 1) % 7  # Convert to cron format (0=Sunday)
+                # Now with day names, the comparison is much simpler
+                # Just check if the uppercase day name from the next run time
+                # matches any of our expected days
+                weekday_name_upper = weekday_name.upper()
                 
-                # Check if the scheduled day matches the expected cron day
-                if day_of_week != '*':
-                    cron_days = day_of_week.split(',')
-                    if str(cron_equivalent) not in cron_days:
-                        logger.warning(f"Warning: Next run time {next_run} is on {weekday_name} (Python weekday={python_weekday}, cron weekday={cron_equivalent}) but cron expression specifies days {day_of_week}")
-                        logger.warning(f"This may indicate a timezone alignment issue or that the next valid run time is in a future week")
+                # Only perform check if we have specific days (not *)
+                # and if we haven't already shown a warning
+                if cron_dow != '*' and actual_day not in expected_days:
+                    logger.warning(f"Warning: Next run time {next_run} is scheduled for {weekday_name_upper}, but job is configured to run on: {cron_dow}")
+                    logger.warning(f"This may indicate a timezone alignment issue or that the next valid run time is in a future week")
             else:
                 logger.warning(f"Could not determine next run time for job {job_id} with cron expression {job.cron_expression}")
             
