@@ -127,8 +127,10 @@ class SchedulerService:
                     elif part in day_map:
                         day_names.append(day_map[part])
                 logger.info(f"Job will run on these days: {day_names}")
+                cron_dow = ",".join(day_names)
             else:
                 logger.info("Job will run every day")
+                cron_dow = "*"
             
             # Create the trigger with the job's timezone
             trigger = CronTrigger(
@@ -136,7 +138,7 @@ class SchedulerService:
                 hour=hour,
                 day=day,
                 month=month,
-                day_of_week=day_of_week,
+                day_of_week=cron_dow,
                 timezone=job_timezone
             )
             
@@ -154,7 +156,7 @@ class SchedulerService:
                 hour=hour,
                 day=day,
                 month=month,
-                day_of_week=day_of_week,
+                day_of_week=cron_dow,
                 timezone=tz
             )
             
