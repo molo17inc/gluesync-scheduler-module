@@ -286,6 +286,9 @@ class GluesyncSDKClient:
         self._token = None
         self._is_initialized = False
         logger.info(f"Disconnected from CoreHub: {reason}")
+        
+        # Start automatic reconnection in a separate task
+        asyncio.create_task(self._reconnect_with_backoff())
     
     async def _on_error(self, error):
         """
@@ -295,6 +298,83 @@ class GluesyncSDKClient:
             error: The exception that occurred
         """
         logger.error(f"Error in connection: {error}")
+    
+    async def _reconnect_with_backoff(self):
+        """
+        Reconnect to CoreHub with exponential backoff when the connection is lost.
+        This method is called automatically by _on_disconnected.
+        """
+        # Extract the current connection details from client if they exist
+        host = getattr(self._client, 'host', None)
+        port = getattr(self._client, 'port', 1717)  # Default port is 1717
+        use_ssl = getattr(self._client, 'use_ssl', False)
+        
+        if not host and settings.CORE_HUB_URL:
+            # Use settings if client doesn't have host information
+            parsed_url = urlparse(settings.CORE_HUB_URL)
+            host = parsed_url.hostname
+            port = parsed_url.port or 1717
+            use_ssl = parsed_url.scheme == "https"
+        
+        # Exponential backoff parameters
+        retry_count = 0
+        backoff_delay = 1  # Start with 1 second delay
+        max_backoff = 30   # Maximum backoff of 30 seconds
+        cycle_count = 0    # Count full cycles of backoff
+        
+        logger.info("Starting automatic reconnection with exponential backoff")
+        
+        while True:  # Retry indefinitely
+            try:
+                # If we don't have a client or it was shut down, exit the reconnection loop
+                if not self._client:
+                    logger.info("Client was explicitly shut down, stopping reconnection attempts")
+                    return
+                    
+                # If already connected, exit the reconnection loop
+                if getattr(self._client, 'is_connected', False):
+                    logger.info("Already reconnected to CoreHub")
+                    return
+                
+                retry_count += 1
+                if host:
+                    logger.info(f"Reconnection attempt {retry_count} (cycle {cycle_count}) to CoreHub at {self._build_corehub_url(host, port, use_ssl)}...")
+                else:
+                    logger.info(f"Reconnection attempt {retry_count} (cycle {cycle_count}) using UDP discovery...")
+                
+                await self._client.connect()
+                
+                # After reconnect, check if we have a host (for UDP discovery)
+                if not host and self._client.host:
+                    # Update the discovered host/port for future use
+                    host = self._client.host
+                    port = self._client.port
+                    # Update the CoreHub URL in settings
+                    corehub_url = self._build_corehub_url(host, port, use_ssl)
+                    if corehub_url:
+                        settings.update_corehub_url(corehub_url)
+                        logger.info(f"Updated CoreHub URL to {corehub_url}")
+                
+                logger.info(f"Successfully reconnected to CoreHub after {retry_count} attempt(s)")
+                self._is_initialized = True
+                return  # Reconnection successful
+                
+            except Exception as e:
+                # Log the error and retry with exponential backoff
+                logger.warning(f"Reconnection attempt {retry_count} failed: {e}")
+                
+                # Calculate backoff with exponential increase
+                logger.info(f"Waiting {backoff_delay} seconds before next reconnection attempt...")
+                await asyncio.sleep(backoff_delay)
+                
+                # Double the backoff for next time, up to the maximum
+                backoff_delay = min(backoff_delay * 2, max_backoff)
+                
+                # If we've reached max backoff, reset on the next failure
+                if backoff_delay >= max_backoff:
+                    backoff_delay = 1  # Reset to 1 second
+                    cycle_count += 1   # Increment cycle count
+                    logger.info(f"Completed backoff cycle {cycle_count}, resetting delay to 1 second")
         
 # Create a global instance for easy import
 gluesync_sdk_client = GluesyncSDKClient.get_instance()
