@@ -286,6 +286,7 @@ class GluesyncSDKClient:
         """
         self._token = token
         logger.info(f"Connected to CoreHub successfully! Token received.")
+        logger.debug(f"Token: {token}")
     
     async def _on_disconnected(self, reason):
         """
