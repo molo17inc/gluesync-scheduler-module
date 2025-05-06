@@ -40,6 +40,17 @@ from gluesync_sdk import (
 from gluesync_scheduler.config.settings import settings
 
 # Configure logging
+# Ensure timestamps are always included in logs, even when run as a standalone script
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL, "INFO"),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(os.path.join(settings.LOG_DIR if hasattr(settings, 'LOG_DIR') else './logs', 
+                                        "sdk_client.log"))
+    ],
+    force=True  # Apply even if the root logger is already configured
+)
 logger = logging.getLogger(__name__)
 
 class GluesyncSDKClient:
