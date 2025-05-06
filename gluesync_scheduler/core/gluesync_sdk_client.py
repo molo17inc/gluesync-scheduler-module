@@ -298,6 +298,16 @@ class GluesyncSDKClient:
             error: The exception that occurred
         """
         logger.error(f"Error in connection: {error}")
+        
+        # Reset token and initialization state
+        self._token = None
+        self._is_initialized = False
+        
+        # Start reconnection process if not already in progress
+        if not hasattr(self, '_reconnection_in_progress') or not self._reconnection_in_progress:
+            logger.info("Starting reconnection process due to connection error")
+            self._reconnection_in_progress = True
+            asyncio.create_task(self._reconnect_with_backoff())
     
     async def _reconnect_with_backoff(self):
         """
@@ -357,6 +367,8 @@ class GluesyncSDKClient:
                 
                 logger.info(f"Successfully reconnected to CoreHub after {retry_count} attempt(s)")
                 self._is_initialized = True
+                # Reset the reconnection flag and return
+                self._reconnection_in_progress = False
                 return  # Reconnection successful
                 
             except Exception as e:
@@ -375,6 +387,12 @@ class GluesyncSDKClient:
                     backoff_delay = 1  # Reset to 1 second
                     cycle_count += 1   # Increment cycle count
                     logger.info(f"Completed backoff cycle {cycle_count}, resetting delay to 1 second")
+                    
+                    # If we've been retrying for too many cycles, reset the reconnection flag
+                    # This prevents the system from getting stuck if reconnection is impossible
+                    if cycle_count >= 3:  # After 3 full backoff cycles
+                        logger.warning(f"Reconnection still failing after {cycle_count} cycles. Resetting reconnection flag.")
+                        self._reconnection_in_progress = False
         
 # Create a global instance for easy import
 gluesync_sdk_client = GluesyncSDKClient.get_instance()
