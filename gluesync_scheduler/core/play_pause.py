@@ -263,6 +263,41 @@ class CoreHubClient:
                         return {"status": "success", "error": "Response too complex to process", "status_code": response.status_code}
                 else:
                     return {"status": "success", "status_code": response.status_code}
+            elif response.status_code == 401:
+                # Authentication error - token is likely invalid
+                error_message = "Authentication failed: Invalid or expired token"
+                try:
+                    # Try to parse the error message from the response
+                    error_data = response.json()
+                    if "message" in error_data:
+                        error_message = error_data["message"]
+                except Exception:
+                    pass
+                
+                logger.error(f"Authentication error (401): {error_message}")
+                
+                # Reset token and trigger reconnection
+                self.token = None
+                try:
+                    # Try to re-initialize the SDK client to get a fresh token
+                    from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+                    # Set flag for SDK client to know it needs to reconnect
+                    if hasattr(gluesync_sdk_client, '_client') and gluesync_sdk_client._client:
+                        gluesync_sdk_client._token = None
+                        gluesync_sdk_client._is_initialized = False
+                        # Create a task to trigger reconnection
+                        import asyncio
+                        asyncio.create_task(gluesync_sdk_client._reconnect_with_backoff())
+                except Exception as e:
+                    logger.error(f"Failed to trigger SDK reconnection: {e}")
+                
+                # Return a specific error response for auth errors
+                return {
+                    "status": "error",
+                    "status_code": 401,
+                    "error": "authentication_failed",
+                    "message": error_message
+                }
             else:
                 logger.error(f"Request failed with status code {response.status_code}: {response.text}")
                 return None
@@ -307,6 +342,12 @@ class CoreHubClient:
         }
             
         response = self.fetch_core_hub(path, method='POST', params=params)
+        
+        # Check for auth errors specifically
+        if response and isinstance(response, dict) and response.get('status') == 'error':
+            logger.error(f"Error starting entity {entity_id}: {response.get('message')}")
+            return False
+            
         return response is not None
     
     def stop_entity(self, pipeline_id: str, entity_id: str) -> bool:
@@ -314,6 +355,12 @@ class CoreHubClient:
         path = f'/pipelines/{pipeline_id}/commands/sync/stop'
         params = {'entity': entity_id}
         response = self.fetch_core_hub(path, method='POST', params=params)
+        
+        # Check for auth errors specifically
+        if response and isinstance(response, dict) and response.get('status') == 'error':
+            logger.error(f"Error stopping entity {entity_id}: {response.get('message')}")
+            return False
+            
         return response is not None
     
     def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
@@ -326,14 +373,22 @@ class CoreHubClient:
         
         try:
             response = self.fetch_core_hub(path, method='POST', params=params)
+            
+            # Check for auth errors specifically
+            if response and isinstance(response, dict) and response.get('status') == 'error':
+                logger.error(f"Error resyncing entity {entity_id}: {response.get('message')}")
+                return False
+                
             success = response is not None
             if success:
                 logger.info(f"Successfully resynced entity {entity_id} in pipeline {pipeline_id}")
+            else:
+                logger.error(f"Failed to resync entity {entity_id} in pipeline {pipeline_id}")
             return success
         except Exception as e:
             logger.error(f"Error resyncing entity {entity_id}: {str(e)}")
-            # Return True anyway to prevent job failure
-            return True
+            # Don't hide errors anymore
+            return False
     
     def start_pipeline(self, pipeline_id: str, with_snapshot: bool = False) -> bool:
         """Start all entities in a pipeline"""
@@ -344,14 +399,22 @@ class CoreHubClient:
             
         try:
             response = self.fetch_core_hub(path, method='POST', params=params)
+            
+            # Check for auth errors specifically
+            if response and isinstance(response, dict) and response.get('status') == 'error':
+                logger.error(f"Error starting pipeline {pipeline_id}: {response.get('message')}")
+                return False
+                
             success = response is not None
             if success:
                 logger.info(f"Successfully started pipeline {pipeline_id}")
+            else:
+                logger.error(f"Failed to start pipeline {pipeline_id}")
             return success
         except Exception as e:
             logger.error(f"Error starting pipeline {pipeline_id}: {str(e)}")
-            # Return True anyway to prevent job failure
-            return True
+            # Don't hide errors anymore
+            return False
     
     def stop_pipeline(self, pipeline_id: str) -> bool:
         """Stop all entities in a pipeline"""
@@ -359,14 +422,22 @@ class CoreHubClient:
         
         try:
             response = self.fetch_core_hub(path, method='POST')
+            
+            # Check for auth errors specifically
+            if response and isinstance(response, dict) and response.get('status') == 'error':
+                logger.error(f"Error stopping pipeline {pipeline_id}: {response.get('message')}")
+                return False
+                
             success = response is not None
             if success:
                 logger.info(f"Successfully stopped pipeline {pipeline_id}")
+            else:
+                logger.error(f"Failed to stop pipeline {pipeline_id}")
             return success
         except Exception as e:
             logger.error(f"Error stopping pipeline {pipeline_id}: {str(e)}")
-            # Return True anyway to prevent job failure
-            return True
+            # Don't hide errors anymore
+            return False
     
     def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for all entities in a pipeline"""
@@ -377,14 +448,22 @@ class CoreHubClient:
         
         try:
             response = self.fetch_core_hub(path, method='POST', params=params)
+            
+            # Check for auth errors specifically
+            if response and isinstance(response, dict) and response.get('status') == 'error':
+                logger.error(f"Error resyncing pipeline {pipeline_id}: {response.get('message')}")
+                return False
+                
             success = response is not None
             if success:
                 logger.info(f"Successfully resynced pipeline {pipeline_id}")
+            else:
+                logger.error(f"Failed to resync pipeline {pipeline_id}")
             return success
         except Exception as e:
             logger.error(f"Error resyncing pipeline {pipeline_id}: {str(e)}")
-            # Return True anyway to prevent job failure
-            return True
+            # Don't hide errors anymore
+            return False
 
 
 class PipelineManager:
