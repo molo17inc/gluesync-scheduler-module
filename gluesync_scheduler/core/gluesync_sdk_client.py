@@ -60,6 +60,8 @@ class GluesyncSDKClient:
     _token = None
     _client = None
     _is_initialized = False
+    _reconnecting = False
+    _reconnect_task = None
     
     @classmethod
     def get_instance(cls):
@@ -200,6 +202,8 @@ class GluesyncSDKClient:
         self._client.on_connected = self._on_connected
         self._client.on_disconnected = self._on_disconnected
         self._client.on_error = self._on_error
+        self._client.on_reconnecting = self._on_reconnecting
+        self._client.on_reconnected = self._on_reconnected
         
         # Connect to CoreHub with indefinite retry logic and exponential backoff
         retry_count = 0
@@ -300,7 +304,7 @@ class GluesyncSDKClient:
         logger.info(f"Disconnected from CoreHub: {reason}")
         
         # Start automatic reconnection in a separate task
-        asyncio.create_task(self._reconnect_with_backoff())
+        self._start_reconnect_task()
     
     async def _on_error(self, error):
         """
@@ -316,15 +320,44 @@ class GluesyncSDKClient:
         self._is_initialized = False
         
         # Start reconnection process if not already in progress
-        if not hasattr(self, '_reconnection_in_progress') or not self._reconnection_in_progress:
+        if not self._reconnecting:
             logger.info("Starting reconnection process due to connection error")
-            self._reconnection_in_progress = True
-            asyncio.create_task(self._reconnect_with_backoff())
+            self._start_reconnect_task()
     
-    async def _reconnect_with_backoff(self):
+    async def _on_reconnecting(self):
         """
-        Reconnect to CoreHub with exponential backoff when the connection is lost.
-        This method is called automatically by _on_disconnected.
+        Handle the reconnecting event.
+        Called when reconnection process starts.
+        """
+        logger.info("Reconnection process starting")
+        
+    async def _on_reconnected(self):
+        """
+        Handle the reconnected event.
+        Called when reconnection succeeds.
+        """
+        logger.info("Successfully reconnected to CoreHub")
+        self._is_initialized = True
+        self._reconnecting = False
+        self._reconnect_task = None
+        
+    def _start_reconnect_task(self):
+        """
+        Creates and starts the reconnection task if not already in progress.
+        """
+        if self._reconnecting:
+            logger.debug("Reconnection already in progress, skipping...")
+            return
+            
+        logger.info("Starting reconnection task")
+        self._reconnecting = True
+        self._reconnect_task = asyncio.create_task(self._reconnect())
+        
+    async def _reconnect(self):
+        """
+        Handles the reconnection logic based on whether a host is specified.
+        - When a host is explicitly specified, it attempts to reconnect immediately
+        - When no host is specified, it waits for a broadcast message before attempting to reconnect
         """
         # Extract the current connection details from client if they exist
         host = getattr(self._client, 'host', None)
@@ -338,53 +371,83 @@ class GluesyncSDKClient:
             port = parsed_url.port or 1717
             use_ssl = parsed_url.scheme == "https"
         
-        # Exponential backoff parameters
-        retry_count = 0
-        backoff_delay = 1  # Start with 1 second delay
-        max_backoff = 30   # Maximum backoff of 30 seconds
-        cycle_count = 0    # Count full cycles of backoff
-        
-        logger.info("Starting automatic reconnection with exponential backoff")
-        
-        while True:  # Retry indefinitely
-            try:
-                # If we don't have a client or it was shut down, exit the reconnection loop
-                if not self._client:
-                    logger.info("Client was explicitly shut down, stopping reconnection attempts")
-                    return
+        try:
+            if host:
+                # If we have a specific host, attempt to reconnect immediately
+                logger.info(f"Host explicitly specified ({host}), attempting immediate reconnection")
+                await self._attempt_reconnect()
+            else:
+                # If no host is specified, wait for a broadcast message
+                logger.info("No host specified, waiting for broadcast message before reconnecting")
+                # In this case, we don't do anything and wait for the SDK to handle reconnection
+                # based on broadcast messages from CoreHub
+                
+                # We'll just log periodic messages to show we're still waiting
+                wait_time = 0
+                while self._reconnecting and not self._client.is_connected:
+                    # Every 30 seconds, log that we're still waiting
+                    if wait_time % 30 == 0:
+                        logger.info(f"Still waiting for CoreHub broadcast ({wait_time}s elapsed)...")
                     
-                # If already connected, exit the reconnection loop
-                if getattr(self._client, 'is_connected', False):
-                    logger.info("Already reconnected to CoreHub")
-                    return
+                    await asyncio.sleep(1)
+                    wait_time += 1
+                    
+                    # If we get a host (from a broadcast), try to reconnect
+                    if self._client.host and not self._client.is_connected:
+                        logger.info(f"Received broadcast from CoreHub at {self._client.host}:{self._client.port}")
+                        await self._attempt_reconnect()
+                        break
                 
+        except Exception as e:
+            logger.error(f"Error during reconnection process: {e}")
+        finally:
+            # Reset reconnection status if we're exiting the reconnection loop
+            if not self._client.is_connected:
+                self._reconnecting = False
+                self._reconnect_task = None
+                logger.warning("Reconnection process ended without successful connection")
+    
+    async def _attempt_reconnect(self):
+        """
+        Manages the actual connection attempt with retries.
+        """
+        # Extract the current connection details from client if they exist
+        host = getattr(self._client, 'host', None)
+        port = getattr(self._client, 'port', 1717)  # Default port is 1717
+        use_ssl = getattr(self._client, 'use_ssl', False)
+        
+        # Retry parameters
+        retry_count = 0
+        max_retries = 5  # Only retry a few times for explicitly specified hosts
+        backoff_delay = 1
+        max_backoff = 30
+        
+        logger.info(f"Attempting to reconnect to CoreHub at {self._build_corehub_url(host, port, use_ssl)}")
+        
+        while retry_count < max_retries and self._reconnecting:
+            try:
                 retry_count += 1
-                if host:
-                    logger.info(f"Reconnection attempt {retry_count} (cycle {cycle_count}) to CoreHub at {self._build_corehub_url(host, port, use_ssl)}...")
-                else:
-                    logger.info(f"Reconnection attempt {retry_count} (cycle {cycle_count}) using UDP discovery...")
+                logger.info(f"Reconnection attempt {retry_count}/{max_retries}")
                 
+                # Attempt to connect
                 await self._client.connect()
                 
-                # After reconnect, check if we have a host (for UDP discovery)
-                if not host and self._client.host:
-                    # Update the discovered host/port for future use
-                    host = self._client.host
-                    port = self._client.port
-                    # Update the CoreHub URL in settings
-                    corehub_url = self._build_corehub_url(host, port, use_ssl)
+                # If connection succeeded, update settings and exit
+                if self._client.is_connected:
+                    logger.info(f"Successfully reconnected to CoreHub after {retry_count} attempt(s)")
+                    
+                    # Update CoreHub URL in settings
+                    corehub_url = self._build_corehub_url(self._client.host, self._client.port, self._client.use_ssl)
                     if corehub_url:
                         settings.update_corehub_url(corehub_url)
                         logger.info(f"Updated CoreHub URL to {corehub_url}")
-                
-                logger.info(f"Successfully reconnected to CoreHub after {retry_count} attempt(s)")
-                self._is_initialized = True
-                # Reset the reconnection flag and return
-                self._reconnection_in_progress = False
-                return  # Reconnection successful
+                    
+                    self._is_initialized = True
+                    self._reconnecting = False
+                    self._reconnect_task = None
+                    return True
                 
             except Exception as e:
-                # Log the error and retry with exponential backoff
                 logger.warning(f"Reconnection attempt {retry_count} failed: {e}")
                 
                 # Calculate backoff with exponential increase
@@ -393,18 +456,9 @@ class GluesyncSDKClient:
                 
                 # Double the backoff for next time, up to the maximum
                 backoff_delay = min(backoff_delay * 2, max_backoff)
-                
-                # If we've reached max backoff, reset on the next failure
-                if backoff_delay >= max_backoff:
-                    backoff_delay = 1  # Reset to 1 second
-                    cycle_count += 1   # Increment cycle count
-                    logger.info(f"Completed backoff cycle {cycle_count}, resetting delay to 1 second")
-                    
-                    # If we've been retrying for too many cycles, reset the reconnection flag
-                    # This prevents the system from getting stuck if reconnection is impossible
-                    if cycle_count >= 3:  # After 3 full backoff cycles
-                        logger.warning(f"Reconnection still failing after {cycle_count} cycles. Resetting reconnection flag.")
-                        self._reconnection_in_progress = False
+        
+        logger.warning(f"Failed to reconnect after {max_retries} attempts")
+        return False
         
 # Create a global instance for easy import
 gluesync_sdk_client = GluesyncSDKClient.get_instance()
