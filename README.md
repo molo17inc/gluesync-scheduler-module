@@ -12,6 +12,7 @@ A backend service that provides a set of REST APIs for scheduling and managing c
 - **Comprehensive REST API**: Full CRUD operations for scheduled jobs
 - **Flexible Job Scheduling**: Choose between user-friendly schedule format or standard cron expressions
 - **In-Memory Job Scheduling**: Uses APScheduler for reliable job execution in containerized environments
+- **Configurable Settings**: Store and retrieve application settings via API, including timezone configuration
 - **Multiple Task Types**:
   - Start/stop entities
   - Start/stop entire pipelines
@@ -122,7 +123,7 @@ Configure the application using environment variables:
 | `ENTITY_START_TIMEOUT` | Timeout in seconds for entity start operations | `2` |
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
-| `TIMEZONE` | Timezone value to be used when storing/retrieve dates | `UTC` |
+| `TIMEZONE` | Default timezone for job scheduling (can be overridden via settings API) | `Europe/Rome` |
 
 ### Gluesync SDK Configuration
 
@@ -181,6 +182,31 @@ To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with
 
    This will start the application, and it should be accessible on `http://localhost:8080`.
 
+### Database Migrations
+
+The Gluesync Scheduler Module automatically runs database migrations during startup, so you don't need to run them manually when starting the application. However, if you're upgrading an existing installation or need to run migrations separately, the project includes migration scripts for all schema changes.
+
+#### Running Migrations Manually
+
+```bash
+# Run all migrations
+./migrations/run_migrations.sh
+
+# Specify a custom database URL
+./migrations/run_migrations.sh --db-url sqlite:///path/to/your/database.db
+```
+
+#### Running Migrations in Docker
+
+```bash
+# Run all migrations inside the container
+docker exec [container_name] ./migrations/run_migrations.sh
+```
+
+Current migrations:
+
+- `migrate_add_settings_table.py`: Adds the settings table for configuration storage
+
 ### Testing the API with Postman
 
 1. **Test with Postman**:
@@ -198,6 +224,73 @@ To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with
    Check the terminal for logs to ensure the application is running correctly.
 
    If there are any issues, verify the Docker logs for more details.
+
+## Settings Management
+
+The module includes a settings management system that allows you to configure application settings through the API. Settings are stored in the database and persist across application restarts.
+
+### Available Settings
+
+| Setting Key | Description | Default |
+|-------------|-------------|----------|
+| `timezone`  | Timezone used for scheduling jobs | Value from `TIMEZONE` env var |
+
+### Settings API Endpoints
+
+#### Get All Settings
+
+```http
+GET /api/settings/
+```
+
+Returns a list of all configured settings.
+
+#### Get a Specific Setting
+
+```http
+GET /api/settings/{key}
+```
+
+Retrieve a specific setting by its key.
+
+#### Update a Setting
+
+```http
+PUT /api/settings/{key}
+```
+
+Update the value of a specific setting.
+
+**Request Body**:
+
+```json
+{
+  "value": "America/New_York",
+  "description": "Updated timezone description" // Optional
+}
+```
+
+#### Create a New Setting
+
+```http
+POST /api/settings/
+```
+
+Create a new custom setting.
+
+**Request Body**:
+
+```json
+{
+  "key": "custom_setting",
+  "value": "custom_value",
+  "description": "A custom application setting" // Optional
+}
+```
+
+### Environment Variable Override
+
+If both the database setting and environment variable are present for a setting (e.g., timezone), the environment variable will take precedence on application restart. This allows for consistent configuration in containerized environments while still providing flexibility for runtime changes.
 
 By following these steps, you should be able to run the project locally and test the API using Postman. If you encounter any issues, feel free to ask for further assistance!
 

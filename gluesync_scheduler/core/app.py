@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Set
 
 from gluesync_scheduler.api.router import router
 from gluesync_scheduler.api.pipeline_router import router as pipeline_router
+from gluesync_scheduler.api.settings_router import router as settings_router
 from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
 from gluesync_scheduler.services.scheduler_service import scheduler_service
@@ -228,8 +229,65 @@ async def startup_event():
     logger.info("Starting Gluesync Scheduler Module...")
     
     # Create necessary directories
+    os.makedirs(settings.DATA_DIR, exist_ok=True)
     os.makedirs(settings.LOG_DIR, exist_ok=True)
+    os.makedirs(settings.CRON_LOG_DIR, exist_ok=True)
     os.makedirs(os.path.dirname(settings.DB_URL.replace('sqlite:///', '')), exist_ok=True)
+    
+    # Run database migrations
+    try:
+        logger.info("Running database migrations...")
+        # Import the migration module
+        import importlib.util
+        import sys
+        
+        # Construct the path to the migration script
+        migration_script_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "migrations", 
+            "migrate_add_settings_table.py"
+        )
+        
+        if os.path.exists(migration_script_path):
+            # Load the migration module dynamically
+            spec = importlib.util.spec_from_file_location(
+                "migrate_add_settings_table", 
+                migration_script_path
+            )
+            migration_module = importlib.util.module_from_spec(spec)
+            sys.modules["migrate_add_settings_table"] = migration_module
+            spec.loader.exec_module(migration_module)
+            
+            # Create the engine and run the migration
+            engine = create_engine(settings.DB_URL)
+            migration_module.create_settings_table(engine)
+            logger.info("Database migrations completed successfully.")
+        else:
+            logger.warning(f"Migration script not found at {migration_script_path}")
+    except Exception as e:
+        logger.error(f"Error running database migrations: {str(e)}")
+        # Continue with startup even if migrations fail - the app might still work
+    
+    # Initialize default settings
+    engine = create_engine(settings.DB_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = SessionLocal()
+    try:
+        from gluesync_scheduler.services.settings_service import SettingsService
+        settings_service = SettingsService(db)
+        created_settings = settings_service.initialize_default_settings()
+        if created_settings:
+            logger.info(f"Initialized default settings: {created_settings}")
+        
+        # Load settings from database
+        timezone_setting = settings_service.get_setting_by_key("timezone")
+        if timezone_setting and timezone_setting.value:
+            settings.TIMEZONE = timezone_setting.value
+            logger.info(f"Loaded timezone from database: {settings.TIMEZONE}")
+    except Exception as e:
+        logger.error(f"Error initializing settings: {str(e)}")
+    finally:
+        db.close()
     
     # Initialize the Gluesync SDK client
     try:
@@ -340,6 +398,7 @@ async def shutdown_event():
 
 # Include the API routers
 app.include_router(router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
 app.include_router(pipeline_router, prefix="/api")
 
 # Custom JSON encoder to handle datetime objects

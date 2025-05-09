@@ -63,3 +63,15 @@ class ScheduledJob(Base):
     last_run_error_time = Column(DateTime(timezone=True), nullable=True)
     start_time = Column(String, nullable=True)
     timezone_name = Column(String, nullable=True)
+
+
+class Setting(Base):
+    """Model for storing application settings as key-value pairs"""
+    __tablename__ = "settings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, nullable=False, unique=True, index=True)
+    value = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))

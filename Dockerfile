@@ -110,6 +110,9 @@ COPY ./README.md .
 # Copy the restructured package
 COPY ./gluesync_scheduler ./gluesync_scheduler
 
+# Copy migrations directory
+COPY ./migrations ./migrations
+
 # Copy app code
 COPY . .
 

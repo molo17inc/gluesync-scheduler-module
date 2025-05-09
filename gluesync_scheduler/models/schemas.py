@@ -368,3 +368,65 @@ class OperationResponse(BaseModel):
     success: bool = Field(..., description="Whether the operation was successful")
     message: str = Field(..., description="Message describing the result of the operation")
     data: Optional[Dict[str, Any]] = Field(None, description="Optional data returned by the operation")
+
+
+class SettingBase(BaseModel):
+    """Base model for setting fields"""
+    key: str = Field(..., description="Unique key for the setting", example="timezone")
+    value: Optional[str] = Field(None, description="Value of the setting", example="America/New_York")
+    description: Optional[str] = Field(None, description="Description of what the setting controls", example="Timezone used for scheduling jobs")
+
+
+class SettingCreate(SettingBase):
+    """Model for creating a new setting"""
+    pass
+
+
+class SettingUpdate(BaseModel):
+    """Model for updating an existing setting"""
+    value: Optional[str] = Field(..., description="New value for the setting", example="America/New_York")
+    description: Optional[str] = Field(None, description="Updated description")
+
+
+class Setting(SettingBase):
+    """Complete setting model with all fields (used for responses)"""
+    id: int = Field(..., description="Unique identifier for the setting")
+    created_at: datetime = Field(..., description="Timestamp when the setting was created")
+    updated_at: datetime = Field(..., description="Timestamp when the setting was last updated")
+    
+    model_config = ConfigDict(
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "key": "timezone",
+                "value": "America/New_York",
+                "description": "Timezone used for scheduling jobs",
+                "created_at": "2025-05-09T10:00:00Z",
+                "updated_at": "2025-05-09T14:30:00Z"
+            }
+        }
+    )
+
+
+class SettingsList(BaseModel):
+    """Model for a list of settings"""
+    items: List[Setting] = Field(..., description="List of setting objects")
+    total: int = Field(..., description="Total number of settings")
+    
+    model_config = ConfigDict(
+        json_schema_extra = {
+            "example": {
+                "items": [
+                    {
+                        "id": 1,
+                        "key": "timezone",
+                        "value": "America/New_York",
+                        "description": "Timezone used for scheduling jobs",
+                        "created_at": "2025-05-09T10:00:00Z",
+                        "updated_at": "2025-05-09T14:30:00Z"
+                    }
+                ],
+                "total": 1
+            }
+        }
+    )
