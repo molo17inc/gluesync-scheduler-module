@@ -204,6 +204,7 @@ class GluesyncSDKClient:
         self._client.on_error = self._on_error
         self._client.on_reconnecting = self._on_reconnecting
         self._client.on_reconnected = self._on_reconnected
+        self._client.on_token_updated = self._on_token_updated
         
         # Connect to CoreHub with indefinite retry logic and exponential backoff
         retry_count = 0
@@ -340,6 +341,25 @@ class GluesyncSDKClient:
         self._is_initialized = True
         self._reconnecting = False
         self._reconnect_task = None
+        
+    async def _on_token_updated(self, token):
+        """
+        Handle the token updated event.
+        Called when a new token is received from the server,
+        either during initial connection or after reconnection.
+        
+        Args:
+            token: The new JWT token received from the server
+        """
+        if self._token != token:
+            old_token = self._token
+            self._token = token
+            logger.info("Received new authentication token from CoreHub")
+            logger.debug(f"Token updated: {token[:10]}...")
+            
+            # Log the token change for debugging purposes
+            if old_token:
+                logger.debug(f"Previous token: {old_token[:10]}... New token: {token[:10]}...")
         
     def _start_reconnect_task(self):
         """
