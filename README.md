@@ -117,7 +117,8 @@ Configure the application using environment variables:
 | `CORE_HUB_URL` | URL of the Gluesync Core Hub (dynamically updated from SDK discovery if available) | `http://localhost:1717` |
 | `HOST` | Host to bind the API server | `0.0.0.0` |
 | `PORT` | Port to bind the API server | `1717` |
-| `DEBUG` | Enable debug mode | `False` |
+| `DEBUG` | Enable debug mode for Uvicorn server logs | `False` |
+| `LOG_LEVEL` | Application logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` |
 | `DB_URL` | Database connection URL | `sqlite:///./scheduler.db` |
 | `DATA_DIR` | Directory for storing application data | `/app/data` |
 | `ENTITY_START_TIMEOUT` | Timeout in seconds for entity start operations | `2` |
