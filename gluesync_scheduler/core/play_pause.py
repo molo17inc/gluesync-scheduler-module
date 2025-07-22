@@ -299,7 +299,7 @@ class CoreHubClient:
                         gluesync_sdk_client._is_initialized = False
                         # Create a task to trigger reconnection
                         import asyncio
-                        asyncio.create_task(gluesync_sdk_client._reconnect_with_backoff())
+                        asyncio.create_task(gluesync_sdk_client._attempt_reconnect())
                 except Exception as e:
                     logger.error(f"Failed to trigger SDK reconnection: {e}")
                 
