@@ -80,11 +80,12 @@ class JobBase(BaseModel):
     """Base model for job data with common fields"""
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
-    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline")
+    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups")
     schedule: Optional[ScheduleConfig] = Field(None, description="User-friendly schedule configuration")
     cron_expression: Optional[str] = Field(None, description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight). Not required if schedule is provided.", example="0 0 * * *")
     pipeline_id: str = Field(..., description="ID of the pipeline to operate on", example="pipeline-123")
     entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on (required for entity operations)", example=["entity-456", "entity-789"])
+    group_ids: Optional[List[str]] = Field(None, description="List of group IDs to operate on (required for group operations)", example=["group-123", "group-456"])
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     
@@ -124,6 +125,7 @@ class JobUpdate(BaseModel):
     cron_expression: Optional[str] = Field(None, description="Updated cron expression. Not required if schedule is provided.", example="0 0 * * *")
     pipeline_id: Optional[str] = Field(None, description="Updated pipeline ID", example="pipeline-123")
     entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on", example=["entity-456", "entity-789"])
+    group_ids: Optional[List[str]] = Field(None, description="List of group IDs to operate on", example=["group-123", "group-456"])
     with_snapshot: Optional[bool] = Field(None, description="Updated snapshot setting")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     

@@ -349,6 +349,7 @@ class JobService:
                 cron_expression=job_data.cron_expression,
                 pipeline_id=job_data.pipeline_id,
                 entity_ids=json.dumps(job_data.entity_ids) if job_data.entity_ids else None,
+                group_ids=json.dumps(job_data.group_ids) if job_data.group_ids else None,
                 with_snapshot=job_data.with_snapshot,
                 enabled=job_data.enabled,
                 created_at=datetime.now(timezone.utc),
@@ -417,6 +418,10 @@ class JobService:
             # Special handling for entity_ids (convert to JSON string)
             if "entity_ids" in update_data:
                 update_data["entity_ids"] = json.dumps(update_data["entity_ids"]) if update_data["entity_ids"] else None
+            
+            # Special handling for group_ids (convert to JSON string)
+            if "group_ids" in update_data:
+                update_data["group_ids"] = json.dumps(update_data["group_ids"]) if update_data["group_ids"] else None
             
             # Handle schedule conversion to cron_expression if schedule is provided
             if "schedule" in update_data and update_data["schedule"]:
@@ -816,6 +821,15 @@ class JobService:
                 except json.JSONDecodeError:
                     logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
             
+            # Parse group_ids if present
+            group_ids = []
+            if job.group_ids:
+                try:
+                    group_ids = json.loads(job.group_ids)
+                    logger.info(f"Parsed group_ids: {group_ids}")
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not parse group_ids JSON: {job.group_ids}")
+            
             # Use localhost for internal API calls, not the binding address (0.0.0.0)
             # Use HTTPS protocol when SSL is enabled
             protocol = "https" if settings.SSL_ENABLED else "http"
@@ -828,30 +842,42 @@ class JobService:
             method = "POST"  # All our endpoints use POST method
             
             # Determine the action for the endpoint path
-            if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
+            if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.GROUP_START]:
                 action = "play"
-            elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
+            elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP, TaskType.GROUP_STOP]:
                 action = "pause"
-            elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
+            elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT, TaskType.GROUP_SNAPSHOT]:
                 action = "resync"
             else:
                 error_msg = f"Unknown task type: {job.task_type}"
                 logger.error(error_msg)
                 return False, error_msg, {}
                 
-            # Construct the full endpoint URL
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
+            # For group operations, use CoreHub client directly instead of API endpoints
+            if job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+                return self._execute_group_operation(job, group_ids, action)
+            else:
+                endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
             
             # Prepare the JSON payload
             json_data = {}
             
-            # Add entity_ids to the payload if present
-            if entity_ids:
+            # Add entity_ids to the payload if present (for entity and pipeline operations)
+            if entity_ids and job.task_type not in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
                 json_data["entity_ids"] = entity_ids
             
+            # Add group_ids to the payload if present (for group operations)
+            if group_ids and job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+                json_data["group_ids"] = group_ids
+            
             # Add with_snapshot for start operations if needed
-            if job.with_snapshot and job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
+            if job.with_snapshot and job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.GROUP_START]:
                 json_data["with_snapshot"] = True
+            
+            # Add snapshotWriteMethod parameter for all operations that support it
+            snapshot_write_method = getattr(job, 'snapshot_write_method', 'UPSERT')
+            if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
+                json_data["snapshot_write_method"] = snapshot_write_method
             
             # Log the request details
             logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
@@ -940,6 +966,81 @@ class JobService:
             error_msg = f"Error executing job: {str(e)}"
             logger.error(error_msg)
             return False, error_msg, {"exception": str(e)}
+    
+    def _execute_group_operation(self, job: ScheduledJob, group_ids: list, action: str) -> tuple[bool, str, dict]:
+        """Execute group operations using CoreHub client directly"""
+        from ..core.play_pause import CoreHubClient
+        
+        try:
+            # Get CoreHub client instance
+            corehub_client = CoreHubClient()
+            
+            # Determine snapshot write method from job parameters
+            snapshot_write_method = getattr(job, 'snapshot_write_method', 'UPSERT')
+            
+            success_count = 0
+            total_groups = len(group_ids)
+            results = []
+            
+            # Execute operation for each group (CoreHub only supports one group per call)
+            for group_id in group_ids:
+                try:
+                    if action == "play":
+                        # For start operations, check if with_snapshot is enabled
+                        with_snapshot = getattr(job, 'with_snapshot', False)
+                        result = corehub_client.start_group(
+                            job.pipeline_id, 
+                            group_id, 
+                            with_snapshot=with_snapshot,
+                            snapshot_write_method=snapshot_write_method
+                        )
+                    elif action == "pause":
+                        result = corehub_client.stop_group(job.pipeline_id, group_id)
+                    elif action == "resync":
+                        result = corehub_client.resync_group(
+                            job.pipeline_id, 
+                            group_id,
+                            snapshot_write_method=snapshot_write_method
+                        )
+                    else:
+                        result = False
+                    
+                    if result:
+                        success_count += 1
+                        results.append({"group_id": group_id, "status": "success"})
+                        logger.info(f"Successfully executed {action} for group {group_id}")
+                    else:
+                        results.append({"group_id": group_id, "status": "failed"})
+                        logger.error(f"Failed to execute {action} for group {group_id}")
+                        
+                except Exception as e:
+                    results.append({"group_id": group_id, "status": "error", "error": str(e)})
+                    logger.error(f"Error executing {action} for group {group_id}: {str(e)}")
+            
+            # Determine overall success
+            overall_success = success_count == total_groups
+            
+            if overall_success:
+                message = f"Successfully executed {action} for all {total_groups} groups"
+            else:
+                message = f"Executed {action} for {success_count}/{total_groups} groups successfully"
+            
+            details = {
+                "total_groups": total_groups,
+                "successful_groups": success_count,
+                "failed_groups": total_groups - success_count,
+                "results": results,
+                "action": action,
+                "pipeline_id": job.pipeline_id,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            return overall_success, message, details
+            
+        except Exception as e:
+            error_msg = f"Error executing group {action} operation: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg, {"error": str(e), "timestamp": datetime.now().isoformat()}
 
     def delete_job(self, job_id: int) -> None:
         """
