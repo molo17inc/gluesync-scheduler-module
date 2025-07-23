@@ -38,6 +38,9 @@ class TaskType(enum.Enum):
     PIPELINE_STOP = "pipeline_stop"
     ENTITY_SNAPSHOT = "entity_snapshot"
     PIPELINE_SNAPSHOT = "pipeline_snapshot"
+    GROUP_START = "group_start"
+    GROUP_STOP = "group_stop"
+    GROUP_SNAPSHOT = "group_snapshot"
 
 
 class ScheduledJob(Base):
@@ -50,6 +53,7 @@ class ScheduledJob(Base):
     cron_expression = Column(String, nullable=False)
     pipeline_id = Column(String, nullable=False)
     entity_ids = Column(Text, nullable=True)
+    group_ids = Column(Text, nullable=True)
     with_snapshot = Column(Boolean, default=False)
     snapshot_write_method = Column(String, nullable=False, default='UPSERT')
     enabled = Column(Boolean, default=True)
