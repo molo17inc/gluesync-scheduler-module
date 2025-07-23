@@ -28,7 +28,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from gluesync_scheduler.config.settings import settings
-from gluesync_scheduler.core.gluesync_sdk_client import get_gluesync_client
+from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class GroupService:
     async def _get_auth_headers(self) -> Dict[str, str]:
         """Get authentication headers using SDK token"""
         try:
-            sdk_client = get_gluesync_client()
+            sdk_client = gluesync_sdk_client
             if sdk_client and hasattr(sdk_client, 'token') and sdk_client.token:
                 return {
                     'Authorization': f'Bearer {sdk_client.token}',

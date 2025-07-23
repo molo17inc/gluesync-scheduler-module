@@ -116,7 +116,7 @@ try:
     logger.info("App imported successfully")
     
     # Initialize the SDK client
-    from gluesync_sdk_client import gluesync_sdk_client
+    from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
     logger.info("Initializing mock SDK client...")
     gluesync_sdk_client.initialize()
     logger.info("Mock SDK client initialized successfully")
