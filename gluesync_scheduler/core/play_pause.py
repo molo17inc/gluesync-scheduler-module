@@ -348,8 +348,9 @@ class CoreHubClient:
     
     def start_entity(self, pipeline_id: str, entity_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
         """Start a specific entity in a pipeline"""
-        path = f'/pipelines/{pipeline_id}/entities/{entity_id}/commands/sync/start'
+        path = f'/pipelines/{pipeline_id}/commands/sync/start'
         params = {
+            'entity': entity_id,
             'withSnapshot': 'true' if with_snapshot else 'false',
             'snapshotWriteMethod': snapshot_write_method
         }
@@ -365,8 +366,8 @@ class CoreHubClient:
     
     def stop_entity(self, pipeline_id: str, entity_id: str) -> bool:
         """Stop a specific entity in a pipeline"""
-        path = f'/pipelines/{pipeline_id}/entities/{entity_id}/commands/sync/stop'
-        params = {}
+        path = f'/pipelines/{pipeline_id}/commands/sync/stop'
+        params = {'entity': entity_id}
         response = self.fetch_core_hub(path, method='POST', params=params)
         
         # Check for auth errors specifically
@@ -378,8 +379,9 @@ class CoreHubClient:
     
     def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for a specific entity"""
-        path = f'/pipelines/{pipeline_id}/entities/{entity_id}/commands/sync/one-time-snapshot'
+        path = f'/pipelines/{pipeline_id}/commands/sync/resync'
         params = {
+            'entity': entity_id,
             'snapshotWriteMethod': snapshot_write_method
         }
         
