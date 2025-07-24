@@ -29,7 +29,6 @@ dependencies = [
     "croniter==2.0.1",
     "apscheduler==3.11.0",
     "pyjks==20.0.0",
-    "gluesync-sdk>=1.0.0",
 ]
 
 [project.urls]
