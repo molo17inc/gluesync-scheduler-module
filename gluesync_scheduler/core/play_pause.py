@@ -422,7 +422,7 @@ class CoreHubClient:
     
     def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for a specific entity"""
-        path = f'/pipelines/{pipeline_id}/commands/sync/resync'
+        path = f'/pipelines/{pipeline_id}/commands/sync/redo'
         params = {
             'entity': entity_id,
             'snapshotWriteMethod': snapshot_write_method
