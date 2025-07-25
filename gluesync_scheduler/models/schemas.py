@@ -86,7 +86,7 @@ class JobBase(BaseModel):
     pipeline_id: str = Field(..., description="ID of the pipeline to operate on", example="pipeline-123")
     entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on (required for entity operations)", example=["entity-456", "entity-789"])
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
-    snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", regex="^(UPSERT|INSERT)$")
+    snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     
     @validator("schedule", "cron_expression")
@@ -126,7 +126,7 @@ class JobUpdate(BaseModel):
     pipeline_id: Optional[str] = Field(None, description="Updated pipeline ID", example="pipeline-123")
     entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on", example=["entity-456", "entity-789"])
     with_snapshot: Optional[bool] = Field(None, description="Updated snapshot setting")
-    snapshot_write_method: Optional[str] = Field(None, description="Updated write method for snapshot operations (UPSERT or INSERT)", regex="^(UPSERT|INSERT)$")
+    snapshot_write_method: Optional[str] = Field(None, description="Updated write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     
     model_config = ConfigDict(
