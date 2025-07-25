@@ -51,6 +51,7 @@ class ScheduledJob(Base):
     pipeline_id = Column(String, nullable=False)
     entity_ids = Column(Text, nullable=True)
     with_snapshot = Column(Boolean, default=False)
+    snapshot_write_method = Column(String, nullable=False, default='UPSERT')
     enabled = Column(Boolean, default=True)
     command = Column(Text, nullable=False)
     cron_job_identifier = Column(String, nullable=False, unique=True)

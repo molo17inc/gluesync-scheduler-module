@@ -164,6 +164,7 @@ async def create_job(job_data: JobCreate = Body(..., description="Job data to cr
     "pipeline_id": "pipeline-123",
     "entity_ids": ["entity-456", "entity-789"],
     "with_snapshot": True,
+    "snapshot_write_method": "UPSERT",
     "enabled": True
 }), db: Session = Depends(get_db)):
     """
@@ -261,6 +262,7 @@ async def update_job(job_id: int = Path(..., description="The ID of the job to u
                       "hour": 0,
                       "minute": 0
                   },
+                  "snapshot_write_method": "INSERT",
                   "enabled": True
               }), 
               db: Session = Depends(get_db)):

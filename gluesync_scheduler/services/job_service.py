@@ -350,6 +350,7 @@ class JobService:
                 pipeline_id=job_data.pipeline_id,
                 entity_ids=json.dumps(job_data.entity_ids) if job_data.entity_ids else None,
                 with_snapshot=job_data.with_snapshot,
+                snapshot_write_method=job_data.snapshot_write_method,
                 enabled=job_data.enabled,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -852,6 +853,10 @@ class JobService:
             # Add with_snapshot for start operations if needed
             if job.with_snapshot and job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
                 json_data["with_snapshot"] = True
+            
+            # Add snapshot_write_method for resync operations
+            if job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
+                json_data["snapshot_write_method"] = getattr(job, 'snapshot_write_method', 'UPSERT')
             
             # Log the request details
             logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")

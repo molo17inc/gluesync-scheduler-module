@@ -12,4 +12,8 @@ echo "Running migrations..."
 echo "Running migration: migrate_add_settings_table.py"
 python3 "$SCRIPT_DIR/migrate_add_settings_table.py" "$@"
 
+# Add snapshot_write_method column migration
+echo "Running migration: migrate_add_snapshot_write_method.py"
+python3 "$SCRIPT_DIR/migrate_add_snapshot_write_method.py" "$@"
+
 echo "All migrations completed."
