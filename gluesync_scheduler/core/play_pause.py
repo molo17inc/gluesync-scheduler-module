@@ -375,7 +375,7 @@ class CoreHubClient:
             
         return response is not None
     
-    def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
+    def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'INSERT') -> bool:
         """Trigger a one-time snapshot for a specific entity"""
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         params = {
@@ -451,7 +451,7 @@ class CoreHubClient:
             # Don't hide errors anymore
             return False
     
-    def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
+    def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'INSERT') -> bool:
         """Trigger a one-time snapshot for all entities in a pipeline"""
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         params = {
@@ -507,7 +507,7 @@ class PipelineManager:
     
     async def execute(self, action: str, pipeline_id: Optional[str] = None, 
                entity_ids: Optional[List[str]] = None, with_snapshot: bool = False,
-               snapshot_write_method: str = 'UPSERT') -> bool:
+               snapshot_write_method: str = 'INSERT') -> bool:
         """Execute a pipeline action
         
         Args:
@@ -515,7 +515,7 @@ class PipelineManager:
             pipeline_id: ID of the pipeline
             entity_ids: List of entity IDs
             with_snapshot: Whether to include snapshot
-            snapshot_write_method: Write method for the snapshot (default: UPSERT)
+            snapshot_write_method: Write method for the snapshot (default: INSERT)
         """
         try:
             if action == 'list':
@@ -607,12 +607,12 @@ class PipelineManager:
         
         return success
     
-    async def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
+    async def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'INSERT') -> bool:
         """Trigger a one-time snapshot for all entities in a pipeline
         
         Args:
             pipeline_id: Pipeline ID
-            snapshot_write_method: Write method for the snapshot (default: UPSERT)
+            snapshot_write_method: Write method for the snapshot (default: INSERT)
             
         Returns:
             bool: True if operation was successful, False otherwise
@@ -620,13 +620,13 @@ class PipelineManager:
         logger.info(f"Resyncing pipeline {pipeline_id} (snapshot_write_method={snapshot_write_method})")
         return self.client.resync_pipeline(pipeline_id, snapshot_write_method)
     
-    async def resync_entities(self, pipeline_id: str, entity_ids: List[str], snapshot_write_method: str = 'UPSERT') -> bool:
+    async def resync_entities(self, pipeline_id: str, entity_ids: List[str], snapshot_write_method: str = 'INSERT') -> bool:
         """Trigger a one-time snapshot for specific entities in a pipeline
         
         Args:
             pipeline_id: Pipeline ID
             entity_ids: List of entity IDs to resync
-            snapshot_write_method: Write method for the snapshot (default: UPSERT)
+            snapshot_write_method: Write method for the snapshot (default: INSERT)
             
         Returns:
             bool: True if all operations were successful, False otherwise
@@ -676,13 +676,13 @@ class PipelineManager:
                 return False
     
     async def _handle_resync_action(self, pipeline_id: Optional[str], entity_ids: Optional[List[str]], 
-                             snapshot_write_method: str = 'UPSERT') -> bool:
+                             snapshot_write_method: str = 'INSERT') -> bool:
         """Handle the resync action
         
         Args:
             pipeline_id: ID of the pipeline
             entity_ids: Optional list of entity IDs
-            snapshot_write_method: Write method for the snapshot (default: UPSERT)
+            snapshot_write_method: Write method for the snapshot (default: INSERT)
             
         Returns:
             bool: True if operation was successful, False otherwise
@@ -741,7 +741,7 @@ async def main_async():
     parser.add_argument("--pipeline", help="Pipeline ID")
     parser.add_argument("--entity", help="Entity ID(s), comma-separated for multiple entities")
     parser.add_argument("--snapshot", action="store_true", help="Create snapshot when starting entities")
-    parser.add_argument("--snapshot-write-method", default="UPSERT", help="Write method for snapshot (default: UPSERT)")
+    parser.add_argument("--snapshot-write-method", default="INSERT", help="Write method for snapshot (default: INSERT)")
     parser.add_argument("--job-id", help="Job identifier for updating job status")
     
     args = parser.parse_args()

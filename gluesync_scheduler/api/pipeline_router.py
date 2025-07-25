@@ -299,7 +299,7 @@ async def resync_pipeline(
     request: Request,
     pipeline_id: str = Path(..., description="The ID of the pipeline to resync"),
     entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to resync. If not provided, all entities in the pipeline will be resynced."),
-    snapshot_write_method: str = Query("UPSERT", description="The write method for the snapshot, default is UPSERT."),
+    snapshot_write_method: str = Query("INSERT", description="The write method for the snapshot, default is INSERT."),
     body: dict = Body(default=None)
 ):
     """
@@ -311,7 +311,7 @@ async def resync_pipeline(
     ## Parameters
     - **pipeline_id**: The ID of the pipeline to resync
     - **entity_ids**: Optional list of entity IDs to resync. If not provided, all entities in the pipeline will be resynced.
-    - **snapshot_write_method**: The write method for the snapshot, default is UPSERT.
+    - **snapshot_write_method**: The write method for the snapshot, default is INSERT.
     
     ## Returns
     A JSON object containing:
@@ -327,7 +327,7 @@ async def resync_pipeline(
       "details": {
         "pipeline_id": "pipeline-123",
         "entities_resynced": ["entity-456", "entity-789"],
-        "snapshot_write_method": "UPSERT"
+        "snapshot_write_method": "INSERT"
       }
     }
     ```

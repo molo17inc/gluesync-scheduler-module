@@ -233,7 +233,7 @@ def test_pipeline_manager_resync_action(mock_sdk_client, mock_requests):
         assert args[0] == "POST"
         assert "test-pipeline/commands/sync/one-time-snapshot" in args[1]
         assert kwargs["params"]["entity"] == "entity1"
-        assert kwargs["params"]["snapshotWriteMethod"] == "UPSERT"
+        assert kwargs["params"]["snapshotWriteMethod"] == "INSERT"
         
         # Reset mock
         mock_requests.reset_mock()
@@ -249,7 +249,7 @@ def test_pipeline_manager_resync_action(mock_sdk_client, mock_requests):
         assert args[0] == "POST"
         assert "test-pipeline/commands/sync/one-time-snapshot" in args[1]
         assert "entity" not in kwargs["params"]
-        assert kwargs["params"]["snapshotWriteMethod"] == "UPSERT"
+        assert kwargs["params"]["snapshotWriteMethod"] == "INSERT"
 
 
 if __name__ == "__main__":
