@@ -52,7 +52,15 @@ class Settings:
     
     # Database settings
     DATA_DIR = os.getenv('DATA_DIR', './data')
-    DB_URL = os.getenv('DB_URL', f'sqlite:///{DATA_DIR}/scheduler.db')
+    
+    # Ensure we have an absolute path for the database
+    if os.getenv('DB_URL'):
+        DB_URL = os.getenv('DB_URL')
+    else:
+        # Convert relative path to absolute path for consistency
+        abs_data_dir = os.path.abspath(DATA_DIR)
+        DB_URL = f'sqlite:///{abs_data_dir}/scheduler.db'
+        logger.info(f"Using absolute database path: {abs_data_dir}/scheduler.db")
     
     # Timezone settings
     TIMEZONE = os.getenv('TIMEZONE', 'Europe/Rome')

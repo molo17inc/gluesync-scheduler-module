@@ -241,38 +241,34 @@ async def startup_event():
         import sys
         import subprocess
         
-        # Construct the path to the migrations directory
-        migrations_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "migrations"
+        logger.info(f"Running migrations with DB_URL: {settings.DB_URL}")
+        
+        # Ensure database directory exists
+        if settings.DB_URL.startswith('sqlite:///'):
+            db_path = settings.DB_URL.replace('sqlite:///', '')
+            db_dir = os.path.dirname(os.path.abspath(db_path))
+            os.makedirs(db_dir, exist_ok=True)
+            logger.info(f"Ensuring database directory exists at {db_dir}")
+        
+        # Run migrations using the run_migrations.sh script
+        result = subprocess.run(
+            ['/bin/bash', 'migrations/run_migrations.sh', '--db-url', settings.DB_URL],
+            capture_output=True,
+            text=True,
+            check=False
         )
         
-        # Run all migrations using the migration runner script
-        migration_runner_path = os.path.join(migrations_dir, "run_migrations.sh")
-        
-        if os.path.exists(migration_runner_path):
-            logger.info(f"Running migrations from {migration_runner_path}")
-            # Run the migration script with the current database URL
-            result = subprocess.run(
-                ["bash", migration_runner_path, "--db-url", settings.DB_URL],
-                cwd=migrations_dir,
-                capture_output=True,
-                text=True,
-                timeout=60  # 60 second timeout for migrations
-            )
-            
-            if result.returncode == 0:
-                logger.info("Database migrations completed successfully.")
-                if result.stdout:
-                    logger.info(f"Migration output: {result.stdout}")
-            else:
-                logger.error(f"Migration failed with return code {result.returncode}")
-                if result.stderr:
-                    logger.error(f"Migration error: {result.stderr}")
-                if result.stdout:
-                    logger.error(f"Migration output: {result.stdout}")
+        if result.returncode == 0:
+            logger.info("✅ Migrations completed successfully")
+            # Force SQLAlchemy to refresh its schema cache
+            from sqlalchemy import MetaData
+            from gluesync_scheduler.db.database import engine
+            MetaData().reflect(bind=engine)
+            logger.info("✅ SQLAlchemy metadata refreshed after migration")
         else:
-            logger.warning(f"Migration runner script not found at {migration_runner_path}")
+            logger.error(f"❌ Migration failed with error code {result.returncode}")
+            logger.error(f"Migration script output: {result.stdout}")
+            logger.error(f"Migration script errors: {result.stderr}")
             
             # Fallback: try to run individual migrations
             logger.info("Attempting to run individual migrations...")
