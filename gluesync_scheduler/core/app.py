@@ -345,6 +345,26 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Error running database migrations: {str(e)}")
         # Continue with startup even if migrations fail - the app might still work
+        
+    # Force SQLAlchemy to refresh its metadata after migrations
+    try:
+        logger.info("Refreshing SQLAlchemy metadata after migrations...")
+        from gluesync_scheduler.models.models import Base
+        engine = create_engine(settings.DB_URL)
+        
+        # Clear any cached metadata and reflect the current database schema
+        Base.metadata.clear()
+        Base.metadata.reflect(bind=engine)
+        
+        # Verify the snapshot_write_method column is visible to SQLAlchemy
+        if hasattr(Base.metadata.tables.get('scheduled_jobs'), 'c') and \
+           'snapshot_write_method' in Base.metadata.tables['scheduled_jobs'].c:
+            logger.info("✅ SQLAlchemy metadata refresh successful: snapshot_write_method column visible")
+        else:
+            logger.warning("⚠️ SQLAlchemy metadata refresh: snapshot_write_method column not visible")
+            
+    except Exception as metadata_error:
+        logger.error(f"Error refreshing SQLAlchemy metadata: {str(metadata_error)}")
     
     # Initialize default settings
     engine = create_engine(settings.DB_URL)

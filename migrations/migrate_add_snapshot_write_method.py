@@ -51,49 +51,68 @@ except ImportError:
 def add_snapshot_write_method_column(engine):
     """Add the snapshot_write_method column to the scheduled_jobs table if it doesn't exist"""
     
-    logger.info(f"Running migration against database: {engine.url}")
+    logger.info(f"🔍 MIGRATION: Running migration against database: {engine.url}")
+    logger.info(f"🔍 MIGRATION: Database file path: {engine.url.database}")
+    
+    # Check if database file exists
+    import os
+    db_path = engine.url.database
+    if db_path and os.path.exists(db_path):
+        logger.info(f"🔍 MIGRATION: Database file exists at {db_path}")
+        logger.info(f"🔍 MIGRATION: Database file size: {os.path.getsize(db_path)} bytes")
+    else:
+        logger.warning(f"🔍 MIGRATION: Database file not found at {db_path}")
     
     inspector = inspect(engine)
     
     # Check if the scheduled_jobs table exists
     table_names = inspector.get_table_names()
-    logger.info(f"Available tables: {table_names}")
+    logger.info(f"🔍 MIGRATION: Available tables: {table_names}")
     
     if 'scheduled_jobs' not in table_names:
-        logger.info("scheduled_jobs table does not exist, skipping migration")
+        logger.info("🔍 MIGRATION: scheduled_jobs table does not exist, skipping migration")
         return
     
     # Check if the snapshot_write_method column already exists
     columns = inspector.get_columns('scheduled_jobs')
     column_names = [col['name'] for col in columns]
-    logger.info(f"Current columns in scheduled_jobs: {column_names}")
+    logger.info(f"🔍 MIGRATION: Current columns in scheduled_jobs: {column_names}")
+    logger.info(f"🔍 MIGRATION: Total columns found: {len(column_names)}")
     
     if 'snapshot_write_method' in column_names:
-        logger.info("snapshot_write_method column already exists, skipping migration")
+        logger.info("🔍 MIGRATION: snapshot_write_method column already exists, skipping migration")
         return
     
-    logger.info("Adding snapshot_write_method column to scheduled_jobs table")
+    logger.info("🔍 MIGRATION: Adding snapshot_write_method column to scheduled_jobs table")
     
     try:
         with engine.connect() as connection:
             # Add the new column with default value 'UPSERT'
-            logger.info("Executing: ALTER TABLE scheduled_jobs ADD COLUMN snapshot_write_method VARCHAR NOT NULL DEFAULT 'UPSERT'")
-            connection.execute(text(
-                "ALTER TABLE scheduled_jobs ADD COLUMN snapshot_write_method VARCHAR NOT NULL DEFAULT 'UPSERT'"
-            ))
+            sql_command = "ALTER TABLE scheduled_jobs ADD COLUMN snapshot_write_method VARCHAR NOT NULL DEFAULT 'UPSERT'"
+            logger.info(f"🔍 MIGRATION: Executing SQL: {sql_command}")
+            connection.execute(text(sql_command))
             connection.commit()
-            logger.info("Successfully added snapshot_write_method column")
+            logger.info("🔍 MIGRATION: SQL execution completed, committing transaction")
             
-            # Verify the column was added
+            # Force a new inspector to avoid caching issues
+            logger.info("🔍 MIGRATION: Creating new inspector to verify column addition")
             inspector_after = inspect(engine)
             columns_after = inspector_after.get_columns('scheduled_jobs')
             column_names_after = [col['name'] for col in columns_after]
-            logger.info(f"Columns after migration: {column_names_after}")
+            logger.info(f"🔍 MIGRATION: Columns after migration: {column_names_after}")
+            logger.info(f"🔍 MIGRATION: Total columns after migration: {len(column_names_after)}")
             
             if 'snapshot_write_method' in column_names_after:
-                logger.info("✅ Migration verified: snapshot_write_method column exists")
+                logger.info("✅ MIGRATION: Migration verified: snapshot_write_method column exists")
             else:
-                logger.error("❌ Migration failed: snapshot_write_method column not found after migration")
+                logger.error("❌ MIGRATION: Migration failed: snapshot_write_method column not found after migration")
+                
+            # Additional verification: try to query the new column
+            try:
+                result = connection.execute(text("SELECT snapshot_write_method FROM scheduled_jobs LIMIT 1"))
+                logger.info("🔍 MIGRATION: Successfully queried snapshot_write_method column")
+            except Exception as query_error:
+                logger.error(f"🔍 MIGRATION: Failed to query snapshot_write_method column: {query_error}")
                 
     except Exception as e:
         logger.error(f"Error during migration: {str(e)}")
