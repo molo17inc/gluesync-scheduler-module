@@ -237,33 +237,83 @@ async def startup_event():
     # Run database migrations
     try:
         logger.info("Running database migrations...")
-        # Import the migration module
         import importlib.util
         import sys
+        import subprocess
         
-        # Construct the path to the migration script
-        migration_script_path = os.path.join(
+        # Construct the path to the migrations directory
+        migrations_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "migrations", 
-            "migrate_add_settings_table.py"
+            "migrations"
         )
         
-        if os.path.exists(migration_script_path):
-            # Load the migration module dynamically
-            spec = importlib.util.spec_from_file_location(
-                "migrate_add_settings_table", 
-                migration_script_path
+        # Run all migrations using the migration runner script
+        migration_runner_path = os.path.join(migrations_dir, "run_migrations.sh")
+        
+        if os.path.exists(migration_runner_path):
+            logger.info(f"Running migrations from {migration_runner_path}")
+            # Run the migration script with the current database URL
+            result = subprocess.run(
+                ["bash", migration_runner_path, "--db-url", settings.DB_URL],
+                cwd=migrations_dir,
+                capture_output=True,
+                text=True,
+                timeout=60  # 60 second timeout for migrations
             )
-            migration_module = importlib.util.module_from_spec(spec)
-            sys.modules["migrate_add_settings_table"] = migration_module
-            spec.loader.exec_module(migration_module)
             
-            # Create the engine and run the migration
-            engine = create_engine(settings.DB_URL)
-            migration_module.create_settings_table(engine)
-            logger.info("Database migrations completed successfully.")
+            if result.returncode == 0:
+                logger.info("Database migrations completed successfully.")
+                if result.stdout:
+                    logger.info(f"Migration output: {result.stdout}")
+            else:
+                logger.error(f"Migration failed with return code {result.returncode}")
+                if result.stderr:
+                    logger.error(f"Migration error: {result.stderr}")
+                if result.stdout:
+                    logger.error(f"Migration output: {result.stdout}")
         else:
-            logger.warning(f"Migration script not found at {migration_script_path}")
+            logger.warning(f"Migration runner script not found at {migration_runner_path}")
+            
+            # Fallback: try to run individual migrations
+            logger.info("Attempting to run individual migrations...")
+            
+            # List of migration files to run in order
+            migration_files = [
+                "migrate_add_settings_table.py",
+                "migrate_add_snapshot_write_method.py"
+            ]
+            
+            engine = create_engine(settings.DB_URL)
+            
+            for migration_file in migration_files:
+                migration_path = os.path.join(migrations_dir, migration_file)
+                if os.path.exists(migration_path):
+                    try:
+                        logger.info(f"Running migration: {migration_file}")
+                        
+                        # Load and execute the migration module
+                        module_name = migration_file.replace('.py', '')
+                        spec = importlib.util.spec_from_file_location(module_name, migration_path)
+                        migration_module = importlib.util.module_from_spec(spec)
+                        sys.modules[module_name] = migration_module
+                        spec.loader.exec_module(migration_module)
+                        
+                        # Run the appropriate migration function
+                        if hasattr(migration_module, 'create_settings_table'):
+                            migration_module.create_settings_table(engine)
+                        elif hasattr(migration_module, 'add_snapshot_write_method_column'):
+                            migration_module.add_snapshot_write_method_column(engine)
+                        elif hasattr(migration_module, 'main'):
+                            # Some migrations might have a main function
+                            pass  # Skip main function as it expects command line args
+                        
+                        logger.info(f"Successfully completed migration: {migration_file}")
+                    except Exception as migration_error:
+                        logger.error(f"Error running migration {migration_file}: {str(migration_error)}")
+                        # Continue with other migrations
+                else:
+                    logger.warning(f"Migration file not found: {migration_path}")
+                    
     except Exception as e:
         logger.error(f"Error running database migrations: {str(e)}")
         # Continue with startup even if migrations fail - the app might still work
