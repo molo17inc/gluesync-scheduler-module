@@ -49,73 +49,66 @@ except ImportError:
 
 
 def add_snapshot_write_method_column(engine):
-    """Add the snapshot_write_method column to the scheduled_jobs table if it doesn't exist"""
+    """Add the snapshot_write_method column to the scheduled_jobs table using SQLAlchemy schema operations"""
     
-    logger.info(f"🔍 MIGRATION: Running migration against database: {engine.url}")
-    logger.info(f"🔍 MIGRATION: Database file path: {engine.url.database}")
+    from sqlalchemy import MetaData, Table, Column, String
+    from sqlalchemy.sql.ddl import DDL
     
-    # Check if database file exists
-    import os
-    db_path = engine.url.database
-    if db_path and os.path.exists(db_path):
-        logger.info(f"🔍 MIGRATION: Database file exists at {db_path}")
-        logger.info(f"🔍 MIGRATION: Database file size: {os.path.getsize(db_path)} bytes")
-    else:
-        logger.warning(f"🔍 MIGRATION: Database file not found at {db_path}")
+    logger.info(f"🔍 MIGRATION: Running SQLAlchemy-based migration against database: {engine.url}")
     
-    inspector = inspect(engine)
+    # Create metadata and reflect existing schema
+    metadata = MetaData()
+    metadata.reflect(bind=engine)
     
     # Check if the scheduled_jobs table exists
-    table_names = inspector.get_table_names()
-    logger.info(f"🔍 MIGRATION: Available tables: {table_names}")
-    
-    if 'scheduled_jobs' not in table_names:
+    if 'scheduled_jobs' not in metadata.tables:
         logger.info("🔍 MIGRATION: scheduled_jobs table does not exist, skipping migration")
         return
     
-    # Check if the snapshot_write_method column already exists
-    columns = inspector.get_columns('scheduled_jobs')
-    column_names = [col['name'] for col in columns]
-    logger.info(f"🔍 MIGRATION: Current columns in scheduled_jobs: {column_names}")
-    logger.info(f"🔍 MIGRATION: Total columns found: {len(column_names)}")
+    scheduled_jobs_table = metadata.tables['scheduled_jobs']
+    existing_columns = [col.name for col in scheduled_jobs_table.columns]
+    logger.info(f"🔍 MIGRATION: Current columns in scheduled_jobs: {existing_columns}")
     
-    if 'snapshot_write_method' in column_names:
+    # Check if the snapshot_write_method column already exists
+    if 'snapshot_write_method' in existing_columns:
         logger.info("🔍 MIGRATION: snapshot_write_method column already exists, skipping migration")
         return
     
-    logger.info("🔍 MIGRATION: Adding snapshot_write_method column to scheduled_jobs table")
+    logger.info("🔍 MIGRATION: Adding snapshot_write_method column using SQLAlchemy DDL operations")
     
     try:
+        # Use SQLAlchemy's DDL approach for adding columns
         with engine.connect() as connection:
-            # Add the new column with default value 'UPSERT'
-            sql_command = "ALTER TABLE scheduled_jobs ADD COLUMN snapshot_write_method VARCHAR NOT NULL DEFAULT 'UPSERT'"
-            logger.info(f"🔍 MIGRATION: Executing SQL: {sql_command}")
-            connection.execute(text(sql_command))
+            # Create DDL statement for adding the column
+            add_column_ddl = DDL("ALTER TABLE scheduled_jobs ADD COLUMN snapshot_write_method VARCHAR NOT NULL DEFAULT 'UPSERT'")
+            connection.execute(add_column_ddl)
             connection.commit()
-            logger.info("🔍 MIGRATION: SQL execution completed, committing transaction")
             
-            # Force a new inspector to avoid caching issues
-            logger.info("🔍 MIGRATION: Creating new inspector to verify column addition")
-            inspector_after = inspect(engine)
-            columns_after = inspector_after.get_columns('scheduled_jobs')
-            column_names_after = [col['name'] for col in columns_after]
-            logger.info(f"🔍 MIGRATION: Columns after migration: {column_names_after}")
-            logger.info(f"🔍 MIGRATION: Total columns after migration: {len(column_names_after)}")
+            logger.info("🔍 MIGRATION: SQLAlchemy DDL operation completed")
+        
+        # Verify the column was added by reflecting the schema again
+        metadata_after = MetaData()
+        metadata_after.reflect(bind=engine)
+        updated_table = metadata_after.tables['scheduled_jobs']
+        updated_columns = [col.name for col in updated_table.columns]
+        
+        logger.info(f"🔍 MIGRATION: Columns after migration: {updated_columns}")
+        
+        if 'snapshot_write_method' in updated_columns:
+            logger.info("✅ MIGRATION: SQLAlchemy DDL migration verified: snapshot_write_method column exists")
             
-            if 'snapshot_write_method' in column_names_after:
-                logger.info("✅ MIGRATION: Migration verified: snapshot_write_method column exists")
-            else:
-                logger.error("❌ MIGRATION: Migration failed: snapshot_write_method column not found after migration")
-                
-            # Additional verification: try to query the new column
-            try:
-                result = connection.execute(text("SELECT snapshot_write_method FROM scheduled_jobs LIMIT 1"))
-                logger.info("🔍 MIGRATION: Successfully queried snapshot_write_method column")
-            except Exception as query_error:
-                logger.error(f"🔍 MIGRATION: Failed to query snapshot_write_method column: {query_error}")
+            # Test querying the new column
+            with engine.connect() as connection:
+                try:
+                    result = connection.execute(text("SELECT snapshot_write_method FROM scheduled_jobs LIMIT 1"))
+                    logger.info("🔍 MIGRATION: Successfully queried snapshot_write_method column")
+                except Exception as query_error:
+                    logger.error(f"🔍 MIGRATION: Failed to query snapshot_write_method column: {query_error}")
+        else:
+            logger.error("❌ MIGRATION: SQLAlchemy DDL migration failed: snapshot_write_method column not found after migration")
                 
     except Exception as e:
-        logger.error(f"Error during migration: {str(e)}")
+        logger.error(f"Error during SQLAlchemy DDL migration: {str(e)}")
         raise
 
 

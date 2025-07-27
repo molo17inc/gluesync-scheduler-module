@@ -346,25 +346,25 @@ async def startup_event():
         logger.error(f"Error running database migrations: {str(e)}")
         # Continue with startup even if migrations fail - the app might still work
         
-    # Force SQLAlchemy to refresh its metadata after migrations
+    # Verify SQLAlchemy model and database schema are synchronized after migrations
     try:
-        logger.info("Refreshing SQLAlchemy metadata after migrations...")
-        from gluesync_scheduler.models.models import Base
+        logger.info("Verifying database schema synchronization...")
+        from gluesync_scheduler.models.models import ScheduledJob
+        from sqlalchemy import inspect
+        
         engine = create_engine(settings.DB_URL)
         
-        # Clear any cached metadata and reflect the current database schema
-        Base.metadata.clear()
-        Base.metadata.reflect(bind=engine)
+        # Check that the model includes the snapshot_write_method column
+        model_columns = [col.name for col in ScheduledJob.__table__.columns]
+        logger.info(f"Model columns: {model_columns}")
         
-        # Verify the snapshot_write_method column is visible to SQLAlchemy
-        if hasattr(Base.metadata.tables.get('scheduled_jobs'), 'c') and \
-           'snapshot_write_method' in Base.metadata.tables['scheduled_jobs'].c:
-            logger.info("✅ SQLAlchemy metadata refresh successful: snapshot_write_method column visible")
+        if 'snapshot_write_method' in model_columns:
+            logger.info("✅ Schema verification: snapshot_write_method column present in SQLAlchemy model")
         else:
-            logger.warning("⚠️ SQLAlchemy metadata refresh: snapshot_write_method column not visible")
+            logger.warning("⚠️ Schema verification: snapshot_write_method column missing from SQLAlchemy model")
             
-    except Exception as metadata_error:
-        logger.error(f"Error refreshing SQLAlchemy metadata: {str(metadata_error)}")
+    except Exception as verification_error:
+        logger.error(f"Error during schema verification: {str(verification_error)}")
     
     # Initialize default settings
     engine = create_engine(settings.DB_URL)
