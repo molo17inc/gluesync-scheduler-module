@@ -351,7 +351,6 @@ async def startup_event():
         logger.info("Verifying database schema synchronization...")
         from gluesync_scheduler.models.models import ScheduledJob
         from sqlalchemy import inspect
-        import os
         
         logger.info(f"🔍 DATABASE DEBUG: Application DB_URL: {settings.DB_URL}")
         
