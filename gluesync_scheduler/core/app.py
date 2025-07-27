@@ -283,6 +283,7 @@ async def startup_event():
                 "migrate_add_snapshot_write_method.py"
             ]
             
+            logger.info(f"Creating engine for database: {settings.DB_URL}")
             engine = create_engine(settings.DB_URL)
             
             for migration_file in migration_files:
@@ -313,6 +314,33 @@ async def startup_event():
                         # Continue with other migrations
                 else:
                     logger.warning(f"Migration file not found: {migration_path}")
+                    
+            # Verify the snapshot_write_method column exists after all migrations
+            try:
+                logger.info("Verifying migration results...")
+                from sqlalchemy import inspect
+                inspector = inspect(engine)
+                if 'scheduled_jobs' in inspector.get_table_names():
+                    columns = inspector.get_columns('scheduled_jobs')
+                    column_names = [col['name'] for col in columns]
+                    logger.info(f"Final scheduled_jobs columns: {column_names}")
+                    
+                    if 'snapshot_write_method' in column_names:
+                        logger.info("✅ Verification successful: snapshot_write_method column exists")
+                    else:
+                        logger.error("❌ Verification failed: snapshot_write_method column missing after migration")
+                        # Try to add it manually as a last resort
+                        logger.info("Attempting manual column addition...")
+                        with engine.connect() as connection:
+                            connection.execute(text(
+                                "ALTER TABLE scheduled_jobs ADD COLUMN snapshot_write_method VARCHAR NOT NULL DEFAULT 'UPSERT'"
+                            ))
+                            connection.commit()
+                            logger.info("Manual column addition completed")
+                else:
+                    logger.warning("scheduled_jobs table not found during verification")
+            except Exception as verify_error:
+                logger.error(f"Error during migration verification: {str(verify_error)}")
                     
     except Exception as e:
         logger.error(f"Error running database migrations: {str(e)}")

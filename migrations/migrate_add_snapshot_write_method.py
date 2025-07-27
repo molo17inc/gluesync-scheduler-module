@@ -43,24 +43,30 @@ try:
     DB_URL = settings.DB_URL
     logger.info(f"Using DB_URL from settings: {DB_URL}")
 except ImportError:
-    # If importing fails, use a default or allow command-line override
-    DB_URL = "sqlite:///./scheduler.db"
+    # If importing fails, use the same path as the application
+    DB_URL = "sqlite:///./data/scheduler.db"
     logger.warning(f"Could not import settings, using default DB_URL: {DB_URL}")
 
 
 def add_snapshot_write_method_column(engine):
     """Add the snapshot_write_method column to the scheduled_jobs table if it doesn't exist"""
     
+    logger.info(f"Running migration against database: {engine.url}")
+    
     inspector = inspect(engine)
     
     # Check if the scheduled_jobs table exists
-    if 'scheduled_jobs' not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    logger.info(f"Available tables: {table_names}")
+    
+    if 'scheduled_jobs' not in table_names:
         logger.info("scheduled_jobs table does not exist, skipping migration")
         return
     
     # Check if the snapshot_write_method column already exists
     columns = inspector.get_columns('scheduled_jobs')
     column_names = [col['name'] for col in columns]
+    logger.info(f"Current columns in scheduled_jobs: {column_names}")
     
     if 'snapshot_write_method' in column_names:
         logger.info("snapshot_write_method column already exists, skipping migration")
@@ -68,13 +74,30 @@ def add_snapshot_write_method_column(engine):
     
     logger.info("Adding snapshot_write_method column to scheduled_jobs table")
     
-    with engine.connect() as connection:
-        # Add the new column with default value 'UPSERT'
-        connection.execute(text(
-            "ALTER TABLE scheduled_jobs ADD COLUMN snapshot_write_method VARCHAR NOT NULL DEFAULT 'UPSERT'"
-        ))
-        connection.commit()
-        logger.info("Successfully added snapshot_write_method column")
+    try:
+        with engine.connect() as connection:
+            # Add the new column with default value 'UPSERT'
+            logger.info("Executing: ALTER TABLE scheduled_jobs ADD COLUMN snapshot_write_method VARCHAR NOT NULL DEFAULT 'UPSERT'")
+            connection.execute(text(
+                "ALTER TABLE scheduled_jobs ADD COLUMN snapshot_write_method VARCHAR NOT NULL DEFAULT 'UPSERT'"
+            ))
+            connection.commit()
+            logger.info("Successfully added snapshot_write_method column")
+            
+            # Verify the column was added
+            inspector_after = inspect(engine)
+            columns_after = inspector_after.get_columns('scheduled_jobs')
+            column_names_after = [col['name'] for col in columns_after]
+            logger.info(f"Columns after migration: {column_names_after}")
+            
+            if 'snapshot_write_method' in column_names_after:
+                logger.info("✅ Migration verified: snapshot_write_method column exists")
+            else:
+                logger.error("❌ Migration failed: snapshot_write_method column not found after migration")
+                
+    except Exception as e:
+        logger.error(f"Error during migration: {str(e)}")
+        raise
 
 
 def main():
