@@ -120,6 +120,23 @@ def main():
     
     # Use command-line DB URL if provided
     db_url = args.db_url if args.db_url else DB_URL
+    
+    logger.info(f"🔍 MIGRATION DEBUG: Command line args: {args}")
+    logger.info(f"🔍 MIGRATION DEBUG: Current working directory: {os.getcwd()}")
+    logger.info(f"🔍 MIGRATION DEBUG: Script location: {__file__}")
+    logger.info(f"🔍 MIGRATION DEBUG: DB_URL from settings: {DB_URL}")
+    logger.info(f"🔍 MIGRATION DEBUG: Final db_url to use: {db_url}")
+    
+    # If using SQLite, resolve and log the absolute path
+    if db_url.startswith('sqlite:///'):
+        db_path = db_url.replace('sqlite:///', '')
+        if not os.path.isabs(db_path):
+            db_path = os.path.abspath(db_path)
+        logger.info(f"🔍 MIGRATION DEBUG: Resolved SQLite database path: {db_path}")
+        logger.info(f"🔍 MIGRATION DEBUG: Database file exists: {os.path.exists(db_path)}")
+        if os.path.exists(db_path):
+            logger.info(f"🔍 MIGRATION DEBUG: Database file size: {os.path.getsize(db_path)} bytes")
+    
     logger.info(f"Running migration with database: {db_url}")
     
     try:

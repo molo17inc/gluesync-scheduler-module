@@ -351,12 +351,38 @@ async def startup_event():
         logger.info("Verifying database schema synchronization...")
         from gluesync_scheduler.models.models import ScheduledJob
         from sqlalchemy import inspect
+        import os
+        
+        logger.info(f"🔍 DATABASE DEBUG: Application DB_URL: {settings.DB_URL}")
         
         engine = create_engine(settings.DB_URL)
         
+        # Check if the database file actually exists and get its path
+        if settings.DB_URL.startswith('sqlite:///'):
+            db_path = settings.DB_URL.replace('sqlite:///', '')
+            if db_path.startswith('./'):
+                db_path = os.path.abspath(db_path)
+            logger.info(f"🔍 DATABASE DEBUG: Resolved database file path: {db_path}")
+            if os.path.exists(db_path):
+                logger.info(f"🔍 DATABASE DEBUG: Database file exists, size: {os.path.getsize(db_path)} bytes")
+            else:
+                logger.error(f"🔍 DATABASE DEBUG: Database file does not exist at {db_path}")
+        
+        # Check actual database schema
+        inspector = inspect(engine)
+        if 'scheduled_jobs' in inspector.get_table_names():
+            db_columns = inspector.get_columns('scheduled_jobs')
+            db_column_names = [col['name'] for col in db_columns]
+            logger.info(f"🔍 DATABASE DEBUG: Actual database columns: {db_column_names}")
+            
+            if 'snapshot_write_method' in db_column_names:
+                logger.info("✅ Database verification: snapshot_write_method column exists in actual database")
+            else:
+                logger.error("❌ Database verification: snapshot_write_method column missing from actual database")
+        
         # Check that the model includes the snapshot_write_method column
         model_columns = [col.name for col in ScheduledJob.__table__.columns]
-        logger.info(f"Model columns: {model_columns}")
+        logger.info(f"🔍 MODEL DEBUG: SQLAlchemy model columns: {model_columns}")
         
         if 'snapshot_write_method' in model_columns:
             logger.info("✅ Schema verification: snapshot_write_method column present in SQLAlchemy model")
