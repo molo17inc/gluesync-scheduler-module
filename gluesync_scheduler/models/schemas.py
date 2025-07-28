@@ -160,6 +160,8 @@ class Job(JobBase):
     next_run: Optional[datetime] = Field(None, description="Timestamp of the next scheduled execution")
     command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
     schedule_days: List[str] = Field(default_factory=list, description="Array of days when the job is scheduled to run (e.g., ['monday', 'wednesday', 'friday'])")
+    # Explicitly re-define snapshot_write_method to ensure it's included in the response
+    snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     
     # Ensure schedule_days is always populated
     @validator('schedule_days', always=True)
