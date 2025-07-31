@@ -193,9 +193,16 @@ async def play_pipeline(
     except Exception as e:
         logger.error(f"Error starting pipeline: {str(e)}")
         
-        # Log job error if cron_job_identifier is provided
+        # Update job status to failed if cron_job_identifier is provided
         if cron_job_identifier:
-            logger.error(f"Job failed for {cron_job_identifier}: {str(e)}")
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            
+            try:
+                update_job_status(cron_job_identifier, False, str(e))
+                logger.info(f"Updated job status to failed for {cron_job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Error updating job status to failed: {str(update_error)}")
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -285,9 +292,16 @@ async def pause_pipeline(
     except Exception as e:
         logger.error(f"Error stopping pipeline: {str(e)}")
         
-        # Log job error if cron_job_identifier is provided
+        # Update job status to failed if cron_job_identifier is provided
         if cron_job_identifier:
-            logger.error(f"Job failed for {cron_job_identifier}: {str(e)}")
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            
+            try:
+                update_job_status(cron_job_identifier, False, str(e))
+                logger.info(f"Updated job status to failed for {cron_job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Error updating job status to failed: {str(update_error)}")
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -387,9 +401,16 @@ async def resync_pipeline(
     except Exception as e:
         logger.error(f"Error resyncing pipeline: {str(e)}")
         
-        # Log job error if cron_job_identifier is provided
+        # Update job status to failed if cron_job_identifier is provided
         if cron_job_identifier:
-            logger.error(f"Job failed for {cron_job_identifier}: {str(e)}")
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            
+            try:
+                update_job_status(cron_job_identifier, False, str(e))
+                logger.info(f"Updated job status to failed for {cron_job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Error updating job status to failed: {str(update_error)}")
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
