@@ -373,6 +373,9 @@ class SchedulerService:
                     f.write(f"[{datetime.now(timezone.utc)}] Error executing job {job_id}: {str(e)}\n")
             except Exception:
                 pass
+            
+            # Re-raise the exception so APScheduler knows the job failed
+            raise
 
 # Create a global instance for easy import
 scheduler_service = SchedulerService.get_instance()
