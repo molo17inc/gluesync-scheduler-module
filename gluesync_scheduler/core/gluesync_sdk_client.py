@@ -300,8 +300,8 @@ class GluesyncSDKClient:
         self._is_initialized = False
         logger.info(f"Disconnected from CoreHub: {reason}")
         
-        # Start automatic reconnection in a separate task
-        self._start_reconnect_task()
+        # Note: The SDK handles reconnection internally, so we don't need to start a reconnection task
+        logger.info("SDK will handle reconnection automatically")
     
     async def _on_error(self, error):
         """

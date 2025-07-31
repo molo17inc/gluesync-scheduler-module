@@ -158,7 +158,7 @@ async def play_pipeline(
         if entity_ids:
             # Start specific entities
             result = await pipeline_manager.play_entities(pipeline_id, entity_ids, with_snapshot)
-            message = f"Entities started successfully in pipeline {pipeline_id}"
+            message = f"Entities started successfully in pipeline {pipeline_id}" if result else f"Failed to start entities in pipeline {pipeline_id}"
             details = {
                 "pipeline_id": pipeline_id,
                 "entities_started": entity_ids,
@@ -167,13 +167,31 @@ async def play_pipeline(
         else:
             # Start entire pipeline
             result = await pipeline_manager.play_pipeline(pipeline_id, with_snapshot)
-            message = f"Pipeline {pipeline_id} started successfully"
+            message = f"Pipeline {pipeline_id} started successfully" if result else f"Failed to start pipeline {pipeline_id}"
             details = {
                 "pipeline_id": pipeline_id,
                 "with_snapshot": with_snapshot
             }
         
-        # Update job status if cron_job_identifier is provided
+        # Check if the operation was successful
+        if not result:
+            # Update job status to failed if cron_job_identifier is provided
+            if cron_job_identifier:
+                from gluesync_scheduler.db.database import SessionLocal
+                from gluesync_scheduler.cli.job_runner import update_job_status
+                
+                try:
+                    update_job_status(cron_job_identifier, False, message)
+                    logger.info(f"Updated job status to failed for {cron_job_identifier}")
+                except Exception as update_error:
+                    logger.error(f"Error updating job status to failed: {str(update_error)}")
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=message
+            )
+        
+        # Update job status to success if cron_job_identifier is provided
         if cron_job_identifier:
             from gluesync_scheduler.db.database import SessionLocal
             from gluesync_scheduler.cli.job_runner import update_job_status
@@ -270,7 +288,7 @@ async def pause_pipeline(
         if entity_ids:
             # Stop specific entities
             result = await pipeline_manager.pause_entities(pipeline_id, entity_ids)
-            message = f"Entities stopped successfully in pipeline {pipeline_id}"
+            message = f"Entities stopped successfully in pipeline {pipeline_id}" if result else f"Failed to stop entities in pipeline {pipeline_id}"
             details = {
                 "pipeline_id": pipeline_id,
                 "entities_stopped": entity_ids
@@ -278,10 +296,39 @@ async def pause_pipeline(
         else:
             # Stop entire pipeline
             result = await pipeline_manager.pause_pipeline(pipeline_id)
-            message = f"Pipeline {pipeline_id} stopped successfully"
+            message = f"Pipeline {pipeline_id} stopped successfully" if result else f"Failed to stop pipeline {pipeline_id}"
             details = {
                 "pipeline_id": pipeline_id
             }
+        
+        # Check if the operation was successful
+        if not result:
+            # Update job status to failed if cron_job_identifier is provided
+            if cron_job_identifier:
+                from gluesync_scheduler.db.database import SessionLocal
+                from gluesync_scheduler.cli.job_runner import update_job_status
+                
+                try:
+                    update_job_status(cron_job_identifier, False, message)
+                    logger.info(f"Updated job status to failed for {cron_job_identifier}")
+                except Exception as update_error:
+                    logger.error(f"Error updating job status to failed: {str(update_error)}")
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=message
+            )
+        
+        # Update job status to success if cron_job_identifier is provided
+        if cron_job_identifier:
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            
+            try:
+                update_job_status(cron_job_identifier, True)
+                logger.info(f"Updated job status for {cron_job_identifier}")
+            except Exception as e:
+                logger.error(f"Error updating job status: {str(e)}")
         
         # Return a simplified response to avoid recursion issues
         return {
@@ -377,7 +424,7 @@ async def resync_pipeline(
         if entity_ids:
             # Resync specific entities
             result = await pipeline_manager.resync_entities(pipeline_id, entity_ids, snapshot_write_method)
-            message = f"One-time snapshot triggered successfully for entities in pipeline {pipeline_id}"
+            message = f"One-time snapshot triggered successfully for entities in pipeline {pipeline_id}" if result else f"Failed to resync entities in pipeline {pipeline_id}"
             details = {
                 "pipeline_id": pipeline_id,
                 "entities_resynced": entity_ids,
@@ -386,11 +433,40 @@ async def resync_pipeline(
         else:
             # Resync entire pipeline
             result = await pipeline_manager.resync_pipeline(pipeline_id, snapshot_write_method)
-            message = f"One-time snapshot triggered successfully for pipeline {pipeline_id}"
+            message = f"One-time snapshot triggered successfully for pipeline {pipeline_id}" if result else f"Failed to resync pipeline {pipeline_id}"
             details = {
                 "pipeline_id": pipeline_id,
                 "snapshot_write_method": snapshot_write_method
             }
+        
+        # Check if the operation was successful
+        if not result:
+            # Update job status to failed if cron_job_identifier is provided
+            if cron_job_identifier:
+                from gluesync_scheduler.db.database import SessionLocal
+                from gluesync_scheduler.cli.job_runner import update_job_status
+                
+                try:
+                    update_job_status(cron_job_identifier, False, message)
+                    logger.info(f"Updated job status to failed for {cron_job_identifier}")
+                except Exception as update_error:
+                    logger.error(f"Error updating job status to failed: {str(update_error)}")
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=message
+            )
+        
+        # Update job status to success if cron_job_identifier is provided
+        if cron_job_identifier:
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            
+            try:
+                update_job_status(cron_job_identifier, True)
+                logger.info(f"Updated job status for {cron_job_identifier}")
+            except Exception as e:
+                logger.error(f"Error updating job status: {str(e)}")
         
         # Return a simplified response to avoid recursion issues
         return {
