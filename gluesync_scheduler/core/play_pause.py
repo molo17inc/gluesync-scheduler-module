@@ -190,12 +190,33 @@ class CoreHubClient:
     def _get_current_token(self):
         """Get the current authentication token dynamically from the SDK or fallback to stored token"""
         try:
-            if gluesync_sdk_client and gluesync_sdk_client.is_initialized and hasattr(gluesync_sdk_client, 'token') and gluesync_sdk_client.token:
-                return gluesync_sdk_client.token
+            if gluesync_sdk_client:
+                logger.info(f"SDK client available: {gluesync_sdk_client is not None}")
+                logger.info(f"SDK client initialized: {gluesync_sdk_client.is_initialized if gluesync_sdk_client else 'N/A'}")
+                
+                if gluesync_sdk_client.is_initialized:
+                    has_token_attr = hasattr(gluesync_sdk_client, 'token')
+                    logger.info(f"SDK client has token attribute: {has_token_attr}")
+                    
+                    if has_token_attr:
+                        current_token = gluesync_sdk_client.token
+                        logger.info(f"SDK token available: {current_token is not None}")
+                        if current_token:
+                            logger.info(f"Successfully retrieved token from SDK: {current_token[:20]}...")
+                            return current_token
+                        else:
+                            logger.warning("SDK client token is None")
+                    else:
+                        logger.warning("SDK client does not have token attribute")
+                else:
+                    logger.warning("SDK client is not initialized")
+            else:
+                logger.warning("SDK client is not available")
         except Exception as e:
-            logger.debug(f"Could not get token from SDK client: {e}")
+            logger.error(f"Error getting token from SDK client: {e}")
         
         # Fallback to stored token if SDK client is not available
+        logger.debug(f"Falling back to stored token: {self.token is not None}")
         return self.token
     
     def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None):
@@ -220,7 +241,10 @@ class CoreHubClient:
             
         # Get the current token dynamically from the SDK or fallback to stored token
         current_token = self._get_current_token()
-        if not current_token:
+        logger.info(f"Token retrieval result: {'SUCCESS' if current_token else 'FAILED'}")
+        if current_token:
+            logger.info(f"Using token: {current_token[:20]}...{current_token[-10:] if len(current_token) > 30 else ''}")
+        else:
             logger.warning("No authentication token available - proceeding with unauthenticated request")
             
         url = f"{current_url}{path}"
@@ -311,18 +335,9 @@ class CoreHubClient:
                 
                 # Reset token and trigger reconnection
                 self.token = None
-                try:
-                    # Try to re-initialize the SDK client to get a fresh token
-                    from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
-                    # Set flag for SDK client to know it needs to reconnect
-                    if hasattr(gluesync_sdk_client, '_client') and gluesync_sdk_client._client:
-                        gluesync_sdk_client._token = None
-                        gluesync_sdk_client._is_initialized = False
-                        # Create a task to trigger reconnection
-                        import asyncio
-                        asyncio.create_task(gluesync_sdk_client._attempt_reconnect())
-                except Exception as e:
-                    logger.error(f"Failed to trigger SDK reconnection: {e}")
+                # Note: SDK handles reconnection automatically when authentication fails
+                # No manual intervention needed - the SDK will reconnect and get a new token
+                logger.info("Authentication failed - SDK will handle reconnection automatically")
                 
                 # Return a specific error response for auth errors
                 return {
