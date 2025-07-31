@@ -286,6 +286,7 @@ class GluesyncSDKClient:
             token: The JWT token received from the server
         """
         self._token = token
+        self._is_initialized = True  # Mark as initialized when connected
         logger.info(f"Connected to CoreHub successfully! Token received.")
         logger.debug(f"Token: {token}")
     
