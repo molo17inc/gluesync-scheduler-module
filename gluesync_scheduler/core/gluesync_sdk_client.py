@@ -60,8 +60,6 @@ class GluesyncSDKClient:
     _token = None
     _client = None
     _is_initialized = False
-    _reconnecting = False
-    _reconnect_task = None
     
     @classmethod
     def get_instance(cls):
@@ -202,9 +200,7 @@ class GluesyncSDKClient:
         self._client.on_connected = self._on_connected
         self._client.on_disconnected = self._on_disconnected
         self._client.on_error = self._on_error
-        self._client.on_reconnecting = self._on_reconnecting
-        self._client.on_reconnected = self._on_reconnected
-        self._client.on_token_updated = self._on_token_updated
+        # Note: on_reconnecting, on_reconnected, and on_token_updated are not supported by the current SDK
         
         # Connect to CoreHub with indefinite retry logic and exponential backoff
         retry_count = 0
@@ -320,165 +316,17 @@ class GluesyncSDKClient:
         self._token = None
         self._is_initialized = False
         
-        # Start reconnection process if not already in progress
-        if not self._reconnecting:
-            logger.info("Starting reconnection process due to connection error")
-            self._start_reconnect_task()
+        # Note: The SDK handles reconnection internally, so we don't need custom reconnection logic
+        logger.info("Connection error occurred - SDK will handle reconnection automatically")
     
-    async def _on_reconnecting(self):
-        """
-        Handle the reconnecting event.
-        Called when reconnection process starts.
-        """
-        logger.info("Reconnection process starting")
+    # Note: Callback methods for on_reconnecting, on_reconnected, and on_token_updated
+    # have been removed as they are not supported by the current SDK version.
+    # The SDK handles reconnection internally and updates tokens through the on_connected callback.
         
-    async def _on_reconnected(self):
-        """
-        Handle the reconnected event.
-        Called when reconnection succeeds.
-        """
-        logger.info("Successfully reconnected to CoreHub")
-        self._is_initialized = True
-        self._reconnecting = False
-        self._reconnect_task = None
-        
-    async def _on_token_updated(self, token):
-        """
-        Handle the token updated event.
-        Called when a new token is received from the server,
-        either during initial connection or after reconnection.
-        
-        Args:
-            token: The new JWT token received from the server
-        """
-        if self._token != token:
-            old_token = self._token
-            self._token = token
-            logger.info("Received new authentication token from CoreHub")
-            logger.debug(f"Token updated: {token[:10]}...")
-            
-            # Log the token change for debugging purposes
-            if old_token:
-                logger.debug(f"Previous token: {old_token[:10]}... New token: {token[:10]}...")
-        
-    def _start_reconnect_task(self):
-        """
-        Creates and starts the reconnection task if not already in progress.
-        """
-        if self._reconnecting:
-            logger.debug("Reconnection already in progress, skipping...")
-            return
-            
-        logger.info("Starting reconnection task")
-        self._reconnecting = True
-        self._reconnect_task = asyncio.create_task(self._reconnect())
-        
-    async def _reconnect(self):
-        """
-        Handles the reconnection logic based on whether a host is specified.
-        - When a host is explicitly specified, it attempts to reconnect immediately
-        - When no host is specified, it waits for a broadcast message before attempting to reconnect
-        """
-        # Extract the current connection details from client if they exist
-        host = getattr(self._client, 'host', None)
-        port = getattr(self._client, 'port', 1717)  # Default port is 1717
-        use_ssl = getattr(self._client, 'use_ssl', False)
-        
-        if not host and settings.CORE_HUB_URL:
-            # Use settings if client doesn't have host information
-            parsed_url = urlparse(settings.CORE_HUB_URL)
-            host = parsed_url.hostname
-            port = parsed_url.port or 1717
-            use_ssl = parsed_url.scheme == "https"
-        
-        try:
-            if host:
-                # If we have a specific host, attempt to reconnect immediately
-                logger.info(f"Host explicitly specified ({host}), attempting immediate reconnection")
-                await self._attempt_reconnect()
-            else:
-                # If no host is specified, wait for a broadcast message
-                logger.info("No host specified, waiting for broadcast message before reconnecting")
-                # In this case, we don't do anything and wait for the SDK to handle reconnection
-                # based on broadcast messages from CoreHub
-                
-                # We'll just log periodic messages to show we're still waiting
-                wait_time = 0
-                while self._reconnecting and not self._client.is_connected:
-                    # Every 30 seconds, log that we're still waiting
-                    if wait_time % 30 == 0:
-                        logger.info(f"Still waiting for CoreHub broadcast ({wait_time}s elapsed)...")
-                    
-                    await asyncio.sleep(1)
-                    wait_time += 1
-                    
-                    # If we get a host (from a broadcast), try to reconnect
-                    if self._client.host and not self._client.is_connected:
-                        logger.info(f"Received broadcast from CoreHub at {self._client.host}:{self._client.port}")
-                        await self._attempt_reconnect()
-                        break
-                
-        except Exception as e:
-            logger.error(f"Error during reconnection process: {e}")
-        finally:
-            # Reset reconnection status if we're exiting the reconnection loop
-            if not self._client.is_connected:
-                self._reconnecting = False
-                self._reconnect_task = None
-                logger.warning("Reconnection process ended without successful connection")
-    
-    async def _attempt_reconnect(self):
-        """
-        Manages the actual connection attempt with retries.
-        """
-        # Extract the current connection details from client if they exist
-        host = getattr(self._client, 'host', None)
-        port = getattr(self._client, 'port', 1717)  # Default port is 1717
-        use_ssl = getattr(self._client, 'use_ssl', False)
-        
-        # Retry parameters
-        retry_count = 0
-        max_retries = 5  # Only retry a few times for explicitly specified hosts
-        backoff_delay = 1
-        max_backoff = 30
-        
-        logger.info(f"Attempting to reconnect to CoreHub at {self._build_corehub_url(host, port, use_ssl)}")
-        
-        while retry_count < max_retries and self._reconnecting:
-            try:
-                retry_count += 1
-                logger.info(f"Reconnection attempt {retry_count}/{max_retries}")
-                
-                # Attempt to connect
-                await self._client.connect()
-                
-                # If connection succeeded, update settings and exit
-                if self._client.is_connected:
-                    logger.info(f"Successfully reconnected to CoreHub after {retry_count} attempt(s)")
-                    
-                    # Update CoreHub URL in settings
-                    corehub_url = self._build_corehub_url(self._client.host, self._client.port, self._client.use_ssl)
-                    if corehub_url:
-                        settings.update_corehub_url(corehub_url)
-                        logger.info(f"Updated CoreHub URL to {corehub_url}")
-                    
-                    self._is_initialized = True
-                    self._reconnecting = False
-                    self._reconnect_task = None
-                    return True
-                
-            except Exception as e:
-                logger.warning(f"Reconnection attempt {retry_count} failed: {e}")
-                
-                # Calculate backoff with exponential increase
-                logger.info(f"Waiting {backoff_delay} seconds before next reconnection attempt...")
-                await asyncio.sleep(backoff_delay)
-                
-                # Double the backoff for next time, up to the maximum
-                backoff_delay = min(backoff_delay * 2, max_backoff)
-        
-        logger.warning(f"Failed to reconnect after {max_retries} attempts")
-        return False
+    # Note: Custom reconnection methods have been removed as the SDK handles
+    # reconnection internally. The SDK will automatically attempt to reconnect
+    # when the connection is lost and will call the on_connected callback
+    # when reconnection is successful.
         
 # Create a global instance for easy import
 gluesync_sdk_client = GluesyncSDKClient.get_instance()
