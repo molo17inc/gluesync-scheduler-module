@@ -187,6 +187,17 @@ class CoreHubClient:
         # Fallback to stored URL if SDK client is not available
         return self.base_url
     
+    def _get_current_token(self):
+        """Get the current authentication token dynamically from the SDK or fallback to stored token"""
+        try:
+            if gluesync_sdk_client and gluesync_sdk_client.is_initialized and hasattr(gluesync_sdk_client, 'token') and gluesync_sdk_client.token:
+                return gluesync_sdk_client.token
+        except Exception as e:
+            logger.debug(f"Could not get token from SDK client: {e}")
+        
+        # Fallback to stored token if SDK client is not available
+        return self.token
+    
     def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None):
         """
         Make an HTTP request to the CoreHub API.
@@ -207,16 +218,14 @@ class CoreHubClient:
             logger.error("Please ensure CoreHub URL is configured before making API calls")
             return None
             
-        # Authentication check
-        if not self.token:
-            # Try one more time to get the token
-            self._initialize_token()
-            if not self.token:
-                logger.warning("No authentication token - proceeding with unauthenticated request")
+        # Get the current token dynamically from the SDK or fallback to stored token
+        current_token = self._get_current_token()
+        if not current_token:
+            logger.warning("No authentication token available - proceeding with unauthenticated request")
             
         url = f"{current_url}{path}"
         headers = {
-            'Authorization': f'Bearer {self.token}' if self.token else None,
+            'Authorization': f'Bearer {current_token}' if current_token else None,
             'Content-Type': 'application/json'
         }
 
