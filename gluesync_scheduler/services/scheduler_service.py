@@ -360,6 +360,9 @@ class SchedulerService:
                 # Log to error file
                 with open(error_file, 'a') as f:
                     f.write(f"[{datetime.now()}] {error_message}\n")
+                
+                # Re-raise the exception so APScheduler knows the job failed
+                raise
             
         except Exception as e:
             logger.error(f"Error executing job {job_id}: {str(e)}")
