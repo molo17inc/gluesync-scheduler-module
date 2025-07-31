@@ -176,21 +176,33 @@ class CoreHubClient:
         
     # This method is replaced by _initialize_token
             
-    def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict[str, Any]] = None, 
-                       params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        """Make a request to the Core Hub API
+    def _get_current_corehub_url(self):
+        """Get the current CoreHub URL dynamically from the SDK or fallback to stored URL"""
+        try:
+            if gluesync_sdk_client and gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
+                return gluesync_sdk_client.corehub_url
+        except Exception as e:
+            logger.debug(f"Could not get URL from SDK client: {e}")
+        
+        # Fallback to stored URL if SDK client is not available
+        return self.base_url
+    
+    def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None):
+        """
+        Make an HTTP request to the CoreHub API.
         
         Args:
-            path: API endpoint path
-            method: HTTP method (GET, POST, etc.)
+            path: API endpoint path (e.g., '/pipelines')
+            method: HTTP method (GET, POST, PUT, DELETE)
             body: Request body as dictionary
-            params: Query parameters as dictionary
+            params: URL parameters as dictionary
             
         Returns:
             Response data as dictionary or None if request failed
         """
-        # Simple null check - fail fast if we don't have a URL
-        if not self.base_url:
+        # Get the current URL dynamically from the SDK or fallback to stored URL
+        current_url = self._get_current_corehub_url()
+        if not current_url:
             logger.error("CoreHub URL not available - API request cannot proceed")
             logger.error("Please ensure CoreHub URL is configured before making API calls")
             return None
@@ -202,7 +214,7 @@ class CoreHubClient:
             if not self.token:
                 logger.warning("No authentication token - proceeding with unauthenticated request")
             
-        url = f"{self.base_url}{path}"
+        url = f"{current_url}{path}"
         headers = {
             'Authorization': f'Bearer {self.token}' if self.token else None,
             'Content-Type': 'application/json'
