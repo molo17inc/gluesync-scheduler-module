@@ -203,7 +203,7 @@ class CoreHubClient:
                         logger.info(f"SDK token available: {current_token is not None}")
                         if current_token:
                             logger.info(f"Successfully retrieved token from SDK: {current_token[:20]}...")
-                            return current_token
+                            return current_token, True  # Return tuple: (token, from_sdk)
                         else:
                             logger.warning("SDK client token is None")
                     else:
@@ -215,9 +215,10 @@ class CoreHubClient:
         except Exception as e:
             logger.error(f"Error getting token from SDK client: {e}")
         
-        # Fallback to stored token if SDK client is not available
-        logger.debug(f"Falling back to stored token: {self.token is not None}")
-        return self.token
+        # No fallback - if SDK is not properly connected, we should not use any token
+        logger.error("SDK client not available or not initialized - no valid token available")
+        logger.error("API requests will fail until SDK reconnects successfully")
+        return None, False  # Return tuple: (token, from_sdk)
     
     def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None):
         """
@@ -240,8 +241,14 @@ class CoreHubClient:
             return None
             
         # Get the current token dynamically from the SDK or fallback to stored token
-        current_token = self._get_current_token()
-        logger.info(f"Token retrieval result: {'SUCCESS' if current_token else 'FAILED'}")
+        current_token, from_sdk = self._get_current_token()
+        if from_sdk:
+            logger.info(f"Token retrieval result: SUCCESS (from SDK)")
+        elif current_token:
+            logger.warning(f"Token retrieval result: FALLBACK (using cached token - may be outdated)")
+        else:
+            logger.error(f"Token retrieval result: FAILED (no token available)")
+            
         if current_token:
             logger.info(f"Using token: {current_token[:20]}...{current_token[-10:] if len(current_token) > 30 else ''}")
         else:
