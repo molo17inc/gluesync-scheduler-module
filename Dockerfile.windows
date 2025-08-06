@@ -22,14 +22,10 @@ FROM mcr.microsoft.com/windows/servercore:ltsc2022 AS builder
 # Set working directory
 WORKDIR C:\build
 
-# Install Python 3.11 using Chocolatey
-RUN powershell -Command \
-    Set-ExecutionPolicy Bypass -Scope Process -Force; \
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
-    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-
-RUN choco install python311 -y --no-progress
-RUN choco install git -y --no-progress
+# Install Python 3.11 using direct download (more reliable than Chocolatey)
+RUN powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'C:\python-installer.exe'"
+RUN powershell -Command "Start-Process -FilePath 'C:\python-installer.exe' -ArgumentList '/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_test=0' -Wait"
+RUN powershell -Command "Remove-Item 'C:\python-installer.exe' -Force"
 
 # Add Python to PATH
 RUN setx PATH "%PATH%;C:\Python311;C:\Python311\Scripts" /M
@@ -64,13 +60,10 @@ FROM mcr.microsoft.com/windows/servercore:ltsc2022
 # Set working directory
 WORKDIR C:\app
 
-# Install Python 3.11 using Chocolatey
-RUN powershell -Command \
-    Set-ExecutionPolicy Bypass -Scope Process -Force; \
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
-    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-
-RUN choco install python311 -y --no-progress
+# Install Python 3.11 using direct download (more reliable than Chocolatey)
+RUN powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'C:\python-installer.exe'"
+RUN powershell -Command "Start-Process -FilePath 'C:\python-installer.exe' -ArgumentList '/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_test=0' -Wait"
+RUN powershell -Command "Remove-Item 'C:\python-installer.exe' -Force"
 
 # Add Python to PATH
 RUN setx PATH "%PATH%;C:\Python311;C:\Python311\Scripts" /M
