@@ -161,6 +161,9 @@ deploy-windows:
   stage: deploy-windows
   tags:
     - windows-runner-hq
+  # Temporarily disable automatic Windows builds until runners are configured
+  when: manual
+  allow_failure: true
   script:
     - echo "Building Windows Docker image..."
     
@@ -220,27 +223,59 @@ deploy-manifest:
       VERSION_TAG="${DEFAULT_NAME}:${TAGPART}"
       VERSION_TAG_WINDOWS="${DEFAULT_NAME}:${TAGPART}-windows"
     
-    # Create and push multi-platform manifest
+    # Check if Windows image exists and create multi-platform manifest accordingly
     - |
+      # Check if Windows image exists
+      WINDOWS_EXISTS=false
+      if docker manifest inspect "$VERSION_TAG_WINDOWS" >/dev/null 2>&1; then
+        echo "Windows image found: $VERSION_TAG_WINDOWS"
+        WINDOWS_EXISTS=true
+      else
+        echo "Windows image not found: $VERSION_TAG_WINDOWS"
+        echo "Will create Linux-only manifests"
+      fi
+      
       if [[ $CI_COMMIT_TAG == release-* ]]; then
         echo "Creating manifest for release version..."
-        # Create manifest for versioned tag
-        docker manifest create "$VERSION_TAG-multiplatform" \
-          "$VERSION_TAG" \
-          "$VERSION_TAG_WINDOWS"
-        docker manifest push "$VERSION_TAG-multiplatform"
-        
-        # Create manifest for latest tag
-        docker manifest create "${DEFAULT_NAME}:latest-multiplatform" \
-          "${DEFAULT_NAME}:latest" \
-          "${DEFAULT_NAME}:latest-windows"
-        docker manifest push "${DEFAULT_NAME}:latest-multiplatform"
+        if [ "$WINDOWS_EXISTS" = true ]; then
+          # Create multi-platform manifest (Linux + Windows)
+          docker manifest create "$VERSION_TAG-multiplatform" \
+            "$VERSION_TAG" \
+            "$VERSION_TAG_WINDOWS"
+          docker manifest push "$VERSION_TAG-multiplatform"
+          
+          docker manifest create "${DEFAULT_NAME}:latest-multiplatform" \
+            "${DEFAULT_NAME}:latest" \
+            "${DEFAULT_NAME}:latest-windows"
+          docker manifest push "${DEFAULT_NAME}:latest-multiplatform"
+          echo "✅ Created multi-platform manifests (Linux + Windows)"
+        else
+          # Create Linux-only manifests
+          docker manifest create "$VERSION_TAG-multiplatform" \
+            "$VERSION_TAG"
+          docker manifest push "$VERSION_TAG-multiplatform"
+          
+          docker manifest create "${DEFAULT_NAME}:latest-multiplatform" \
+            "${DEFAULT_NAME}:latest"
+          docker manifest push "${DEFAULT_NAME}:latest-multiplatform"
+          echo "⚠️ Created Linux-only manifests (Windows build unavailable)"
+        fi
       elif [[ $CI_COMMIT_TAG == tag-* ]]; then
         echo "Creating manifest for tag version..."
-        docker manifest create "$VERSION_TAG-multiplatform" \
-          "$VERSION_TAG" \
-          "$VERSION_TAG_WINDOWS"
-        docker manifest push "$VERSION_TAG-multiplatform"
+        if [ "$WINDOWS_EXISTS" = true ]; then
+          # Create multi-platform manifest (Linux + Windows)
+          docker manifest create "$VERSION_TAG-multiplatform" \
+            "$VERSION_TAG" \
+            "$VERSION_TAG_WINDOWS"
+          docker manifest push "$VERSION_TAG-multiplatform"
+          echo "✅ Created multi-platform manifest (Linux + Windows)"
+        else
+          # Create Linux-only manifest
+          docker manifest create "$VERSION_TAG-multiplatform" \
+            "$VERSION_TAG"
+          docker manifest push "$VERSION_TAG-multiplatform"
+          echo "⚠️ Created Linux-only manifest (Windows build unavailable)"
+        fi
       fi
   rules:
     - if: $CI_COMMIT_TAG
