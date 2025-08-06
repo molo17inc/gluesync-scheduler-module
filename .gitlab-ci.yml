@@ -167,8 +167,8 @@ deploy-windows:
     GIT_STRATEGY: clone
   before_script:
     - echo "Preparing Windows build environment..."
-    - git submodule init
-    - git submodule update
+    - echo "Repository already cloned by GitLab Runner"
+    - dir
   script:
     - echo "Building Windows Docker image..."
     
