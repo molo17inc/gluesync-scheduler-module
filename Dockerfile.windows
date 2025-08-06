@@ -16,59 +16,13 @@
 
 # Copyright (C) 2025 MOLO17. All rights reserved.
 
-# Build stage for SDK installation
-FROM mcr.microsoft.com/powershell:lts-windowsservercore-ltsc2022 AS builder
-
-# Set working directory
-WORKDIR C:\build
-
-# Install Python 3.11 using direct download (more reliable than Chocolatey)
-RUN powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'C:\python-installer.exe'"
-RUN powershell -Command "Start-Process -FilePath 'C:\python-installer.exe' -ArgumentList '/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_test=0' -Wait"
-RUN powershell -Command "Remove-Item 'C:\python-installer.exe' -Force"
-
-# Add Python to PATH
-RUN setx PATH "%PATH%;C:\Python311;C:\Python311\Scripts" /M
-
-# Set environment variables for Python
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Copy only the SDK submodule
-COPY ./gluesync-sdk ./gluesync-sdk
-
-# Install specific websockets version first to avoid compatibility issues
-RUN python -m pip install --upgrade pip wheel setuptools
-RUN python -m pip install websockets==11.0.3
-
-# Install the SDK
-RUN cd ./gluesync-sdk && python -m pip install -e .
-
-# Create a directory for the installed packages
-RUN mkdir C:\wheels
-
-# Copy the installed SDK packages
-RUN powershell -Command \
-    "Get-ChildItem -Path 'C:\Python311\Lib\site-packages' -Recurse -Include '*gluesync*', '*twofish*' | \
-    Compress-Archive -DestinationPath 'C:\wheels\gluesync-sdk.zip'"
-
-# Final stage
-FROM mcr.microsoft.com/powershell:lts-windowsservercore-ltsc2022
+# Use Python Windows image (has Python pre-installed)
+FROM python:3.11-windowsservercore-ltsc2022
 
 # Set working directory
 WORKDIR C:\app
 
-# Install Python 3.11 using direct download (more reliable than Chocolatey)
-RUN powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'C:\python-installer.exe'"
-RUN powershell -Command "Start-Process -FilePath 'C:\python-installer.exe' -ArgumentList '/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_test=0' -Wait"
-RUN powershell -Command "Remove-Item 'C:\python-installer.exe' -Force"
-
-# Add Python to PATH
-RUN setx PATH "%PATH%;C:\Python311;C:\Python311\Scripts" /M
-
-# Set environment variables
+# Set environment variables for Python
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
@@ -83,14 +37,18 @@ RUN mkdir C:\opt\gluesync\data
 RUN mkdir C:\app\data
 RUN mkdir C:\app\logs
 
-# Copy the SDK from builder stage
-COPY --from=builder C:\wheels\gluesync-sdk.zip C:\temp\gluesync-sdk.zip
-RUN powershell -Command "Expand-Archive -Path 'C:\temp\gluesync-sdk.zip' -DestinationPath 'C:\Python311\Lib\site-packages'"
+# Copy only the SDK submodule first
+COPY ./gluesync-sdk ./gluesync-sdk
+
+# Install specific websockets version first to avoid compatibility issues
+RUN python -m pip install --upgrade pip wheel setuptools
+RUN python -m pip install websockets==11.0.3
+
+# Install the SDK
+RUN cd ./gluesync-sdk && python -m pip install -e .
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN python -m pip install --upgrade pip
-RUN python -m pip install websockets==11.0.3
 RUN python -m pip install -r requirements.txt
 
 # Copy application code
@@ -123,11 +81,11 @@ ENV TMP=C:\temp
 # Expose port
 EXPOSE 8000
 
-# Health check
+# Health check using Python instead of PowerShell
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:8000/health' -UseBasicParsing | Out-Null; exit 0 } catch { exit 1 }"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-# Create entrypoint script
+# Create entrypoint script using echo commands
 RUN echo @echo off > entrypoint.bat && \
     echo echo Starting Gluesync Scheduler Module... >> entrypoint.bat && \
     echo python run_scheduler.py >> entrypoint.bat
