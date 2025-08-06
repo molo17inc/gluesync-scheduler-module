@@ -169,9 +169,10 @@ deploy-windows:
     - echo "Preparing Windows build environment..."
     - echo "Repository already cloned by GitLab Runner"
     - dir
-    - echo "Installing Docker CLI..."
-    - choco install docker-cli -y
-    - refreshenv
+    - echo "Downloading Docker CLI..."
+    - Invoke-WebRequest -Uri "https://download.docker.com/win/static/stable/x86_64/docker-24.0.7.zip" -OutFile "docker.zip"
+    - Expand-Archive -Path "docker.zip" -DestinationPath "C:\temp"
+    - Copy-Item "C:\temp\docker\docker.exe" -Destination "C:\Windows\System32\"
     - echo "Docker CLI installation complete"
     - docker --version
   script:
