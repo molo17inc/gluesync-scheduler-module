@@ -23,8 +23,16 @@
 
 import os
 import logging
-from pathlib import Path
-from dotenv import load_dotenv
+from typing import Optional
+from zoneinfo import ZoneInfo
+from gluesync_scheduler.utils.path_utils import (
+    get_platform_specific_path,
+    get_safe_sqlite_url,
+    get_log_directory,
+    get_data_directory,
+    get_gluesync_config_path,
+    normalize_path
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -50,8 +58,10 @@ class Settings:
     HOST = os.getenv('HOST', '0.0.0.0')
     PORT = int(os.getenv('PORT', '8000'))
     
-    # Database settings
-    DATA_DIR = os.getenv('DATA_DIR', './data')
+    # Database settings - use cross-platform paths
+    _default_db_path = os.path.join(get_data_directory(), 'scheduler.db')
+    DB_URL = os.getenv('DB_URL', get_safe_sqlite_url(_default_db_path))
+    DATA_DIR = os.getenv('DATA_DIR', get_data_directory())
     
     # Ensure we have an absolute path for the database
     if os.getenv('DB_URL'):
@@ -78,20 +88,23 @@ class Settings:
     SSL_ENABLED = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
     SSL_SKIP_VERIFY = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
     
-    # Gluesync SDK settings
-    GLUESYNC_LICENSE_FILE = os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')
+    # Gluesync SDK settings - use cross-platform paths
+    _gluesync_config_dir = get_gluesync_config_path()
+    GLUESYNC_LICENSE_FILE = os.getenv('GLUESYNC_LICENSE_FILE', 
+                                     os.path.join(_gluesync_config_dir, 'gs-license.dat'))
     GLUESYNC_MODULE_TAG = os.getenv('GLUESYNC_MODULE_TAG', 'chronos')
-    GLUESYNC_SECURITY_CONFIG = os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')
+    GLUESYNC_SECURITY_CONFIG = os.getenv('GLUESYNC_SECURITY_CONFIG', 
+                                        os.path.join(_gluesync_config_dir, 'security-config.json'))
     
-    # Logging settings
+    # Logging settings - use cross-platform paths
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
-    LOG_DIR = os.getenv('LOG_DIR', './logs')
+    LOG_DIR = os.getenv('LOG_DIR', get_log_directory())
     DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
     
-    # Cron settings
+    # Cron settings - use cross-platform paths
     # Use current user for crontab by default (True), or specific user if provided
     CRONTAB_USER = os.getenv('CRONTAB_USER', '')
-    CRON_LOG_DIR = os.getenv('CRON_LOG_DIR', './logs')
+    CRON_LOG_DIR = os.getenv('CRON_LOG_DIR', get_log_directory())
 
 
 settings = Settings()

@@ -1,0 +1,143 @@
+# This file is part of Gluesync Scheduler Module (aka Chronos).
+# Gluesync Scheduler Module (aka Chronos) is dual-licensed under the following licenses:
+
+# 1. GNU General Public License (GPL) Version 3
+#    You may use, modify, and distribute this software under the terms of the GPL v3.
+#    See the LICENSE-GPL file or <http://www.gnu.org/licenses/gpl-3.0.html> for details.
+#    This option is available at no cost, but any derivative works must also be licensed under GPL v3.
+# 2. MOLO17 Commercial License
+#    Alternatively, you may use this software under the MOLO17 Commercial License,
+#    which includes a warranty and permits proprietary use. Contact MOLO17 at info@molo17.com
+#    for licensing terms and conditions.
+
+# You must choose one of these licenses to use this software. Using this software implies
+# acceptance of one of these licenses. See the accompanying LICENSE files or contact
+# MOLO17 for more information.
+
+# Copyright (C) 2025 MOLO17. All rights reserved.
+
+# Build stage for SDK installation
+FROM mcr.microsoft.com/windows/servercore:ltsc2022 AS builder
+
+# Set working directory
+WORKDIR C:\build
+
+# Install Python 3.11 using Chocolatey
+RUN powershell -Command \
+    Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+RUN choco install python311 -y --no-progress
+RUN choco install git -y --no-progress
+
+# Add Python to PATH
+RUN setx PATH "%PATH%;C:\Python311;C:\Python311\Scripts" /M
+
+# Set environment variables for Python
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Copy only the SDK submodule
+COPY ./gluesync-sdk ./gluesync-sdk
+
+# Install specific websockets version first to avoid compatibility issues
+RUN python -m pip install --upgrade pip wheel setuptools
+RUN python -m pip install websockets==11.0.3
+
+# Install the SDK
+RUN cd ./gluesync-sdk && python -m pip install -e .
+
+# Create a directory for the installed packages
+RUN mkdir C:\wheels
+
+# Copy the installed SDK packages
+RUN powershell -Command \
+    "Get-ChildItem -Path 'C:\Python311\Lib\site-packages' -Recurse -Include '*gluesync*', '*twofish*' | \
+    Compress-Archive -DestinationPath 'C:\wheels\gluesync-sdk.zip'"
+
+# Final stage
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+# Set working directory
+WORKDIR C:\app
+
+# Install Python 3.11 using Chocolatey
+RUN powershell -Command \
+    Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+RUN choco install python311 -y --no-progress
+
+# Add Python to PATH
+RUN setx PATH "%PATH%;C:\Python311;C:\Python311\Scripts" /M
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Set default Gluesync paths for Windows
+ENV GLUESYNC_LICENSE_FILE=C:\opt\gluesync\data\gs-license.dat
+ENV GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\data\security-config.json
+
+# Create necessary directories
+RUN mkdir C:\opt\gluesync\data
+RUN mkdir C:\app\data
+RUN mkdir C:\app\logs
+
+# Copy the SDK from builder stage
+COPY --from=builder C:\wheels\gluesync-sdk.zip C:\temp\gluesync-sdk.zip
+RUN powershell -Command "Expand-Archive -Path 'C:\temp\gluesync-sdk.zip' -DestinationPath 'C:\Python311\Lib\site-packages'"
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN python -m pip install --upgrade pip
+RUN python -m pip install websockets==11.0.3
+RUN python -m pip install -r requirements.txt
+
+# Copy application code
+COPY gluesync_scheduler/ ./gluesync_scheduler/
+COPY main.py .
+COPY run_scheduler.py .
+COPY setup.py .
+COPY migrations/ ./migrations/
+
+# Copy configuration files
+COPY gs-license.dat C:\opt\gluesync\data\gs-license.dat
+COPY security-config.json C:\opt\gluesync\data\security-config.json
+
+# Set default environment variables for Windows
+ENV DB_URL=sqlite:///C:/app/data/scheduler.db
+ENV LOG_DIR=C:\app\logs
+ENV CRON_LOG_DIR=C:\app\logs
+ENV DATA_DIR=C:\app\data
+ENV HOST=0.0.0.0
+ENV PORT=8000
+ENV SSL_ENABLED=false
+ENV GLUESYNC_MODULE_TAG=scheduler-module
+ENV GLUESYNC_USE_SSL=false
+
+# Windows-specific path environment variables
+ENV PYTHONPATH=C:\app
+ENV TEMP=C:\temp
+ENV TMP=C:\temp
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:8000/health' -UseBasicParsing | Out-Null; exit 0 } catch { exit 1 }"
+
+# Create entrypoint script
+RUN echo @echo off > entrypoint.bat && \
+    echo echo Starting Gluesync Scheduler Module... >> entrypoint.bat && \
+    echo python run_scheduler.py >> entrypoint.bat
+
+# Set entrypoint
+ENTRYPOINT ["entrypoint.bat"]
