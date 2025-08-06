@@ -162,7 +162,9 @@ deploy-windows:
   tags:
     - windows-runner-hq
   allow_failure: true
-  image: mcr.microsoft.com/windows/servercore:ltsc2022
+  image: mcr.microsoft.com/powershell:lts-windowsservercore-ltsc2022
+  variables:
+    GIT_STRATEGY: clone
   before_script:
     - echo "Preparing Windows build environment..."
     - git submodule init
