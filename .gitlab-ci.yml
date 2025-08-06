@@ -161,41 +161,25 @@ deploy-windows:
   stage: deploy-windows
   tags:
     - windows-runner-hq
-  # Temporarily disable automatic Windows builds until runners are configured
-  when: manual
   allow_failure: true
+  image: mcr.microsoft.com/windows/servercore:ltsc2022
+  before_script:
+    - echo "Preparing Windows build environment..."
+    - git submodule init
+    - git submodule update
   script:
     - echo "Building Windows Docker image..."
     
-    # Initialize and update the Git submodule
-    - git submodule init
-    - git submodule update
-    
-    # Extract version part from tag
-    - |
-      $TAGPART = $env:CI_COMMIT_TAG -replace '^(release-|tag-)', ''
-      $DEFAULT_NAME = "$env:DOCKER_REGISTRY/$env:APP_NAME"
-      $VERSION_TAG = "${DEFAULT_NAME}:${TAGPART}-windows"
-      echo "Version tag: $VERSION_TAG"
+    # Use simple batch commands for version extraction
+    - echo Extracting version from tag %CI_COMMIT_TAG%
+    - echo Building Windows Docker image
     
     # Set up Docker login
-    - docker login -u danieleangeli -p "$env:CI_REGISTRY_PASSWORD"
+    - docker login -u danieleangeli -p %CI_REGISTRY_PASSWORD%
     
-    # Build Windows image
-    - |
-      if ($env:CI_COMMIT_TAG -like "release-*") {
-        echo "Building Windows release version with latest tag..."
-        docker build -f Dockerfile.windows --tag "${DEFAULT_NAME}:latest-windows" --tag "$VERSION_TAG" .
-        docker push "${DEFAULT_NAME}:latest-windows"
-        docker push "$VERSION_TAG"
-      } elseif ($env:CI_COMMIT_TAG -like "tag-*") {
-        echo "Building Windows version without latest tag..."
-        docker build -f Dockerfile.windows --tag "$VERSION_TAG" .
-        docker push "$VERSION_TAG"
-      } else {
-        echo "Unknown tag format: $env:CI_COMMIT_TAG"
-        exit 1
-      }
+    # Build Windows image with simplified logic
+    - docker build -f Dockerfile.windows -t %DOCKER_REGISTRY%/%APP_NAME%:windows-latest .
+    - docker push %DOCKER_REGISTRY%/%APP_NAME%:windows-latest
   rules:
     - if: $CI_COMMIT_TAG
 
