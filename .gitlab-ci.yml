@@ -165,6 +165,7 @@ deploy-windows:
   image: mcr.microsoft.com/powershell:lts-windowsservercore-ltsc2022
   variables:
     GIT_STRATEGY: clone
+    DOCKER_HOST: tcp://host.docker.internal:2375
   before_script:
     - echo "Preparing Windows build environment..."
     - echo "Repository already cloned by GitLab Runner"
@@ -175,6 +176,8 @@ deploy-windows:
     - Copy-Item "C:\temp\docker\docker.exe" -Destination "C:\Windows\System32\"
     - echo "Docker CLI installation complete"
     - docker --version
+    - echo "Testing Docker daemon connection..."
+    - docker info
   script:
     - echo "Building Windows Docker image..."
     
