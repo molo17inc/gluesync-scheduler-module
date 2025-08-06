@@ -169,6 +169,11 @@ deploy-windows:
     - echo "Preparing Windows build environment..."
     - echo "Repository already cloned by GitLab Runner"
     - dir
+    - echo "Installing Docker CLI..."
+    - choco install docker-cli -y
+    - refreshenv
+    - echo "Docker CLI installation complete"
+    - docker --version
   script:
     - echo "Building Windows Docker image..."
     
