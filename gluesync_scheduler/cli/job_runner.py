@@ -51,13 +51,11 @@ except Exception as e:
     print(f"Error initializing database schema: {e}")
 
 # Configure logging
-# Determine if we're running in Docker or locally
-if os.path.exists('/app'):
-    # Docker environment
-    log_dir = "/app/logs"
-else:
-    # Local environment
-    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
+# Use cross-platform path utilities
+from gluesync_scheduler.utils.path_utils import get_log_directory, get_project_root
+
+# Get the appropriate log directory for the current platform
+log_dir = get_log_directory()
 
 # Create logs directory
 try:
