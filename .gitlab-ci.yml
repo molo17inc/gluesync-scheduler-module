@@ -194,9 +194,8 @@ deploy-windows:
     - |
       # Try Docker login with error handling
       Write-Host "Attempting Docker login..."
-      $loginResult = echo $env:CI_REGISTRY_PASSWORD | docker login -u $env:CI_REGISTRY_USER --password-stdin $env:CI_REGISTRY 2>&1
+      echo $env:CI_REGISTRY_PASSWORD | docker login -u $env:CI_REGISTRY_USER --password-stdin $env:CI_REGISTRY
       if ($LASTEXITCODE -ne 0) {
-        Write-Host "Login output: $loginResult"
         Write-Error "Docker login failed with exit code: $LASTEXITCODE"
         Write-Host "Please check if CI_REGISTRY_USER and CI_REGISTRY_PASSWORD are properly configured"
         exit 1
