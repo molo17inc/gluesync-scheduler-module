@@ -170,23 +170,23 @@ deploy-windows:
     - pwsh -Command "Invoke-WebRequest -Uri 'https://download.docker.com/win/static/stable/x86_64/docker-24.0.7.zip' -OutFile 'docker.zip'"
     - pwsh -Command "Expand-Archive -Path 'docker.zip' -DestinationPath 'C:\temp'"
     - pwsh -Command "Copy-Item 'C:\temp\docker\docker.exe' -Destination 'C:\Windows\System32\'"
-    - echo "Verifying Docker CLI installation..."
-    - docker --version || echo "Docker not found in PATH"
-    - where docker || echo "Docker location:"
+    - echo "Adding Docker to PATH and verifying installation..."
+    - pwsh -Command "$env:PATH += ';C:\Windows\System32'"
+    - pwsh -Command "docker --version"
     # Set Docker host to connect to the host daemon
-    - set DOCKER_HOST=tcp://host.docker.internal:2375
-    - echo "DOCKER_HOST set to %DOCKER_HOST%"
+    - pwsh -Command "$env:DOCKER_HOST = 'tcp://host.docker.internal:2375'"
+    - pwsh -Command "echo \"DOCKER_HOST set to $env:DOCKER_HOST\""
     # Debug: Check if we can reach the Docker daemon
     - ping host.docker.internal || echo "Cannot ping host.docker.internal"
     - nslookup host.docker.internal || echo "Cannot resolve host.docker.internal"
     # Test Docker connectivity
-    - docker version || echo "Docker command failed"
-    - docker info || echo "Cannot connect to Docker daemon"
+    - pwsh -Command "docker version" || echo "Docker command failed"
+    - pwsh -Command "docker info" || echo "Cannot connect to Docker daemon"
     # Additional Docker connectivity tests
     - echo "Testing Docker daemon connectivity..."
-    - docker ps 2>nul || echo "Cannot list containers - Docker daemon may not be accessible"
-    - echo "Current DOCKER_HOST %DOCKER_HOST%"
-    - echo "Testing connection to %DOCKER_HOST%..."
+    - pwsh -Command "docker ps 2>&1" || echo "Cannot list containers - Docker daemon may not be accessible"
+    - pwsh -Command "echo \"Current DOCKER_HOST $env:DOCKER_HOST\""
+    - echo "Testing connection to $env:DOCKER_HOST..."
     - powershell -Command "Test-NetConnection -ComputerName host.docker.internal -Port 2375" || echo "Cannot connect to Docker daemon on port 2375"
   script:
     - echo "Building Windows Docker image..."
@@ -197,32 +197,24 @@ deploy-windows:
     - echo DOCKER_REGISTRY is %DOCKER_REGISTRY%
     - echo APP_NAME is %APP_NAME%
     
-    # Extract version part from tag (similar to Linux job)
+    # Extract version part from tag (similar to Linux job) using PowerShell
     - echo Extracting tag part from %CI_COMMIT_TAG%
-    - for /f "tokens=*" %%a in ('echo %CI_COMMIT_TAG% ^| findstr /r "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*.*"') do set TAGPART=%%a
+    - pwsh -Command "$tag = '%CI_COMMIT_TAG%' -match '[0-9]+\.[0-9]+\.[0-9]+'; if ($matches) { $env:TAGPART = $matches[0] } else { $env:TAGPART = '' }"
     - echo Tag part is %TAGPART%
     - set DEFAULT_NAME=%DOCKER_REGISTRY%/%APP_NAME%
     - set VERSION_TAG=%DEFAULT_NAME%:%TAGPART%
     - set VERSION_TAG_WINDOWS=%DEFAULT_NAME%:%TAGPART%-windows
     
     # Set up Docker login
-    - docker login -u danieleangeli -p %CI_REGISTRY_PASSWORD%
+    - pwsh -Command "docker login -u danieleangeli -p '%CI_REGISTRY_PASSWORD%'"
     
     # Check if it's a release tag or regular tag and build accordingly
-    - echo Building Windows Docker image based on tag format
-    - 'if /i "%CI_COMMIT_TAG:~0,8%"=="release-" (
-        echo "Building Windows release with latest tag..."
-        docker build -f Dockerfile.windows -t %VERSION_TAG_WINDOWS% -t %DEFAULT_NAME%:latest-windows .
-        docker push %VERSION_TAG_WINDOWS%
-        docker push %DEFAULT_NAME%:latest-windows
-      ) else if /i "%CI_COMMIT_TAG:~0,4%"=="tag-" (
-        echo "Building Windows amd64-only version without latest tag..."
-        docker build -f Dockerfile.windows -t %VERSION_TAG_WINDOWS% .
-        docker push %VERSION_TAG_WINDOWS%
-      ) else (
-        echo "Unknown tag format: %CI_COMMIT_TAG%"
-        exit /b 1
-      )'
+    - 'pwsh -Command "if (\"$env:CI_COMMIT_TAG\".StartsWith(\"release-\")) { Write-Host \"Building Windows release with latest tag...\"; exit 0 } elseif (\"$env:CI_COMMIT_TAG\".StartsWith(\"tag-\")) { Write-Host \"Building Windows amd64-only version without latest tag...\"; exit 0 } else { Write-Host \"Unknown tag format: $env:CI_COMMIT_TAG\"; exit 1 }"'
+    - 'pwsh -Command "if (\"$env:CI_COMMIT_TAG\".StartsWith(\"release-\")) { docker build -f Dockerfile.windows -t \"$env:VERSION_TAG_WINDOWS\" -t \"$env:DEFAULT_NAME:latest-windows\" . }"'
+    - 'pwsh -Command "if (\"$env:CI_COMMIT_TAG\".StartsWith(\"release-\")) { docker push \"$env:VERSION_TAG_WINDOWS\" }"'
+    - 'pwsh -Command "if (\"$env:CI_COMMIT_TAG\".StartsWith(\"release-\")) { docker push \"$env:DEFAULT_NAME:latest-windows\" }"'
+    - 'pwsh -Command "if (\"$env:CI_COMMIT_TAG\".StartsWith(\"tag-\")) { docker build -f Dockerfile.windows -t \"$env:VERSION_TAG_WINDOWS\" . }"'
+    - 'pwsh -Command "if (\"$env:CI_COMMIT_TAG\".StartsWith(\"tag-\")) { docker push \"$env:VERSION_TAG_WINDOWS\" }"'
   rules:
     - if: $CI_COMMIT_TAG
 
