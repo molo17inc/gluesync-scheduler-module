@@ -161,50 +161,51 @@ deploy-windows:
   stage: deploy
   tags:
     - windows-runner-hq
-  image: mcr.microsoft.com/powershell:lts-windowsservercore-ltsc2022
+  image: docker:24.0.7
+  services:
+    - name: docker:24.0.7-dind
+      command: ["--tls=false", "--host=tcp://0.0.0.0:2375"]
   variables:
-    GIT_STRATEGY: clone
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
   before_script:
-    - echo "Installing Docker CLI for Windows..."
-    - pwsh -Command "Invoke-WebRequest -Uri 'https://download.docker.com/win/static/stable/x86_64/docker-24.0.7.zip' -OutFile 'docker.zip'"
-    - pwsh -Command "Expand-Archive -Path 'docker.zip' -DestinationPath 'C:\temp'"
-    - pwsh -Command "Copy-Item 'C:\temp\docker\docker.exe' -Destination 'C:\Windows\System32\'"
-    - echo "Verifying Docker CLI installation..."
-    - pwsh -Command "docker --version"
-    # Set Docker host to connect to the host daemon
-    - pwsh -Command "$env:DOCKER_HOST = 'tcp://host.docker.internal:2375'; Write-Host 'DOCKER_HOST set to $env:DOCKER_HOST'"
-    # Debug: Check if we can reach the Docker daemon
-    - ping host.docker.internal || echo "Cannot ping host.docker.internal"
-    - nslookup host.docker.internal || echo "Cannot resolve host.docker.internal"
-    # Test Docker connectivity
-    - pwsh -Command "docker version" || echo "Docker command failed"
-    - pwsh -Command "docker info" || echo "Cannot connect to Docker daemon"
-    # Additional Docker connectivity tests
-    - echo "Testing Docker daemon connectivity..."
-    - pwsh -Command "docker ps 2>&1" || echo "Cannot list containers - Docker daemon may not be accessible"
-    - echo "Testing connection to $env:DOCKER_HOST..."
-    - powershell -Command "Test-NetConnection -ComputerName host.docker.internal -Port 2375" || echo "Cannot connect to Docker daemon on port 2375"
+    - docker version
   script:
     - echo "Building Windows Docker image..."
-    
-    # Debug environment variables
-    - pwsh -Command "Write-Host \"CI_COMMIT_TAG is $env:CI_COMMIT_TAG\""
-    - pwsh -Command "Write-Host \"CI_REGISTRY_PASSWORD is $env:CI_REGISTRY_PASSWORD\""
-    - pwsh -Command "Write-Host \"DOCKER_REGISTRY is $env:DOCKER_REGISTRY\""
-    - pwsh -Command "Write-Host \"APP_NAME is $env:APP_NAME\""
-    
-    # Extract version part from tag (similar to Linux job) using PowerShell
-    - pwsh -Command "Write-Host \"Extracting tag part from $env:CI_COMMIT_TAG\""
-    - pwsh -Command "$tag = $env:CI_COMMIT_TAG -match '[0-9]+\.[0-9]+\.[0-9]+'; if ($matches) { $env:TAGPART = $matches[0] } else { $env:TAGPART = '' }"
-    - pwsh -Command "Write-Host \"Tag part is $env:TAGPART\""
-    - pwsh -Command "$env:DEFAULT_NAME = \"$env:DOCKER_REGISTRY/$env:APP_NAME\""
-    - pwsh -Command "$env:VERSION_TAG = \"$env:DEFAULT_NAME`:$env:TAGPART\""
-    
-    # Set up Docker login
-    - pwsh -Command "docker login -u 'danieleangeli' -p '$env:CI_REGISTRY_PASSWORD'"
-    
-    # Check if it's a release tag or regular tag and build accordingly
-    - 'pwsh -Command "if (\"$env:CI_COMMIT_TAG\".StartsWith(\"release-\")) { Write-Host \"Building Windows release with latest tag...\"; docker build --platform windows/amd64 -f Dockerfile.windows -t \"$env:VERSION_TAG\" --build-arg TARGETPLATFORM=windows/amd64 .; docker push \"$env:VERSION_TAG\"; docker tag \"$env:VERSION_TAG\" \"$env:DEFAULT_NAME:latest\"; docker push \"$env:DEFAULT_NAME:latest\" } elseif (\"$env:CI_COMMIT_TAG\".StartsWith(\"tag-\")) { Write-Host \"Building Windows amd64-only version without latest tag...\"; docker build --platform windows/amd64 -f Dockerfile.windows -t \"$env:VERSION_TAG\" --build-arg TARGETPLATFORM=windows/amd64 .; docker push \"$env:VERSION_TAG\" } else { Write-Host \"Unknown tag format: $env:CI_COMMIT_TAG\"; exit 1 }"'
+    - |
+      # Extract version part from tag
+      TAGPART=$(echo $CI_COMMIT_TAG | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+      echo "Tag part is $TAGPART"
+      DEFAULT_NAME=$DOCKER_REGISTRY/$APP_NAME
+      VERSION_TAG="$DEFAULT_NAME:$TAGPART"
+      echo "VERSION_TAG is $VERSION_TAG"
+      
+      # Set up Docker login
+      echo "$CI_REGISTRY_PASSWORD" | docker login -u danieleangeli --password-stdin
+      
+      # Build and push based on tag type
+      if [[ $CI_COMMIT_TAG == release-* ]]; then
+        echo "Building Windows release with latest tag..."
+        docker buildx create --use
+        docker buildx build --platform windows/amd64 \
+          --file Dockerfile.windows \
+          --tag $VERSION_TAG \
+          --tag $DEFAULT_NAME:latest \
+          --push \
+          .
+      elif [[ $CI_COMMIT_TAG == tag-* ]]; then
+        echo "Building Windows amd64-only version without latest tag..."
+        docker buildx create --use
+        docker buildx build --platform windows/amd64 \
+          --file Dockerfile.windows \
+          --tag $VERSION_TAG \
+          --push \
+          .
+      else
+        echo "Unknown tag format: $CI_COMMIT_TAG"
+        exit 1
+      fi
   rules:
     - if: $CI_COMMIT_TAG
 
