@@ -127,12 +127,7 @@ deploy-windows:
       Write-Host "Using Dockerfile: Dockerfile.windows"
       
       try {
-        docker build `
-          --platform windows/amd64 `
-          --file Dockerfile.windows `
-          --tag "${env:VERSION_TAG_WINDOWS}" `
-          --build-arg MODULE_VERSION="$env:TAG_PART" `
-          .
+        docker build --file Dockerfile.windows --tag "${env:VERSION_TAG_WINDOWS}" .
         Write-Host "✅ Docker build completed successfully"
       } catch {
         Write-Error "❌ Docker build failed: $_"
@@ -143,9 +138,9 @@ deploy-windows:
     - |
       Write-Host "Pushing Windows Docker image..."
       try {
-        docker push "$env:VERSION_TAG_WINDOWS"
+        docker push "${env:VERSION_TAG_WINDOWS}"
         Write-Host "✅ Docker push completed successfully"
-        Write-Host "Windows image available at: $env:VERSION_TAG_WINDOWS"
+        Write-Host "Windows image available at: ${env:VERSION_TAG_WINDOWS}"
       } catch {
         Write-Error "❌ Docker push failed: $_"
         exit 1
@@ -157,7 +152,7 @@ deploy-windows:
         Write-Host "Tagging as latest-windows..."
         $LATEST_WINDOWS = "${env:IMAGE_NAME}:latest-windows"
         try {
-          docker tag "$env:VERSION_TAG_WINDOWS" "$LATEST_WINDOWS"
+          docker tag "${env:VERSION_TAG_WINDOWS}" "$LATEST_WINDOWS"
           docker push "$LATEST_WINDOWS"
           Write-Host "✅ Latest-windows tag pushed successfully"
         } catch {
