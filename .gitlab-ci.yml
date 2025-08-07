@@ -170,11 +170,39 @@ deploy-windows:
   variables:
     GIT_STRATEGY: clone
   script:
-    - Write-Host "Building Windows Docker image..."
+    - |
+      Write-Host "Building Windows Docker image..."
     
     # Set up Docker login to GitLab Container Registry
-    - Write-Host "Logging into GitLab Container Registry..."
-    - $env:CI_REGISTRY_PASSWORD | docker login -u $env:CI_REGISTRY_USER --password-stdin $env:CI_REGISTRY
+    - |
+      Write-Host "Logging into GitLab Container Registry..."
+      Write-Host "Registry: $env:CI_REGISTRY"
+      Write-Host "User: $env:CI_REGISTRY_USER"
+      Write-Host "Project: $env:CI_PROJECT_PATH"
+      Write-Host "Registry Image: $env:CI_REGISTRY_IMAGE"
+      
+      # Check if variables are available
+      if (-not $env:CI_REGISTRY_PASSWORD) {
+        Write-Error "CI_REGISTRY_PASSWORD is not set"
+        exit 1
+      }
+      
+      if (-not $env:CI_REGISTRY_USER) {
+        Write-Error "CI_REGISTRY_USER is not set"
+        exit 1
+      }
+    - |
+      # Try Docker login with error handling
+      Write-Host "Attempting Docker login..."
+      $loginResult = echo $env:CI_REGISTRY_PASSWORD | docker login -u $env:CI_REGISTRY_USER --password-stdin $env:CI_REGISTRY 2>&1
+      if ($LASTEXITCODE -ne 0) {
+        Write-Host "Login output: $loginResult"
+        Write-Error "Docker login failed with exit code: $LASTEXITCODE"
+        Write-Host "Please check if CI_REGISTRY_USER and CI_REGISTRY_PASSWORD are properly configured"
+        exit 1
+      } else {
+        Write-Host "Docker login successful"
+      }
     
     # Build Windows image with versioned tag
     - |
