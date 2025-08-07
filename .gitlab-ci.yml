@@ -162,79 +162,89 @@ deploy-windows:
   tags:
     - windows-runner-hq
   allow_failure: true
-  image: docker:27.3.1
-  services:
-    - name: docker:dind
-      variables:
-        DOCKER_TLS_CERTDIR: ""
   variables:
     GIT_STRATEGY: clone
   script:
+    # Stop on first error
+    - $ErrorActionPreference = "Stop"
+    
+    # Docker login with proper error handling
+    - |
+      Write-Host "Logging into Docker registry..."
+      try {
+        docker login -u "$env:CI_REGISTRY_USER" -p "$env:CI_REGISTRY_PASSWORD" "$env:CI_REGISTRY"
+        Write-Host "✅ Docker login successful"
+      } catch {
+        Write-Error "❌ Docker login failed: $_"
+        exit 1
+      }
+    
+    # Extract version information from tag
+    - |
+      Write-Host "Processing tag: $env:CI_COMMIT_TAG"
+      $TAG_PART = $env:CI_COMMIT_TAG -replace '^(release-|tag-)', ''
+      $IMAGE_NAME = "$env:CI_REGISTRY_IMAGE/gluesync-scheduler-module"
+      $VERSION_TAG = "${IMAGE_NAME}:${TAG_PART}"
+      $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-windows"
+      
+      Write-Host "Image name: $IMAGE_NAME"
+      Write-Host "Version tag: $VERSION_TAG_WINDOWS"
+      
+      # Set environment variables for use in build
+      $env:IMAGE_NAME = $IMAGE_NAME
+      $env:VERSION_TAG_WINDOWS = $VERSION_TAG_WINDOWS
+      $env:TAG_PART = $TAG_PART
+    
+    # Initialize Git submodules for gluesync-sdk
+    - |
+      Write-Host "Initializing Git submodules..."
+      git submodule init
+      git submodule update
+      Write-Host "✅ Submodules initialized"
+    
+    # Build Windows Docker image
     - |
       Write-Host "Building Windows Docker image..."
+      Write-Host "Using Dockerfile: Dockerfile.windows"
+      
+      try {
+        docker build `
+          --platform windows/amd64 `
+          --file Dockerfile.windows `
+          --tag "$env:VERSION_TAG_WINDOWS" `
+          --build-arg MODULE_VERSION="$env:TAG_PART" `
+          .
+        Write-Host "✅ Docker build completed successfully"
+      } catch {
+        Write-Error "❌ Docker build failed: $_"
+        exit 1
+      }
     
-    # Set up Docker login to GitLab Container Registry
+    # Push Windows Docker image
     - |
-      Write-Host "Logging into GitLab Container Registry..."
-      Write-Host "Registry: '$env:CI_REGISTRY'"
-      Write-Host "User: '$env:CI_REGISTRY_USER'"
-      Write-Host "Project: '$env:CI_PROJECT_PATH'"
-      Write-Host "Registry Image: '$env:CI_REGISTRY_IMAGE'"
-      Write-Host "Password length: $($env:CI_REGISTRY_PASSWORD.Length)"
-      
-      # Check if variables are available
-      if (-not $env:CI_REGISTRY_PASSWORD) {
-        Write-Error "CI_REGISTRY_PASSWORD is not set"
+      Write-Host "Pushing Windows Docker image..."
+      try {
+        docker push "$env:VERSION_TAG_WINDOWS"
+        Write-Host "✅ Docker push completed successfully"
+        Write-Host "Windows image available at: $env:VERSION_TAG_WINDOWS"
+      } catch {
+        Write-Error "❌ Docker push failed: $_"
         exit 1
       }
-      
-      if (-not $env:CI_REGISTRY_USER) {
-        Write-Error "CI_REGISTRY_USER is not set"
-        exit 1
-      }
-      
-      if (-not $env:CI_REGISTRY) {
-        Write-Error "CI_REGISTRY is not set"
-        exit 1
-      }
+    
+    # Tag as latest-windows for release branches
     - |
-      # Try Docker login with error handling
-      Write-Host "Attempting Docker login..."
-      
-      # Method 1: Try with Write-Output instead of echo
-      Write-Output $env:CI_REGISTRY_PASSWORD | docker login -u $env:CI_REGISTRY_USER --password-stdin $env:CI_REGISTRY
-      if ($LASTEXITCODE -eq 0) {
-        Write-Host "Docker login successful"
-      } else {
-        Write-Host "Method 1 failed, trying method 2..."
-        
-        # Method 2: Try direct parameter approach (less secure but might work)
-        docker login -u $env:CI_REGISTRY_USER -p $env:CI_REGISTRY_PASSWORD $env:CI_REGISTRY
-        if ($LASTEXITCODE -eq 0) {
-          Write-Host "Docker login successful with method 2"
-        } else {
-          Write-Error "Both Docker login methods failed with exit code: $LASTEXITCODE"
-          Write-Host "Please check if CI_REGISTRY_USER and CI_REGISTRY_PASSWORD are properly configured"
+      if ($env:CI_COMMIT_TAG -match '^release-') {
+        Write-Host "Tagging as latest-windows..."
+        $LATEST_WINDOWS = "${env:IMAGE_NAME}:latest-windows"
+        try {
+          docker tag "$env:VERSION_TAG_WINDOWS" "$LATEST_WINDOWS"
+          docker push "$LATEST_WINDOWS"
+          Write-Host "✅ Latest-windows tag pushed successfully"
+        } catch {
+          Write-Error "❌ Failed to push latest-windows tag: $_"
           exit 1
         }
-      }
-    
-    # Build Windows image with versioned tag
-    - |
-      $env:VERSION_TAG_WINDOWS = "$env:CI_REGISTRY_IMAGE`:$env:CI_COMMIT_REF_SLUG-windows"
-      $env:LATEST_TAG_WINDOWS = "$env:CI_REGISTRY_IMAGE`:latest-windows"
-      Write-Host "Building image: $env:VERSION_TAG_WINDOWS"
-    
-    # Build and push versioned Windows image
-    - docker build -f Dockerfile.windows -t $env:VERSION_TAG_WINDOWS .
-    - docker push $env:VERSION_TAG_WINDOWS
-    
-    # Also tag as latest for release tags
-    - |
-      if ($env:CI_COMMIT_TAG -like "release-*" -or $env:CI_COMMIT_TAG -like "v*") {
-        Write-Host "Tagging as latest-windows..."
-        docker tag $env:VERSION_TAG_WINDOWS $env:LATEST_TAG_WINDOWS
-        docker push $env:LATEST_TAG_WINDOWS
       }
   rules:
     - if: $CI_COMMIT_TAG
@@ -254,14 +264,14 @@ deploy-manifest:
     - echo "Creating multi-platform manifest..."
     
     # Set up Docker login
-    - docker login -u danieleangeli -p "$CI_REGISTRY_PASSWORD"
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     
     # Extract version part from tag
     - |
-      TAGPART=`echo $CI_COMMIT_TAG | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)'`
-      DEFAULT_NAME=${DOCKER_REGISTRY}/${APP_NAME}
-      VERSION_TAG="${DEFAULT_NAME}:${TAGPART}"
-      VERSION_TAG_WINDOWS="${DEFAULT_NAME}:${TAGPART}-windows"
+      TAG_PART=$(echo $CI_COMMIT_TAG | sed 's/^\(release-\|tag-\)//')
+      IMAGE_NAME="$CI_REGISTRY_IMAGE/gluesync-scheduler-module"
+      VERSION_TAG="${IMAGE_NAME}:${TAG_PART}"
+      VERSION_TAG_WINDOWS="${IMAGE_NAME}:${TAG_PART}-windows"
     
     # Check if Windows image exists and create multi-platform manifest accordingly
     - |
@@ -284,10 +294,10 @@ deploy-manifest:
             "$VERSION_TAG_WINDOWS"
           docker manifest push "$VERSION_TAG-multiplatform"
           
-          docker manifest create "${DEFAULT_NAME}:latest-multiplatform" \
-            "${DEFAULT_NAME}:latest" \
-            "${DEFAULT_NAME}:latest-windows"
-          docker manifest push "${DEFAULT_NAME}:latest-multiplatform"
+          docker manifest create "${IMAGE_NAME}:latest-multiplatform" \
+            "${IMAGE_NAME}:latest" \
+            "${IMAGE_NAME}:latest-windows"
+          docker manifest push "${IMAGE_NAME}:latest-multiplatform"
           echo "✅ Created multi-platform manifests (Linux + Windows)"
         else
           # Create Linux-only manifests
@@ -295,9 +305,9 @@ deploy-manifest:
             "$VERSION_TAG"
           docker manifest push "$VERSION_TAG-multiplatform"
           
-          docker manifest create "${DEFAULT_NAME}:latest-multiplatform" \
-            "${DEFAULT_NAME}:latest"
-          docker manifest push "${DEFAULT_NAME}:latest-multiplatform"
+          docker manifest create "${IMAGE_NAME}:latest-multiplatform" \
+            "${IMAGE_NAME}:latest"
+          docker manifest push "${IMAGE_NAME}:latest-multiplatform"
           echo "⚠️ Created Linux-only manifests (Windows build unavailable)"
         fi
       elif [[ $CI_COMMIT_TAG == tag-* ]]; then
