@@ -162,28 +162,64 @@ deploy-windows:
   tags:
     - windows-runner-hq
   allow_failure: true
-  image: mcr.microsoft.com/windows/servercore:ltsc2022
+  image: mcr.microsoft.com/powershell:lts-windowsservercore-ltsc2022
   variables:
     GIT_STRATEGY: clone
   before_script:
     - echo "Installing Docker CLI for Windows..."
-    - powershell -Command "Invoke-WebRequest -Uri 'https://download.docker.com/win/static/stable/x86_64/docker-24.0.7.zip' -OutFile 'docker.zip'"
-    - powershell -Command "Expand-Archive -Path 'docker.zip' -DestinationPath 'C:\temp'"
-    - powershell -Command "Copy-Item 'C:\temp\docker\docker.exe' -Destination 'C:\Windows\System32\'"
+    - pwsh -Command "Invoke-WebRequest -Uri 'https://download.docker.com/win/static/stable/x86_64/docker-24.0.7.zip' -OutFile 'docker.zip'"
+    - pwsh -Command "Expand-Archive -Path 'docker.zip' -DestinationPath 'C:\temp'"
+    - pwsh -Command "Copy-Item 'C:\temp\docker\docker.exe' -Destination 'C:\Windows\System32\'"
     - docker --version
+    # Set Docker host to connect to the host daemon
+    - set DOCKER_HOST=tcp://host.docker.internal:2375
+    - echo "DOCKER_HOST set to %%DOCKER_HOST%%"
+    # Debug: Check if we can reach the Docker daemon
+    - ping host.docker.internal || echo "Cannot ping host.docker.internal"
+    - nslookup host.docker.internal || echo "Cannot resolve host.docker.internal"
+    # Test Docker connectivity
+    - docker version || echo "Docker command failed"
+    - docker info || echo "Cannot connect to Docker daemon"
+    # Additional Docker connectivity tests
+    - echo "Testing Docker daemon connectivity..."
+    - docker ps 2>nul || echo "Cannot list containers - Docker daemon may not be accessible"
+    - echo "Current DOCKER_HOST %%DOCKER_HOST%%"
+    - echo "Testing connection to %%DOCKER_HOST%%..."
+    - 'powershell -Command "Test-NetConnection -ComputerName host.docker.internal -Port 2375" || echo "Cannot connect to Docker daemon on port 2375"'
   script:
     - echo "Building Windows Docker image..."
     
-    # Use simple batch commands for version extraction
-    - echo Extracting version from tag %CI_COMMIT_TAG%
-    - echo Building Windows Docker image
+    # Debug environment variables
+    - echo CI_COMMIT_TAG is %CI_COMMIT_TAG%
+    - echo CI_REGISTRY_PASSWORD is %CI_REGISTRY_PASSWORD%
+    - echo DOCKER_REGISTRY is %DOCKER_REGISTRY%
+    - echo APP_NAME is %APP_NAME%
+    
+    # Extract version part from tag (similar to Linux job)
+    - 'for /f "tokens=*" %a in (''echo %CI_COMMIT_TAG% ^| findstr /r "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*.*"'') do set TAGPART=%a'
+    - echo Tag part is %TAGPART%
+    - set DEFAULT_NAME=%DOCKER_REGISTRY%/%APP_NAME%
+    - set VERSION_TAG=%DEFAULT_NAME%:%TAGPART%
+    - set VERSION_TAG_WINDOWS=%DEFAULT_NAME%:%TAGPART%-windows
     
     # Set up Docker login
     - docker login -u danieleangeli -p %CI_REGISTRY_PASSWORD%
     
-    # Build Windows image with simplified logic
-    - docker build -f Dockerfile.windows -t %DOCKER_REGISTRY%/%APP_NAME%:windows-latest .
-    - docker push %DOCKER_REGISTRY%/%APP_NAME%:windows-latest
+    # Check if it's a release tag or regular tag and build accordingly
+    - echo Building Windows Docker image based on tag format
+    - 'if /i "%CI_COMMIT_TAG:~0,8%"=="release-" (
+        echo "Building Windows release with latest tag..."
+        docker build -f Dockerfile.windows -t %VERSION_TAG_WINDOWS% -t %DEFAULT_NAME%:latest-windows .
+        docker push %VERSION_TAG_WINDOWS%
+        docker push %DEFAULT_NAME%:latest-windows
+      ) else if /i "%CI_COMMIT_TAG:~0,4%"=="tag-" (
+        echo "Building Windows amd64-only version without latest tag..."
+        docker build -f Dockerfile.windows -t %VERSION_TAG_WINDOWS% .
+        docker push %VERSION_TAG_WINDOWS%
+      ) else (
+        echo "Unknown tag format: %CI_COMMIT_TAG%"
+        exit /b 1
+      )'
   rules:
     - if: $CI_COMMIT_TAG
 
