@@ -19,6 +19,7 @@
 stages:
   - build
   - deploy-windows
+  - deploy-manifest
 
 default:
   tags:
@@ -80,6 +81,8 @@ build:
 
 # Windows deployment jobs
 deploy-windows:
+  dependencies:
+    - build
   stage: deploy-windows
   tags:
     - windows-runner-hq
@@ -158,7 +161,7 @@ deploy-windows:
 
 # Multi-platform deployment job (combines Linux and Windows)
 deploy-manifest:
-  stage: deploy-windows
+  stage: deploy-manifest
   image: docker:latest
   services:
     - name: docker:dind
