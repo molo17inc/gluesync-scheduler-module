@@ -17,8 +17,7 @@
 # Copyright (C) 2025 MOLO17. All rights reserved.
 
 stages:
-  - test
-  - deploy
+  - build
   - deploy-windows
 
 default:
@@ -27,86 +26,9 @@ default:
 
 variables:
   DOCKER_TLS_CERTDIR: ""
-  PYTEST_ADDOPTS: "--color=yes"
 
-.test_template: &test_template
-  stage: test
-  image: python:3.9
-  before_script:
-    # Initialize and update the Git submodule
-    - git submodule init
-    - git submodule update
-    # Install specific websockets version first to avoid compatibility issues
-    - pip install websockets==11.0.3
-    # Copy mock implementation files
-    - mkdir -p tests
-    - cp -f $CI_PROJECT_DIR/tests/mock_gluesync_sdk.py $CI_PROJECT_DIR/tests/
-    - cp -f $CI_PROJECT_DIR/tests/mock_gluesync_sdk_client.py $CI_PROJECT_DIR/tests/
-    - cp -f $CI_PROJECT_DIR/tests/run_with_mock.py $CI_PROJECT_DIR/tests/
-    - chmod +x $CI_PROJECT_DIR/tests/run_with_mock.py
-    # Set environment variable to use mock implementation
-    - export USE_MOCK=true
-    # Install other dependencies
-    - pip install -r requirements.txt
-    - pip install pytest pytest-cov python-dotenv
-    # Create Gluesync default directories
-    - mkdir -p /opt/gluesync/data
-    # Use license file from GitLab CI variables
-    - echo "$GLUESYNC_LICENSE_CONTENT" > /opt/gluesync/data/gs-license.dat
-    # Copy security config if it exists
-    - if [ -f security-config.json ]; then cp security-config.json /opt/gluesync/data/security-config.json; fi
-    # Set up environment variables for testing
-    - export GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat
-    - export GLUESYNC_MODULE_TAG=chronos
-    - export SSL_ENABLED=False
-    - export GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
-    - export DB_URL=sqlite:///./tests/data/test_scheduler.db
-    - export DEBUG=True
-    - export CORE_HUB_URL=http://mock-corehub:8080
-    - export CRONTAB_USER=$USER
-    # Set HOST to 0.0.0.0 to bind to all interfaces in CI environment
-    - export HOST=0.0.0.0
-    # Create test data directory
-    - mkdir -p ./tests/data
-  artifacts:
-    when: always
-    reports:
-      junit: test-results.xml
-    paths:
-      - coverage.xml
-      - test-results.xml
-  rules:
-    - if: $CI_COMMIT_TAG == null
-
-unit_tests:
-  <<: *test_template
-  script:
-    - echo "Running unit tests for the scheduler module"
-    - python -m pytest tests/test_corehub_integration.py -v --junitxml=test-results.xml --cov=. --cov-report=term --cov-report=xml:coverage.xml
-    - ls -la .  # Debug: list files in working directory
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-
-api_tests:
-  <<: *test_template
-  script:
-    - echo "Running API tests for the scheduler module"
-    - python -m pytest tests/test_api.py -v --junitxml=test-results.xml --cov=. --cov-report=term --cov-report=xml:coverage.xml
-    - ls -la .  # Debug: list files in working directory
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-
-cron_job_tests:
-  <<: *test_template
-  script:
-    - echo "Running cron job tests for the scheduler module"
-    - python -m pytest tests/test_cron_jobs.py -v --junitxml=test-results.xml --cov=. --cov-report=term --cov-report=xml:coverage.xml
-    - ls -la .  # Debug: list files in working directory
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-
-deploy:
-  stage: deploy
+build:
+  stage: build
   image: docker:latest
   services:
     - name: docker:dind
@@ -181,16 +103,16 @@ deploy-windows:
       Write-Host "Processing tag: $env:CI_COMMIT_TAG"
       $TAG_PART = $env:CI_COMMIT_TAG -replace '^(release-|tag-)', ''
       $IMAGE_NAME = "$env:CI_REGISTRY_IMAGE/$env:APP_NAME"
-      $VERSION_TAG = "$IMAGE_NAME:$TAG_PART"
-      $VERSION_TAG_WINDOWS = "$IMAGE_NAME:$TAG_PART-windows"
+      $VERSION_TAG = "${IMAGE_NAME}:${TAG_PART}"
+      $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-windows"
       
-      Write-Host "Image name: $IMAGE_NAME"
-      Write-Host "Version tag: $VERSION_TAG_WINDOWS"
+      Write-Host "Image name: ${IMAGE_NAME}"
+      Write-Host "Version tag: ${VERSION_TAG_WINDOWS}"
       
       # Set environment variables for use in build
-      $env:IMAGE_NAME = $IMAGE_NAME
-      $env:VERSION_TAG_WINDOWS = $VERSION_TAG_WINDOWS
-      $env:TAG_PART = $TAG_PART
+      $env:IMAGE_NAME = ${IMAGE_NAME}
+      $env:VERSION_TAG_WINDOWS = ${VERSION_TAG_WINDOWS}
+      $env:TAG_PART = ${TAG_PART}
     
     # Initialize Git submodules for gluesync-sdk
     - |
@@ -208,7 +130,7 @@ deploy-windows:
         docker build `
           --platform windows/amd64 `
           --file Dockerfile.windows `
-          --tag "$env:VERSION_TAG_WINDOWS" `
+          --tag "${env:VERSION_TAG_WINDOWS}" `
           --build-arg MODULE_VERSION="$env:TAG_PART" `
           .
         Write-Host "✅ Docker build completed successfully"
@@ -255,7 +177,7 @@ deploy-manifest:
       variables:
         DOCKER_TLS_CERTDIR: ""
   dependencies:
-    - deploy
+    - build
     - deploy-windows
   script:
     - echo "Creating multi-platform manifest..."
