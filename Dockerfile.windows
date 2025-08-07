@@ -32,9 +32,9 @@ ENV GLUESYNC_LICENSE_FILE=C:/opt/gluesync/data/gs-license.dat
 ENV GLUESYNC_SECURITY_CONFIG=C:/opt/gluesync/data/security-config.json
 
 # Create necessary directories
-RUN mkdir C:/opt/gluesync/data
-RUN mkdir C:/app/data
-RUN mkdir C:/app/logs
+RUN md C:\opt\gluesync\data
+RUN md C:\app\data
+RUN md C:\app\logs
 
 # Copy only the SDK submodule first
 COPY ./gluesync-sdk ./gluesync-sdk
