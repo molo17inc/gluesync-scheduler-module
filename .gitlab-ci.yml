@@ -176,12 +176,25 @@ deploy-windows:
     - echo Extracting version from tag %CI_COMMIT_TAG%
     - echo Building Windows Docker image
     
-    # Set up Docker login
-    - docker login -u danieleangeli -p %CI_REGISTRY_PASSWORD%
+    # Set up Docker login to GitLab Container Registry
+    - echo "Logging into GitLab Container Registry..."
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
     
-    # Build Windows image with simplified logic
-    - docker build -f Dockerfile.windows -t %DOCKER_REGISTRY%/%APP_NAME%:windows-latest .
-    - docker push %DOCKER_REGISTRY%/%APP_NAME%:windows-latest
+    # Build Windows image with versioned tag
+    - export VERSION_TAG_WINDOWS="${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_SLUG}-windows"
+    - export LATEST_TAG_WINDOWS="${CI_REGISTRY_IMAGE}:latest-windows"
+    
+    # Build and push versioned Windows image
+    - docker build -f Dockerfile.windows -t $VERSION_TAG_WINDOWS .
+    - docker push $VERSION_TAG_WINDOWS
+    
+    # Also tag as latest for release tags
+    - |
+      if [[ $CI_COMMIT_TAG == release-* ]] || [[ $CI_COMMIT_TAG == v* ]]; then
+        echo "Tagging as latest-windows..."
+        docker tag $VERSION_TAG_WINDOWS $LATEST_TAG_WINDOWS
+        docker push $LATEST_TAG_WINDOWS
+      fi
   rules:
     - if: $CI_COMMIT_TAG
 
