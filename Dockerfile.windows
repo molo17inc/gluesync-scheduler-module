@@ -82,12 +82,12 @@ EXPOSE 8000
 
 # Health check using Python instead of PowerShell
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+    CMD python -c "import urllib.request; import os; url = 'http://' + os.environ.get('HOST', 'localhost') + ':8000/health'; urllib.request.urlopen(url)" || exit 1
 
-# Create entrypoint script using echo commands
-RUN echo @echo off > entrypoint.bat && \
-    echo echo Starting Gluesync Scheduler Module... >> entrypoint.bat && \
-    echo python run_scheduler.py >> entrypoint.bat
+# Create entrypoint script using PowerShell to ensure proper line endings
+RUN powershell -Command "Set-Content -Path entrypoint.bat -Value '@echo off'" && \
+    powershell -Command "Add-Content -Path entrypoint.bat -Value 'echo Starting Gluesync Scheduler Module...'" && \
+    powershell -Command "Add-Content -Path entrypoint.bat -Value 'python run_scheduler.py'"
 
 # Set entrypoint
 ENTRYPOINT ["entrypoint.bat"]
