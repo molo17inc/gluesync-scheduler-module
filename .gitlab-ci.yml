@@ -176,10 +176,11 @@ deploy-windows:
     # Set up Docker login to GitLab Container Registry
     - |
       Write-Host "Logging into GitLab Container Registry..."
-      Write-Host "Registry: $env:CI_REGISTRY"
-      Write-Host "User: $env:CI_REGISTRY_USER"
-      Write-Host "Project: $env:CI_PROJECT_PATH"
-      Write-Host "Registry Image: $env:CI_REGISTRY_IMAGE"
+      Write-Host "Registry: '$env:CI_REGISTRY'"
+      Write-Host "User: '$env:CI_REGISTRY_USER'"
+      Write-Host "Project: '$env:CI_PROJECT_PATH'"
+      Write-Host "Registry Image: '$env:CI_REGISTRY_IMAGE'"
+      Write-Host "Password length: $($env:CI_REGISTRY_PASSWORD.Length)"
       
       # Check if variables are available
       if (-not $env:CI_REGISTRY_PASSWORD) {
@@ -191,16 +192,31 @@ deploy-windows:
         Write-Error "CI_REGISTRY_USER is not set"
         exit 1
       }
+      
+      if (-not $env:CI_REGISTRY) {
+        Write-Error "CI_REGISTRY is not set"
+        exit 1
+      }
     - |
       # Try Docker login with error handling
       Write-Host "Attempting Docker login..."
-      echo $env:CI_REGISTRY_PASSWORD | docker login -u $env:CI_REGISTRY_USER --password-stdin $env:CI_REGISTRY
-      if ($LASTEXITCODE -ne 0) {
-        Write-Error "Docker login failed with exit code: $LASTEXITCODE"
-        Write-Host "Please check if CI_REGISTRY_USER and CI_REGISTRY_PASSWORD are properly configured"
-        exit 1
-      } else {
+      
+      # Method 1: Try with Write-Output instead of echo
+      Write-Output $env:CI_REGISTRY_PASSWORD | docker login -u $env:CI_REGISTRY_USER --password-stdin $env:CI_REGISTRY
+      if ($LASTEXITCODE -eq 0) {
         Write-Host "Docker login successful"
+      } else {
+        Write-Host "Method 1 failed, trying method 2..."
+        
+        # Method 2: Try direct parameter approach (less secure but might work)
+        docker login -u $env:CI_REGISTRY_USER -p $env:CI_REGISTRY_PASSWORD $env:CI_REGISTRY
+        if ($LASTEXITCODE -eq 0) {
+          Write-Host "Docker login successful with method 2"
+        } else {
+          Write-Error "Both Docker login methods failed with exit code: $LASTEXITCODE"
+          Write-Host "Please check if CI_REGISTRY_USER and CI_REGISTRY_PASSWORD are properly configured"
+          exit 1
+        }
       }
     
     # Build Windows image with versioned tag
