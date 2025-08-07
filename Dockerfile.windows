@@ -16,8 +16,8 @@
 
 # Copyright (C) 2025 MOLO17. All rights reserved.
 
-# Use Python Windows image (has Python pre-installed)
-FROM mcr.microsoft.com/windows-cssc/python:3.11-nanoserver-ltsc2022
+# Use Python Windows image with build capabilities
+FROM python:3.11-windowsservercore-ltsc2022
 
 # Set working directory
 WORKDIR C:/app
