@@ -170,31 +170,29 @@ deploy-windows:
   variables:
     GIT_STRATEGY: clone
   script:
-    - echo "Building Windows Docker image..."
-    
-    # Use simple batch commands for version extraction
-    - echo Extracting version from tag %CI_COMMIT_TAG%
-    - echo Building Windows Docker image
+    - Write-Host "Building Windows Docker image..."
     
     # Set up Docker login to GitLab Container Registry
-    - echo "Logging into GitLab Container Registry..."
-    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+    - Write-Host "Logging into GitLab Container Registry..."
+    - $env:CI_REGISTRY_PASSWORD | docker login -u $env:CI_REGISTRY_USER --password-stdin $env:CI_REGISTRY
     
     # Build Windows image with versioned tag
-    - export VERSION_TAG_WINDOWS="${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_SLUG}-windows"
-    - export LATEST_TAG_WINDOWS="${CI_REGISTRY_IMAGE}:latest-windows"
+    - |
+      $env:VERSION_TAG_WINDOWS = "$env:CI_REGISTRY_IMAGE`:$env:CI_COMMIT_REF_SLUG-windows"
+      $env:LATEST_TAG_WINDOWS = "$env:CI_REGISTRY_IMAGE`:latest-windows"
+      Write-Host "Building image: $env:VERSION_TAG_WINDOWS"
     
     # Build and push versioned Windows image
-    - docker build -f Dockerfile.windows -t $VERSION_TAG_WINDOWS .
-    - docker push $VERSION_TAG_WINDOWS
+    - docker build -f Dockerfile.windows -t $env:VERSION_TAG_WINDOWS .
+    - docker push $env:VERSION_TAG_WINDOWS
     
     # Also tag as latest for release tags
     - |
-      if [[ $CI_COMMIT_TAG == release-* ]] || [[ $CI_COMMIT_TAG == v* ]]; then
-        echo "Tagging as latest-windows..."
-        docker tag $VERSION_TAG_WINDOWS $LATEST_TAG_WINDOWS
-        docker push $LATEST_TAG_WINDOWS
-      fi
+      if ($env:CI_COMMIT_TAG -like "release-*" -or $env:CI_COMMIT_TAG -like "v*") {
+        Write-Host "Tagging as latest-windows..."
+        docker tag $env:VERSION_TAG_WINDOWS $env:LATEST_TAG_WINDOWS
+        docker push $env:LATEST_TAG_WINDOWS
+      }
   rules:
     - if: $CI_COMMIT_TAG
 
