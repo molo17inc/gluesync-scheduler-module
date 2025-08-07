@@ -158,70 +158,36 @@ deploy:
 
 # Windows deployment jobs
 deploy-windows:
-  stage: deploy
+  stage: deploy-windows
   tags:
     - windows-runner-hq
-  # This job will run on a Windows runner with shell executor
-  image: mcr.microsoft.com/windows/servercore:ltsc2022
+  allow_failure: true
+  image: docker:27.3.1
+  services:
+    - name: docker:dind
+      variables:
+        DOCKER_TLS_CERTDIR: ""
   variables:
-    SHELL: powershell
     GIT_STRATEGY: clone
-  before_script:
-    - echo "Running on Windows runner with shell executor"
-    - echo "CI_COMMIT_TAG is $CI_COMMIT_TAG"
-    - echo "DOCKER_REGISTRY is $DOCKER_REGISTRY"
-    - echo "APP_NAME is $APP_NAME"
   script:
-    - Write-Host "Building Windows Docker image..."
-    - |
-      # Extract version part from tag
-      $tag = "$env:CI_COMMIT_TAG"
-      if ($tag -match '(\d+\.\d+\.\d+)') {
-        $TAGPART = $matches[1]
-      } else {
-        $TAGPART = ""
-      }
-      Write-Host "Tag part is $TAGPART"
-      $DEFAULT_NAME = "$env:DOCKER_REGISTRY/$env:APP_NAME"
-      $VERSION_TAG = "${DEFAULT_NAME}:${TAGPART}"
-      Write-Host "VERSION_TAG is $VERSION_TAG"
-    - |
-      # Install Docker CLI if not present
-      if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-        Write-Host "Installing Docker CLI..."
-        Invoke-WebRequest -Uri 'https://download.docker.com/win/static/stable/x86_64/docker-24.0.7.zip' -OutFile 'docker.zip'
-        Expand-Archive -Path 'docker.zip' -DestinationPath 'C:\Program Files\Docker'
-        $env:PATH += ";C:\Program Files\Docker"
-        [Environment]::SetEnvironmentVariable("PATH", $env:PATH, [System.EnvironmentVariableTarget]::Machine)
-        docker --version
-      }
-    - |
-      # Set up Docker login
-      $env:CI_REGISTRY_PASSWORD | docker login -u danieleangeli --password-stdin
-    - |
-      # Build and push based on tag type
-      if ($env:CI_COMMIT_TAG.StartsWith("release-")) {
-        Write-Host "Building Windows release with latest tag..."
-        docker build --platform windows/amd64 -f Dockerfile.windows -t $env:VERSION_TAG --build-arg TARGETPLATFORM=windows/amd64 .
-        docker push $env:VERSION_TAG
-        docker tag $env:VERSION_TAG "$($env:DEFAULT_NAME):latest"
-        docker push "$($env:DEFAULT_NAME):latest"
-      } 
-      elseif ($env:CI_COMMIT_TAG.StartsWith("tag-")) {
-        Write-Host "Building Windows amd64-only version without latest tag..."
-        docker build --platform windows/amd64 -f Dockerfile.windows -t $env:VERSION_TAG --build-arg TARGETPLATFORM=windows/amd64 .
-        docker push $env:VERSION_TAG
-      } 
-      else {
-        Write-Error "Unknown tag format: $($env:CI_COMMIT_TAG)"
-        exit 1
-      }
+    - echo "Building Windows Docker image..."
+    
+    # Use simple batch commands for version extraction
+    - echo Extracting version from tag %CI_COMMIT_TAG%
+    - echo Building Windows Docker image
+    
+    # Set up Docker login
+    - docker login -u danieleangeli -p %CI_REGISTRY_PASSWORD%
+    
+    # Build Windows image with simplified logic
+    - docker build -f Dockerfile.windows -t %DOCKER_REGISTRY%/%APP_NAME%:windows-latest .
+    - docker push %DOCKER_REGISTRY%/%APP_NAME%:windows-latest
   rules:
     - if: $CI_COMMIT_TAG
 
 # Multi-platform deployment job (combines Linux and Windows)
 deploy-manifest:
-  stage: deploy
+  stage: deploy-windows
   image: docker:latest
   services:
     - name: docker:dind
@@ -237,47 +203,64 @@ deploy-manifest:
     - docker login -u danieleangeli -p "$CI_REGISTRY_PASSWORD"
     
     # Extract version part from tag
-    - TAGPART=`echo $CI_COMMIT_TAG | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)'`
-    - DEFAULT_NAME=${DOCKER_REGISTRY}/${APP_NAME}
-    - VERSION_TAG="${DEFAULT_NAME}:${TAGPART}"
-    
-    # Check if Windows image exists by trying to inspect it
     - |
+      TAGPART=`echo $CI_COMMIT_TAG | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)'`
+      DEFAULT_NAME=${DOCKER_REGISTRY}/${APP_NAME}
+      VERSION_TAG="${DEFAULT_NAME}:${TAGPART}"
+      VERSION_TAG_WINDOWS="${DEFAULT_NAME}:${TAGPART}-windows"
+    
+    # Check if Windows image exists and create multi-platform manifest accordingly
+    - |
+      # Check if Windows image exists
       WINDOWS_EXISTS=false
-      if docker manifest inspect "$VERSION_TAG" >/dev/null 2>&1; then
-        echo "Windows image found: $VERSION_TAG"
+      if docker manifest inspect "$VERSION_TAG_WINDOWS" >/dev/null 2>&1; then
+        echo "Windows image found: $VERSION_TAG_WINDOWS"
         WINDOWS_EXISTS=true
       else
-        echo "Windows image not found: $VERSION_TAG"
+        echo "Windows image not found: $VERSION_TAG_WINDOWS"
         echo "Will create Linux-only manifests"
       fi
-    
-    # Create appropriate manifests based on tag type and Windows image availability
-    - |
+      
       if [[ $CI_COMMIT_TAG == release-* ]]; then
         echo "Creating manifest for release version..."
         if [ "$WINDOWS_EXISTS" = true ]; then
-          # For multi-arch support, we don't need to create separate manifests
-          # The same tag will automatically pull the correct architecture
-          echo "✅ Using unified multi-architecture image (Linux + Windows)"
-          # Tag as latest as well
-          docker pull "$VERSION_TAG"
-          docker tag "$VERSION_TAG" "${DEFAULT_NAME}:latest"
-          docker push "${DEFAULT_NAME}:latest"
-          echo "✅ Tagged and pushed as latest"
+          # Create multi-platform manifest (Linux + Windows)
+          docker manifest create "$VERSION_TAG-multiplatform" \
+            "$VERSION_TAG" \
+            "$VERSION_TAG_WINDOWS"
+          docker manifest push "$VERSION_TAG-multiplatform"
+          
+          docker manifest create "${DEFAULT_NAME}:latest-multiplatform" \
+            "${DEFAULT_NAME}:latest" \
+            "${DEFAULT_NAME}:latest-windows"
+          docker manifest push "${DEFAULT_NAME}:latest-multiplatform"
+          echo "✅ Created multi-platform manifests (Linux + Windows)"
         else
-          # Tag as latest
-          docker pull "$VERSION_TAG"
-          docker tag "$VERSION_TAG" "${DEFAULT_NAME}:latest"
-          docker push "${DEFAULT_NAME}:latest"
-          echo "⚠️ Tagged and pushed as latest (Windows build unavailable)"
+          # Create Linux-only manifests
+          docker manifest create "$VERSION_TAG-multiplatform" \
+            "$VERSION_TAG"
+          docker manifest push "$VERSION_TAG-multiplatform"
+          
+          docker manifest create "${DEFAULT_NAME}:latest-multiplatform" \
+            "${DEFAULT_NAME}:latest"
+          docker manifest push "${DEFAULT_NAME}:latest-multiplatform"
+          echo "⚠️ Created Linux-only manifests (Windows build unavailable)"
         fi
       elif [[ $CI_COMMIT_TAG == tag-* ]]; then
-        echo "Using unified image for tag version..."
+        echo "Creating manifest for tag version..."
         if [ "$WINDOWS_EXISTS" = true ]; then
-          echo "✅ Using unified multi-architecture image (Linux + Windows)"
+          # Create multi-platform manifest (Linux + Windows)
+          docker manifest create "$VERSION_TAG-multiplatform" \
+            "$VERSION_TAG" \
+            "$VERSION_TAG_WINDOWS"
+          docker manifest push "$VERSION_TAG-multiplatform"
+          echo "✅ Created multi-platform manifest (Linux + Windows)"
         else
-          echo "⚠️ Using Linux-only image (Windows build unavailable)"
+          # Create Linux-only manifest
+          docker manifest create "$VERSION_TAG-multiplatform" \
+            "$VERSION_TAG"
+          docker manifest push "$VERSION_TAG-multiplatform"
+          echo "⚠️ Created Linux-only manifest (Windows build unavailable)"
         fi
       fi
   rules:
