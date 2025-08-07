@@ -162,13 +162,15 @@ deploy-windows:
   tags:
     - windows-runner-hq
   allow_failure: true
-  image: docker:27.3.1
-  services:
-    - name: docker:dind
-      variables:
-        DOCKER_TLS_CERTDIR: ""
+  image: mcr.microsoft.com/windows/servercore:ltsc2022
   variables:
     GIT_STRATEGY: clone
+  before_script:
+    - echo "Installing Docker CLI for Windows..."
+    - powershell -Command "Invoke-WebRequest -Uri 'https://download.docker.com/win/static/stable/x86_64/docker-24.0.7.zip' -OutFile 'docker.zip'"
+    - powershell -Command "Expand-Archive -Path 'docker.zip' -DestinationPath 'C:\temp'"
+    - powershell -Command "Copy-Item 'C:\temp\docker\docker.exe' -Destination 'C:\Windows\System32\'"
+    - docker --version
   script:
     - echo "Building Windows Docker image..."
     
