@@ -20,7 +20,7 @@
 FROM python:3.11-nanoserver-ltsc2022
 
 # Set working directory
-WORKDIR C:\app
+WORKDIR C:/app
 
 # Set environment variables for Python
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -28,13 +28,13 @@ ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Set default Gluesync paths for Windows
-ENV GLUESYNC_LICENSE_FILE=C:\opt\gluesync\data\gs-license.dat
-ENV GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\data\security-config.json
+ENV GLUESYNC_LICENSE_FILE=C:/opt/gluesync/data/gs-license.dat
+ENV GLUESYNC_SECURITY_CONFIG=C:/opt/gluesync/data/security-config.json
 
 # Create necessary directories
-RUN mkdir C:\opt\gluesync\data
-RUN mkdir C:\app\data
-RUN mkdir C:\app\logs
+RUN mkdir C:/opt/gluesync/data
+RUN mkdir C:/app/data
+RUN mkdir C:/app/logs
 
 # Copy only the SDK submodule first
 COPY ./gluesync-sdk ./gluesync-sdk
@@ -58,14 +58,14 @@ COPY setup.py .
 COPY migrations/ ./migrations/
 
 # Copy configuration files
-COPY gs-license.dat C:\opt\gluesync\data\gs-license.dat
-COPY security-config.json C:\opt\gluesync\data\security-config.json
+COPY gs-license.dat C:/opt/gluesync/data/gs-license.dat
+COPY security-config.json C:/opt/gluesync/data/security-config.json
 
 # Set default environment variables for Windows
 ENV DB_URL=sqlite:///C:/app/data/scheduler.db
-ENV LOG_DIR=C:\app\logs
-ENV CRON_LOG_DIR=C:\app\logs
-ENV DATA_DIR=C:\app\data
+ENV LOG_DIR=C:/app/logs
+ENV CRON_LOG_DIR=C:/app/logs
+ENV DATA_DIR=C:/app/data
 ENV HOST=0.0.0.0
 ENV PORT=8000
 ENV SSL_ENABLED=false
@@ -73,9 +73,9 @@ ENV GLUESYNC_MODULE_TAG=scheduler-module
 ENV GLUESYNC_USE_SSL=false
 
 # Windows-specific path environment variables
-ENV PYTHONPATH=C:\app
-ENV TEMP=C:\temp
-ENV TMP=C:\temp
+ENV PYTHONPATH=C:/app
+ENV TEMP=C:/temp
+ENV TMP=C:/temp
 
 # Expose port
 EXPOSE 8000
