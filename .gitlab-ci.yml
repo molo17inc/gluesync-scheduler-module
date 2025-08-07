@@ -161,9 +161,6 @@ deploy-windows:
   stage: deploy-windows
   tags:
     - windows-runner-hq
-  allow_failure: true
-  variables:
-    GIT_STRATEGY: clone
   script:
     # Stop on first error
     - $ErrorActionPreference = "Stop"
@@ -172,7 +169,7 @@ deploy-windows:
     - |
       Write-Host "Logging into Docker registry..."
       try {
-        docker login -u "$env:CI_REGISTRY_USER" -p "$env:CI_REGISTRY_PASSWORD" "$env:CI_REGISTRY"
+        docker login -u "$env:CI_REGISTRY_USER" -p "$env:CI_REGISTRY_PASSWORD"
         Write-Host "✅ Docker login successful"
       } catch {
         Write-Error "❌ Docker login failed: $_"
@@ -264,7 +261,7 @@ deploy-manifest:
     - echo "Creating multi-platform manifest..."
     
     # Set up Docker login
-    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
     
     # Extract version part from tag
     - |
