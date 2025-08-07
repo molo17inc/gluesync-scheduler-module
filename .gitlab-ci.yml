@@ -102,7 +102,7 @@ deploy-windows:
     - |
       Write-Host "Processing tag: $env:CI_COMMIT_TAG"
       $TAG_PART = $env:CI_COMMIT_TAG -replace '^(release-|tag-)', ''
-      $IMAGE_NAME = "$env:CI_REGISTRY_IMAGE/$env:APP_NAME"
+      $IMAGE_NAME = "molo17/$env:APP_NAME"
       $VERSION_TAG = "${IMAGE_NAME}:${TAG_PART}"
       $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-windows"
       
@@ -113,14 +113,7 @@ deploy-windows:
       $env:IMAGE_NAME = ${IMAGE_NAME}
       $env:VERSION_TAG_WINDOWS = ${VERSION_TAG_WINDOWS}
       $env:TAG_PART = ${TAG_PART}
-    
-    # Initialize Git submodules for gluesync-sdk
-    - |
-      Write-Host "Initializing Git submodules..."
-      git submodule init
-      git submodule update
-      Write-Host "✅ Submodules initialized"
-    
+     
     # Build Windows Docker image
     - |
       Write-Host "Building Windows Docker image..."
@@ -152,8 +145,8 @@ deploy-windows:
         Write-Host "Tagging as latest-windows..."
         $LATEST_WINDOWS = "${env:IMAGE_NAME}:latest-windows"
         try {
-          docker tag "${env:VERSION_TAG_WINDOWS}" "$LATEST_WINDOWS"
-          docker push "$LATEST_WINDOWS"
+          docker tag "${env:VERSION_TAG_WINDOWS}" "${LATEST_WINDOWS}"
+          docker push "${LATEST_WINDOWS}"
           Write-Host "✅ Latest-windows tag pushed successfully"
         } catch {
           Write-Error "❌ Failed to push latest-windows tag: $_"
@@ -183,7 +176,7 @@ deploy-manifest:
     # Extract version part from tag
     - |
       TAG_PART=$(echo $CI_COMMIT_TAG | sed 's/^\(release-\|tag-\)//')
-      IMAGE_NAME="$CI_REGISTRY_IMAGE/$APP_NAME"
+      IMAGE_NAME="$APP_NAME"
       VERSION_TAG="${IMAGE_NAME}:${TAG_PART}"
       VERSION_TAG_WINDOWS="${IMAGE_NAME}:${TAG_PART}-windows"
     
