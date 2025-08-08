@@ -37,6 +37,7 @@ build:
         DOCKER_TLS_CERTDIR: ""
   script:
     - echo "Building & deploying started..."
+    - set -euo pipefail
 
     - apk add --no-cache bash
     # Initialize and update the Git submodule
