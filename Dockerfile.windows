@@ -44,8 +44,11 @@ RUN powershell -NoProfile -ExecutionPolicy Bypass -Command "\
   "
 
 # Install Visual C++ Build Tools and Windows 10 SDK (needed to build wheels like 'twofish')
-RUN choco install -y visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --passive --locale en-US"
-RUN choco install -y windows-sdk-10.0
+# Note: Use explicit --add arguments; avoid 'en-US' package which doesn't exist on Chocolatey
+RUN choco install -y visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows10SDK.19041 --includeRecommended --quiet --norestart"
+
+# Ensure Python build tooling is up-to-date before building native wheels
+RUN python -m pip install --upgrade pip setuptools wheel
 
 # Copy only the SDK submodule first
 COPY ./gluesync-sdk ./gluesync-sdk
