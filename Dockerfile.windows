@@ -45,24 +45,28 @@ RUN powershell -NoProfile -ExecutionPolicy Bypass -Command "\
 
 # Install Python 3.11 via Chocolatey (adds python and pip to PATH)
 RUN choco install -y python --version=3.11.9
-RUN python --version
-RUN python -m pip --version
+ENV PATH=C:/Python311;C:/Python311/Scripts;%PATH%
+RUN C:\\Python311\\python.exe --version
+RUN C:\\Python311\\python.exe -m pip --version
+
+# Install Git (needed if any dependencies are fetched from VCS during pip install)
+RUN choco install -y git
 
 # Ensure Python build tooling is up-to-date before building native wheels
-RUN python -m pip install --upgrade pip setuptools wheel
+RUN C:\\Python311\\python.exe -m pip install --upgrade pip setuptools wheel
 
 # Copy only the SDK submodule first
 COPY ./gluesync-sdk ./gluesync-sdk
 
 # Install specific websockets version first to avoid compatibility issues
-RUN python -m pip install websockets==11.0.3
+RUN C:\\Python311\\python.exe -m pip install websockets==11.0.3
 
 # Install the SDK
-RUN cd ./gluesync-sdk; python -m pip install -e .
+RUN cd ./gluesync-sdk; C:\\Python311\\python.exe -m pip install -e .
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN python -m pip install -r requirements.txt
+RUN C:\\Python311\\python.exe -m pip install -r requirements.txt
 
 # Copy application code
 COPY gluesync_scheduler/ ./gluesync_scheduler/
@@ -96,12 +100,12 @@ EXPOSE 8000
 
 # Health check using Python instead of PowerShell
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; import os; url = 'http://' + os.environ.get('HOST', 'localhost') + ':8000/health'; urllib.request.urlopen(url)" || exit 1
+    CMD C:\\Python311\\python.exe -c "import urllib.request; import os; url = 'http://' + os.environ.get('HOST', 'localhost') + ':8000/health'; urllib.request.urlopen(url)" || exit 1
 
 # Create entrypoint script using PowerShell to ensure proper line endings
 RUN powershell -Command "Set-Content -Path entrypoint.bat -Value '@echo off'" && \
     powershell -Command "Add-Content -Path entrypoint.bat -Value 'echo Starting Gluesync Chronos Module...'" && \
-    powershell -Command "Add-Content -Path entrypoint.bat -Value 'python run_scheduler.py'"
+    powershell -Command "Add-Content -Path entrypoint.bat -Value 'C:\\Python311\\python.exe run_scheduler.py'"
 
 # Set entrypoint
 ENTRYPOINT ["entrypoint.bat"]
