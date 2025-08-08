@@ -118,11 +118,21 @@ deploy-windows:
       $env:VERSION_TAG_WINDOWS = ${VERSION_TAG_WINDOWS}
       $env:TAG_PART = ${TAG_PART}
      
+    # Ensure submodules are available in this job too (Windows runner checks out repo separately)
+    - |
+      Write-Host "Initializing git submodules..."
+      git submodule init
+      if ($LASTEXITCODE -ne 0) { Write-Error "git submodule init failed"; exit $LASTEXITCODE }
+      git submodule update --recursive
+      if ($LASTEXITCODE -ne 0) { Write-Error "git submodule update failed"; exit $LASTEXITCODE }
+      Write-Host "✅ Submodules ready"
+
     # Build Windows Docker image
     - |
       Write-Host "Building Windows Docker image..."
       Write-Host "Using Dockerfile: Dockerfile.windows"
-      docker build --file Dockerfile.windows --tag "${env:VERSION_TAG_WINDOWS}" .
+      $env:DOCKER_BUILDKIT = 1
+      docker build --progress=plain --file Dockerfile.windows --tag "${env:VERSION_TAG_WINDOWS}" .
       if ($LASTEXITCODE -ne 0) {
         Write-Error "❌ Docker build failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE
