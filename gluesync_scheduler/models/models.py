@@ -64,6 +64,7 @@ class ScheduledJob(Base):
     last_run_error_time = Column(DateTime(timezone=True), nullable=True)
     start_time = Column(String, nullable=True)
     timezone_name = Column(String, nullable=True)
+    is_cron_expression = Column(Boolean, default=False, nullable=False)
 
 
 class Setting(Base):

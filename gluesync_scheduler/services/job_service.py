@@ -341,6 +341,9 @@ class JobService:
                     logger.error(f"Error calculating next run time: {e}")
                     # If calculation fails, we'll leave start_time as None
             
+            # Determine if job was created with cron expression or schedule
+            is_cron_expression = bool(job_data.cron_expression and not job_data.schedule)
+            
             # Create the database record
             db_job = ScheduledJob(
                 name=job_data.name,
@@ -359,7 +362,9 @@ class JobService:
                 # Set start_time to the calculated next run time
                 start_time=next_run_time,
                 # Always store the configured timezone name
-                timezone_name=settings.TIMEZONE
+                timezone_name=settings.TIMEZONE,
+                # Set the flag to track if job was created with cron expression
+                is_cron_expression=is_cron_expression
             )
             
             # Generate a unique identifier for the cron job
@@ -439,17 +444,13 @@ class JobService:
                                 schedule['hour'] = 0
                             if 'days_of_week' not in schedule:
                                 schedule['days_of_week'] = []
-                    
-                    # Now we can safely access the schedule components
-                    # Handle both dict and ScheduleConfig objects
-                    if isinstance(schedule, dict):
-                        minute = schedule.get('minute', 0)
-                        hour = schedule.get('hour', 0)
-                        days_of_week = schedule.get('days_of_week', [])
+                            minute = schedule.get('minute', 0)
+                            hour = schedule.get('hour', 0)
+                            days_of_week = schedule.get('days_of_week', [])
                     else:
-                        minute = schedule.minute
-                        hour = schedule.hour
-                        days_of_week = schedule.days_of_week
+                        minute = job_data.schedule.minute
+                        hour = job_data.schedule.hour
+                        days_of_week = job_data.schedule.days_of_week
                     
                     # Validate required fields
                     if minute is None or hour is None:
@@ -489,6 +490,9 @@ class JobService:
                     cron_expression = f"{minute} {hour} * * {dow_string}"
                     update_data["cron_expression"] = cron_expression
                     
+                    # Set flag to false since we're using a schedule
+                    update_data["is_cron_expression"] = False
+                    
                     logger.info(f"Generated cron expression from update schedule: {cron_expression}")
                     
                     # Add validation to ensure cron expression correctly represents the requested schedule
@@ -526,6 +530,10 @@ class JobService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Failed to convert schedule to cron expression: {str(e)}"
                     )
+            elif "cron_expression" in update_data:
+                # Set flag to true since we're using a cron expression
+                update_data["is_cron_expression"] = True
+                cron_updated = True
             else:
                 # Check if cron_expression is being updated
                 cron_updated = "cron_expression" in update_data

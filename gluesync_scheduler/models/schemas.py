@@ -88,6 +88,7 @@ class JobBase(BaseModel):
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
     snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
+    is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     
     @validator("schedule", "cron_expression")
     def validate_schedule_options(cls, v, values):
@@ -128,6 +129,7 @@ class JobUpdate(BaseModel):
     with_snapshot: Optional[bool] = Field(None, description="Updated snapshot setting")
     snapshot_write_method: Optional[str] = Field(None, description="Updated write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
+    is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     
     model_config = ConfigDict(
         json_schema_extra = {
@@ -141,7 +143,8 @@ class JobUpdate(BaseModel):
                     "minute": 30
                 },
                 "snapshot_write_method": "INSERT",
-                "enabled": True
+                "enabled": True,
+                "is_cron_expression": False
             }
         }
     )
@@ -162,6 +165,7 @@ class Job(JobBase):
     schedule_days: List[str] = Field(default_factory=list, description="Array of days when the job is scheduled to run (e.g., ['monday', 'wednesday', 'friday'])")
     # Explicitly re-define snapshot_write_method to ensure it's included in the response
     snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
+    is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     
     # Ensure schedule_days is always populated
     @validator('schedule_days', always=True)
