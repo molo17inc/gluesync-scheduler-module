@@ -43,7 +43,7 @@ COPY ./gluesync-sdk ./gluesync-sdk
 RUN python -m pip install websockets==11.0.3
 
 # Install the SDK
-RUN cd ./gluesync-sdk && python -m pip install -e .
+RUN cd ./gluesync-sdk; python -m pip install -e .
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
