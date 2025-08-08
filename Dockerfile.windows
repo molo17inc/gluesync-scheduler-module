@@ -16,13 +16,13 @@
 
 # Copyright (C) 2025 MOLO17. All rights reserved.
 
-# Use Python Windows image with build capabilities
-FROM python:3.11-windowsservercore-ltsc2022
+# Use Windows image with preinstalled Visual Studio Build Tools to compile native wheels
+FROM mcr.microsoft.com/vs/buildtools:latest-windowsservercore-ltsc2022
 
 # Set working directory
 WORKDIR C:/app
 
-# Set environment variables for Python
+# Set environment variables for Python (will be installed via Chocolatey)
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -36,18 +36,17 @@ RUN md C:\opt\gluesync\data
 RUN md C:\app\data
 RUN md C:\app\logs
 
-# Install Chocolatey (for build tools)
+# Install Chocolatey (for subsequent installs like Python)
 RUN powershell -NoProfile -ExecutionPolicy Bypass -Command "\
     $ErrorActionPreference = 'Stop'; \
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
     iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')) \
   "
 
-# Install Visual C++ Build Tools and Windows 10 SDK (needed to build wheels like 'twofish')
-# Use Visual Studio Installer directly to avoid Chocolatey parameter parsing issues (exit code 87)
-# Ensure the Visual Studio Installer is present (Chocolatey brings it in, but install explicitly for idempotence)
-RUN choco install -y visualstudio-installer
-RUN powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; $vsInstaller = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vs_installer.exe'; if (-not (Test-Path $vsInstaller)) { throw 'VS Installer not found at expected path.' }; & $vsInstaller install --quiet --wait --norestart --installPath C:\\BuildTools --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows10SDK.19041; exit $LASTEXITCODE"
+# Install Python 3.11 via Chocolatey (adds python and pip to PATH)
+RUN choco install -y python --version=3.11.9
+RUN python --version
+RUN python -m pip --version
 
 # Ensure Python build tooling is up-to-date before building native wheels
 RUN python -m pip install --upgrade pip setuptools wheel
