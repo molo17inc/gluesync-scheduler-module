@@ -199,41 +199,41 @@ deploy-manifest:
         echo "Creating manifest for release version..."
         if [ "$WINDOWS_EXISTS" = true ]; then
           # Create multi-platform manifest (Linux + Windows)
-          docker manifest create "${VERSION_TAG}-multiplatform" \
+          docker manifest create "${VERSION_TAG}" \
             "$VERSION_TAG" \
             "$VERSION_TAG_WINDOWS"
-          docker manifest push "${VERSION_TAG}-multiplatform"
+          docker manifest push "${VERSION_TAG}"
           
-          docker manifest create "${IMAGE_NAME}:latest-multiplatform" \
+          docker manifest create "${IMAGE_NAME}:latest" \
             "${IMAGE_NAME}:latest" \
             "${IMAGE_NAME}:latest-windows"
-          docker manifest push "${IMAGE_NAME}:latest-multiplatform"
+          docker manifest push "${IMAGE_NAME}:latest"
           echo "✅ Created multi-platform manifests (Linux + Windows)"
         else
           # Create Linux-only manifests
-          docker manifest create "${VERSION_TAG}-multiplatform" \
+          docker manifest create "${VERSION_TAG}" \
             "$VERSION_TAG"
-          docker manifest push "${VERSION_TAG}-multiplatform"
+          docker manifest push "${VERSION_TAG}"
           
-          docker manifest create "${IMAGE_NAME}:latest-multiplatform" \
+          docker manifest create "${IMAGE_NAME}:latest" \
             "${IMAGE_NAME}:latest"
-          docker manifest push "${IMAGE_NAME}:latest-multiplatform"
+          docker manifest push "${IMAGE_NAME}:latest"
           echo "⚠️ Created Linux-only manifests (Windows build unavailable)"
         fi
       elif [[ $CI_COMMIT_TAG == tag-* ]]; then
         echo "Creating manifest for tag version..."
         if [ "$WINDOWS_EXISTS" = true ]; then
           # Create multi-platform manifest (Linux + Windows)
-          docker manifest create "${VERSION_TAG}-multiplatform" \
+          docker manifest create "${VERSION_TAG}" \
             "$VERSION_TAG" \
             "$VERSION_TAG_WINDOWS"
-          docker manifest push "${VERSION_TAG}-multiplatform"
+          docker manifest push "${VERSION_TAG}"
           echo "✅ Created multi-platform manifest (Linux + Windows)"
         else
           # Create Linux-only manifest
-          docker manifest create "${VERSION_TAG}-multiplatform" \
+          docker manifest create "${VERSION_TAG}" \
             "$VERSION_TAG"
-          docker manifest push "${VERSION_TAG}-multiplatform"
+          docker manifest push "${VERSION_TAG}"
           echo "⚠️ Created Linux-only manifest (Windows build unavailable)"
         fi
       fi
