@@ -435,22 +435,19 @@ class JobService:
                     if isinstance(schedule, dict):
                         try:
                             schedule = ScheduleConfig(**schedule)
+                            minute = schedule.minute
+                            hour = schedule.hour
+                            days_of_week = schedule.days_of_week
                         except Exception as e:
                             logger.error(f"Error converting schedule dict to ScheduleConfig: {e}")
                             # Ensure we have the required fields with proper defaults
-                            if 'minute' not in schedule:
-                                schedule['minute'] = 0
-                            if 'hour' not in schedule:
-                                schedule['hour'] = 0
-                            if 'days_of_week' not in schedule:
-                                schedule['days_of_week'] = []
-                            minute = schedule.get('minute', 0)
-                            hour = schedule.get('hour', 0)
-                            days_of_week = schedule.get('days_of_week', [])
+                            minute = schedule.get('minute', 0) if 'minute' in schedule else 0
+                            hour = schedule.get('hour', 0) if 'hour' in schedule else 0
+                            days_of_week = schedule.get('days_of_week', []) if 'days_of_week' in schedule else []
                     else:
-                        minute = job_data.schedule.minute
-                        hour = job_data.schedule.hour
-                        days_of_week = job_data.schedule.days_of_week
+                        minute = schedule.minute
+                        hour = schedule.hour
+                        days_of_week = schedule.days_of_week
                     
                     # Validate required fields
                     if minute is None or hour is None:
