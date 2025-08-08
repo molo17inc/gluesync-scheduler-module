@@ -36,6 +36,17 @@ RUN md C:\opt\gluesync\data
 RUN md C:\app\data
 RUN md C:\app\logs
 
+# Install Chocolatey (for build tools)
+RUN powershell -NoProfile -ExecutionPolicy Bypass -Command "\
+    $ErrorActionPreference = 'Stop'; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')) \
+  "
+
+# Install Visual C++ Build Tools and Windows 10 SDK (needed to build wheels like 'twofish')
+RUN choco install -y visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --passive --locale en-US"
+RUN choco install -y windows-sdk-10.0
+
 # Copy only the SDK submodule first
 COPY ./gluesync-sdk ./gluesync-sdk
 
