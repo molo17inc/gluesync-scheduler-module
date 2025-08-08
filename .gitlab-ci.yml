@@ -121,40 +121,40 @@ deploy-windows:
     - |
       Write-Host "Building Windows Docker image..."
       Write-Host "Using Dockerfile: Dockerfile.windows"
-      
-      try {
-        docker build --file Dockerfile.windows --tag "${env:VERSION_TAG_WINDOWS}" .
-        Write-Host "✅ Docker build completed successfully"
-      } catch {
-        Write-Error "❌ Docker build failed: $_"
-        exit 1
+      docker build --file Dockerfile.windows --tag "${env:VERSION_TAG_WINDOWS}" .
+      if ($LASTEXITCODE -ne 0) {
+        Write-Error "❌ Docker build failed with exit code $LASTEXITCODE"
+        exit $LASTEXITCODE
       }
+      Write-Host "✅ Docker build completed successfully"
     
     # Push Windows Docker image
     - |
       Write-Host "Pushing Windows Docker image..."
-      try {
-        docker push "${env:VERSION_TAG_WINDOWS}"
-        Write-Host "✅ Docker push completed successfully"
-        Write-Host "Windows image available at: ${env:VERSION_TAG_WINDOWS}"
-      } catch {
-        Write-Error "❌ Docker push failed: $_"
-        exit 1
+      docker push "${env:VERSION_TAG_WINDOWS}"
+      if ($LASTEXITCODE -ne 0) {
+        Write-Error "❌ Docker push failed with exit code $LASTEXITCODE"
+        exit $LASTEXITCODE
       }
+      Write-Host "✅ Docker push completed successfully"
+      Write-Host "Windows image available at: ${env:VERSION_TAG_WINDOWS}"
     
     # Tag as latest-windows for release branches
     - |
       if ($env:CI_COMMIT_TAG -match '^release-') {
         Write-Host "Tagging as latest-windows..."
         $LATEST_WINDOWS = "${env:IMAGE_NAME}:latest-windows"
-        try {
-          docker tag "${env:VERSION_TAG_WINDOWS}" "${LATEST_WINDOWS}"
-          docker push "${LATEST_WINDOWS}"
-          Write-Host "✅ Latest-windows tag pushed successfully"
-        } catch {
-          Write-Error "❌ Failed to push latest-windows tag: $_"
-          exit 1
+        docker tag "${env:VERSION_TAG_WINDOWS}" "${LATEST_WINDOWS}"
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "❌ docker tag failed with exit code $LASTEXITCODE"
+          exit $LASTEXITCODE
         }
+        docker push "${LATEST_WINDOWS}"
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "❌ Failed to push latest-windows tag with exit code $LASTEXITCODE"
+          exit $LASTEXITCODE
+        }
+        Write-Host "✅ Latest-windows tag pushed successfully"
       }
   rules:
     - if: $CI_COMMIT_TAG
