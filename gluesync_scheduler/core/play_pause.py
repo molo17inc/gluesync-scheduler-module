@@ -422,7 +422,7 @@ class CoreHubClient:
     
     def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for a specific entity"""
-        path = f'/pipelines/{pipeline_id}/commands/sync/redo'
+        path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         params = {
             'entity': entity_id,
             'snapshotWriteMethod': snapshot_write_method
@@ -573,32 +573,6 @@ class CoreHubClient:
             return success
         except Exception as e:
             logger.error(f"Error stopping group {group_id} in pipeline {pipeline_id}: {str(e)}")
-            return False
-    
-    def redo_group(self, pipeline_id: str, group_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
-        """Redo/restart all entities in a specific group within a pipeline"""
-        path = f'/pipelines/{pipeline_id}/commands/sync/redo-group'
-        params = {
-            'groupId': group_id,
-            'snapshotWriteMethod': snapshot_write_method
-        }
-        
-        try:
-            response = self.fetch_core_hub(path, method='POST', params=params)
-            
-            # Check for auth errors specifically
-            if response and isinstance(response, dict) and response.get('status') == 'error':
-                logger.error(f"Error redoing group {group_id} in pipeline {pipeline_id}: {response.get('message')}")
-                return False
-                
-            success = response is not None
-            if success:
-                logger.info(f"Successfully redid group {group_id} in pipeline {pipeline_id}")
-            else:
-                logger.error(f"Failed to redo group {group_id} in pipeline {pipeline_id}")
-            return success
-        except Exception as e:
-            logger.error(f"Error redoing group {group_id} in pipeline {pipeline_id}: {str(e)}")
             return False
     
     def resync_group(self, pipeline_id: str, group_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
