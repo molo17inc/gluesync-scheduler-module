@@ -322,7 +322,8 @@ class JobService:
                     now = datetime.now(tz)
                     
                     # Use croniter to calculate the next run time
-                    cron_iter = croniter(job_data.cron_expression, now)
+                    day_or = getattr(job_data, 'day_or', True)  # Default to True if not specified
+                    cron_iter = croniter(job_data.cron_expression, now, day_or=day_or)
                     next_run_datetime = cron_iter.get_next(datetime)
                     
                     # Make sure the datetime has the correct timezone
@@ -364,7 +365,9 @@ class JobService:
                 # Always store the configured timezone name
                 timezone_name=settings.TIMEZONE,
                 # Set the flag to track if job was created with cron expression
-                is_cron_expression=is_cron_expression
+                is_cron_expression=is_cron_expression,
+                # Set the day_or parameter for croniter
+                day_or=job_data.day_or
             )
             
             # Generate a unique identifier for the cron job
@@ -597,7 +600,8 @@ class JobService:
                         logger.info(f"Actual days job will run based on cron: {actual_days}")
                     
                     # Use croniter to calculate the next run time
-                    cron_iter = croniter(db_job.cron_expression, now)
+                    day_or = getattr(db_job, 'day_or', True)  # Default to True if not specified
+                    cron_iter = croniter(db_job.cron_expression, now, day_or=day_or)
                     next_run_datetime = cron_iter.get_next(datetime)
                     
                     # Make sure the datetime has the correct timezone

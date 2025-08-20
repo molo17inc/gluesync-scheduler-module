@@ -65,6 +65,7 @@ class ScheduledJob(Base):
     start_time = Column(String, nullable=True)
     timezone_name = Column(String, nullable=True)
     is_cron_expression = Column(Boolean, default=False, nullable=False)
+    day_or = Column(Boolean, default=True, nullable=False)
 
 
 class Setting(Base):

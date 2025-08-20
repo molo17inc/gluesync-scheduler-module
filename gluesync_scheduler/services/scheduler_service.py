@@ -294,7 +294,7 @@ class SchedulerService:
     
     def _execute_job(self, job_id: int, job_name: str) -> None:
         """
-        Execute a job
+        Execute a job with day_or filtering
         
         Args:
             job_id: The ID of the job to execute
@@ -308,20 +308,33 @@ class SchedulerService:
             with open(log_file, 'a') as f:
                 f.write(f"[{datetime.now(timezone.utc)}] Running job {job_id}: {job_name}\n")
             
-            # DIRECTLY execute the job logic instead of making an HTTP request
-            # This avoids any potential recursion issues with JSON serialization
-            logger.info(f"Executing scheduled job {job_id}: {job_name}")
-            
-            # Import here to avoid circular imports
+            # Get job details from database to check day_or parameter
             from gluesync_scheduler.db.database import get_db
             from gluesync_scheduler.services.job_service import JobService
             
             # Get a database connection
             db = next(get_db())
+            job_service = JobService(db)
+            
+            # Get the job details
+            job = job_service.get_job(job_id)
+            if not job:
+                logger.error(f"Job {job_id} not found in database")
+                return
+            
+            # Check if job should actually run based on day_or logic
+            if not self._should_job_run_now(job):
+                logger.info(f"Job {job_id} skipped due to day_or=False logic")
+                with open(log_file, 'a') as f:
+                    f.write(f"[{datetime.now(timezone.utc)}] Job skipped due to day_or=False logic\n")
+                return
+            
+            # DIRECTLY execute the job logic instead of making an HTTP request
+            # This avoids any potential recursion issues with JSON serialization
+            logger.info(f"Executing scheduled job {job_id}: {job_name}")
             
             try:
-                # Create job service and run the job directly
-                job_service = JobService(db)
+                # Job service already created above for day_or check
                 result = job_service.run_job(job_id)
                 
                 # Extract values from the result dictionary
@@ -376,6 +389,82 @@ class SchedulerService:
             
             # Re-raise the exception so APScheduler knows the job failed
             raise
+
+    def _should_job_run_now(self, job: ScheduledJob) -> bool:
+        """
+        Check if job should run now based on day_or logic
+        
+        Args:
+            job: The scheduled job to check
+            
+        Returns:
+            True if job should run, False if it should be skipped
+        """
+        # If day_or is True (default), always run (APScheduler already scheduled it correctly)
+        day_or = getattr(job, 'day_or', True)
+        if day_or:
+            return True
+        
+        # If day_or is False, we need to check if BOTH day-of-month AND day-of-week match
+        return self._validate_day_or_false_logic(job)
+    
+    def _validate_day_or_false_logic(self, job: ScheduledJob) -> bool:
+        """
+        Validate that current time matches AND logic for day-of-month and day-of-week
+        
+        Args:
+            job: The scheduled job to validate
+            
+        Returns:
+            True if current time matches both day-of-month and day-of-week conditions
+        """
+        from croniter import croniter
+        import pytz
+        
+        try:
+            # Get current time in job's timezone
+            job_timezone = getattr(job, 'timezone_name', None) or settings.TIMEZONE
+            tz = pytz.timezone(job_timezone)
+            now = datetime.now(tz)
+            
+            # Parse cron expression
+            cron_parts = job.cron_expression.split()
+            if len(cron_parts) != 5:
+                logger.warning(f"Invalid cron expression for job {job.id}: {job.cron_expression}")
+                return True  # Invalid cron, let it run
+            
+            minute, hour, day_of_month, month, day_of_week = cron_parts
+            
+            # If either day_of_month or day_of_week is '*', use OR logic (standard behavior)
+            if day_of_month == '*' or day_of_week == '*':
+                return True
+            
+            # Both are specified - use croniter to validate with day_or=False
+            # Create croniter with day_or=False and check if current time is valid
+            cron_iter = croniter(job.cron_expression, now, day_or=False)
+            
+            # Get the previous valid time with day_or=False logic
+            prev_time = cron_iter.get_prev(datetime)
+            
+            # If the previous valid time is very recent (within last minute), 
+            # then current time is valid for day_or=False logic
+            time_diff = (now - prev_time).total_seconds()
+            
+            # Allow execution if we're within the same minute as a valid time
+            should_run = time_diff < 60
+            
+            logger.debug(f"Job {job.id} day_or=False validation: "
+                        f"prev_valid_time={prev_time}, "
+                        f"current_time={now}, "
+                        f"time_diff={time_diff}s, "
+                        f"should_run={should_run}")
+            
+            return should_run
+            
+        except Exception as e:
+            logger.error(f"Error validating day_or logic for job {job.id}: {str(e)}")
+            # On error, allow the job to run to avoid blocking legitimate executions
+            return True
 
 # Create a global instance for easy import
 scheduler_service = SchedulerService.get_instance()

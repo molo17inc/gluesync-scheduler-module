@@ -89,6 +89,7 @@ class JobBase(BaseModel):
     snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
+    day_or: bool = Field(True, description="Croniter day_or parameter: True for OR logic between day-of-month and day-of-week (default cron behavior), False for AND logic")
     
     @validator("schedule", "cron_expression")
     def validate_schedule_options(cls, v, values):
@@ -130,6 +131,7 @@ class JobUpdate(BaseModel):
     snapshot_write_method: Optional[str] = Field(None, description="Updated write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
+    day_or: Optional[bool] = Field(None, description="Updated croniter day_or parameter: True for OR logic between day-of-month and day-of-week (default cron behavior), False for AND logic")
     
     model_config = ConfigDict(
         json_schema_extra = {
@@ -144,7 +146,8 @@ class JobUpdate(BaseModel):
                 },
                 "snapshot_write_method": "INSERT",
                 "enabled": True,
-                "is_cron_expression": False
+                "is_cron_expression": False,
+                "day_or": True
             }
         }
     )
@@ -166,6 +169,7 @@ class Job(JobBase):
     # Explicitly re-define snapshot_write_method to ensure it's included in the response
     snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
+    day_or: bool = Field(True, description="Croniter day_or parameter: True for OR logic between day-of-month and day-of-week (default cron behavior), False for AND logic")
     
     # Ensure schedule_days is always populated
     @validator('schedule_days', always=True)
@@ -251,7 +255,9 @@ class Job(JobBase):
             now = datetime.now(tz)
             
             # Use croniter to calculate the next run time
-            cron_iter = croniter(cron, now)
+            # Get day_or parameter from values, default to True
+            day_or = values.get('day_or', True)
+            cron_iter = croniter(cron, now, day_or=day_or)
             next_datetime = cron_iter.get_next(datetime)
             
             # Make sure the datetime has the correct timezone
@@ -294,6 +300,7 @@ class Job(JobBase):
                 "with_snapshot": True,
                 "snapshot_write_method": "UPSERT",
                 "enabled": True,
+                "day_or": True,
                 "command": "python3 play_pause.py resync --pipeline pipeline-123 --entity entity-456,entity-789",
                 "cron_job_identifier": "gluesync_job_1",
                 "created_at": "2025-03-20T10:00:00+02:00",
@@ -304,7 +311,8 @@ class Job(JobBase):
                 "last_run_error_time": None,
                 "next_run": "2025-03-21T00:00:00+02:00",
                 "schedule_days": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
-                "start_time": "2025-04-14T23:19:46+0200"
+                "start_time": "2025-04-14T23:19:46+0200",
+                "day_or": True
             }
         }
     )

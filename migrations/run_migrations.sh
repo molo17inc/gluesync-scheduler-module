@@ -20,4 +20,8 @@ python3 "$SCRIPT_DIR/migrate_add_snapshot_write_method.py" "$@"
 echo "Running migration: migrate_add_is_cron_expression.py"
 python3 "$SCRIPT_DIR/migrate_add_is_cron_expression.py" "$@"
 
+# Add day_or column migration
+echo "Running migration: migrate_add_day_or.py"
+python3 "$SCRIPT_DIR/migrate_add_day_or.py" "$@"
+
 echo "All migrations completed."
