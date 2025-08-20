@@ -406,6 +406,35 @@ Examples:
 - `0 0 * * 0` - Run once a week on Sunday at midnight
 - `0 0 1 * *` - Run once a month on the 1st at midnight
 
+#### Advanced Day Matching with `day_or` Parameter
+
+When both day-of-month and day-of-week are specified in a cron expression, the `day_or` parameter controls how they are interpreted:
+
+- **`day_or: true` (default)**: Uses OR logic - job runs if EITHER condition matches (standard cron behavior)
+- **`day_or: false`**: Uses AND logic - job runs only when BOTH conditions match simultaneously
+
+**Examples:**
+
+For cron expression `"0 9 15 * 1"` (9 AM on 15th of month and Mondays):
+
+- With `day_or: true`: Runs at 9 AM on the 15th of any month OR on any Monday
+- With `day_or: false`: Runs at 9 AM only when the 15th falls on a Monday
+
+**API Usage:**
+
+```json
+{
+  "name": "Strict Monday 15th Job",
+  "cron_expression": "0 9 15 * 1",
+  "day_or": false,
+  "task_type": "entity_snapshot",
+  "pipeline_id": "pipeline-123",
+  "entity_ids": ["entity-456"]
+}
+```
+
+> **Note**: The `day_or` parameter only affects scheduling when both day-of-month and day-of-week are explicitly specified (not wildcards). If either field uses `*`, standard OR logic is applied regardless of the `day_or` setting.
+
 #### Day of Week Mapping
 
 In cron expressions, days of the week are represented as numbers:
