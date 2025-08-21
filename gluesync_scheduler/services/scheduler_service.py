@@ -400,20 +400,59 @@ class SchedulerService:
         Returns:
             True if job should run, False if it should be skipped
         """
-        # If day_or is True (default), always run (APScheduler already scheduled it correctly)
+        # Get the day_or parameter
         day_or = getattr(job, 'day_or', True)
+        
+        # Parse cron expression once and pass to validation method
+        cron_parts = job.cron_expression.split()
+        if len(cron_parts) != 5:
+            return True  # Invalid cron, let it run
+        
+        minute, hour, day_of_month, month, day_of_week = cron_parts
+        
+        # Check if either field is effectively a wildcard (*, ranges, lists, etc.)
+        if self._is_wildcard_field(day_of_month) or self._is_wildcard_field(day_of_week):
+            return True  # APScheduler handles OR logic correctly
+        
+        # If day_or is True (default), always run (APScheduler already scheduled it correctly with OR logic)
         if day_or:
             return True
         
         # If day_or is False, we need to check if BOTH day-of-month AND day-of-week match
-        return self._validate_day_or_false_logic(job)
+        # Pass parsed cron_parts to avoid duplicate parsing
+        return self._validate_day_or_false_logic(job, cron_parts)
     
-    def _validate_day_or_false_logic(self, job: ScheduledJob) -> bool:
+    def _is_wildcard_field(self, field: str) -> bool:
+        """
+        Check if a cron field is effectively a wildcard (allows any value)
+        
+        Args:
+            field: The cron field to check
+            
+        Returns:
+            True if the field is a wildcard, range, list, or step that covers all values
+        """
+        if field == '*':
+            return True
+        
+        # Check for step values that effectively cover everything
+        if '/' in field:
+            base, step = field.split('/', 1)
+            if base == '*':
+                return True  # Any step with '*' base is effectively a wildcard
+        
+        # For simplicity, treat ranges and lists as non-wildcards
+        # This ensures day_or logic is applied when ranges/lists are used
+        # Examples: "1-15" or "1,3,5" are not wildcards
+        return False
+    
+    def _validate_day_or_false_logic(self, job: ScheduledJob, cron_parts: list = None) -> bool:
         """
         Validate that current time matches AND logic for day-of-month and day-of-week
         
         Args:
             job: The scheduled job to validate
+            cron_parts: Pre-parsed cron parts to avoid duplicate parsing
             
         Returns:
             True if current time matches both day-of-month and day-of-week conditions
@@ -422,21 +461,27 @@ class SchedulerService:
         import pytz
         
         try:
-            # Get current time in job's timezone
-            job_timezone = getattr(job, 'timezone_name', None) or settings.TIMEZONE
+            # Get current time in job's timezone with safer timezone handling
+            job_timezone_attr = getattr(job, 'timezone_name', None)
+            if job_timezone_attr and isinstance(job_timezone_attr, str):
+                job_timezone = job_timezone_attr
+            else:
+                job_timezone = settings.TIMEZONE
+            
             tz = pytz.timezone(job_timezone)
             now = datetime.now(tz)
             
-            # Parse cron expression
-            cron_parts = job.cron_expression.split()
-            if len(cron_parts) != 5:
-                logger.warning(f"Invalid cron expression for job {job.id}: {job.cron_expression}")
-                return True  # Invalid cron, let it run
+            # Use pre-parsed cron parts if provided, otherwise parse
+            if cron_parts is None:
+                cron_parts = job.cron_expression.split()
+                if len(cron_parts) != 5:
+                    logger.warning(f"Invalid cron expression for job {job.id}: {job.cron_expression}")
+                    return True  # Invalid cron, let it run
             
             minute, hour, day_of_month, month, day_of_week = cron_parts
             
-            # If either day_of_month or day_of_week is '*', use OR logic (standard behavior)
-            if day_of_month == '*' or day_of_week == '*':
+            # Double-check wildcards (shouldn't reach here if wildcards exist)
+            if self._is_wildcard_field(day_of_month) or self._is_wildcard_field(day_of_week):
                 return True
             
             # Both are specified - use croniter to validate with day_or=False
