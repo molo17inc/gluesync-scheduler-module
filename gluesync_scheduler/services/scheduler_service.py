@@ -64,6 +64,11 @@ class SchedulerService:
                 jobstores={
                     'default': MemoryJobStore()
                 },
+                job_defaults={
+                    'coalesce': True,
+                    'max_instances': 1,
+                    'misfire_grace_time': 3600,
+                },
                 timezone=settings.TIMEZONE
             )
             
@@ -218,7 +223,8 @@ class SchedulerService:
                 replace_existing=True,
                 args=[job.id, job.name],
                 misfire_grace_time=3600,   # Allow misfires up to an hour
-                coalesce=True              # Only run once if multiple executions are missed
+                coalesce=True,             # Only run once if multiple executions are missed
+                max_instances=1            # Avoid overlapping executions of the same job
                 # Let the trigger naturally determine the next run time
             )
             
@@ -350,22 +356,22 @@ class SchedulerService:
                     with open(error_file, 'a') as f:
                         f.write(f"[{datetime.now(timezone.utc)}] {error_message}\n")
                     logger.error(error_message)
-                    # Raise an exception so APScheduler knows the job failed
-                    raise Exception(f"Job {job_id} execution failed: {message}")
+                    # Do NOT raise to avoid crashing the scheduler/app; job status is already persisted
+                    return
             
             except Exception as e:
                 error_message = f"Exception occurred while executing job {job_id}: {str(e)}"
-                logger.error(error_message)
+                logger.exception(error_message)
                 
                 # Log to error file
                 with open(error_file, 'a') as f:
-                    f.write(f"[{datetime.now()}] {error_message}\n")
+                    f.write(f"[{datetime.now(timezone.utc)}] {error_message}\n")
                 
-                # Re-raise the exception so APScheduler knows the job failed
-                raise
+                # Do NOT re-raise to avoid crashing the scheduler/app
+                return
             
         except Exception as e:
-            logger.error(f"Error executing job {job_id}: {str(e)}")
+            logger.exception(f"Error executing job {job_id}: {str(e)}")
             
             # Log the error to the error file
             try:
@@ -374,8 +380,8 @@ class SchedulerService:
             except Exception:
                 pass
             
-            # Re-raise the exception so APScheduler knows the job failed
-            raise
+            # Do NOT re-raise to avoid crashing the scheduler/app
+            return
 
 # Create a global instance for easy import
 scheduler_service = SchedulerService.get_instance()
