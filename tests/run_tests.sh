@@ -49,7 +49,7 @@ USE_MOCK=${USE_MOCK:-true}
 # Install the SDK from the submodule or use mock
 if [ "$USE_MOCK" = "false" ] && [ -d "./gluesync-sdk" ]; then
     echo "Installing real gluesync-sdk from submodule..."
-    python3 -m pip install -e ./gluesync-sdk --break-system-packages
+    python3 -m pip install ./gluesync-sdk --break-system-packages
     echo "Using real gluesync-sdk implementation"
 else
     echo "Using mock gluesync-sdk implementation"

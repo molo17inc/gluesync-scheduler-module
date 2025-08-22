@@ -37,10 +37,7 @@ RUN python -m pip install --upgrade pip wheel setuptools
 
 # Install the SDK directly instead of trying to create a wheel
 RUN cd ./gluesync-sdk && \
-    python -m pip install -e .
-
-# List the site-packages directory to see what's installed
-RUN ls -la /usr/local/lib/python3.11/site-packages
+    python -m pip install .
 
 # Copy the installed SDK to the wheels directory - use a more general approach
 RUN cd /usr/local/lib/python3.11/site-packages && \
