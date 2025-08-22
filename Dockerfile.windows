@@ -36,8 +36,10 @@ RUN C:\\Python311\\python.exe --version && C:\\Python311\\python.exe -m pip --ve
 # Upgrade pip and Python build tools (setuptools & wheel)
 RUN C:\\Python311\\python.exe -m pip install --upgrade pip setuptools wheel
 
-# Verify that the Visual C++ compiler is available
-RUN where cl.exe
+# Set up Visual C++ environment for compiling native Python packages
+# This ensures cl.exe and related tools are available for pip
+SHELL ["cmd", "/S", "/C"]
+RUN "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\BuildTools\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
 
 # Copy SDK submodule first to leverage caching
 COPY ./gluesync-sdk ./gluesync-sdk
@@ -45,7 +47,7 @@ COPY ./gluesync-sdk ./gluesync-sdk
 # Install specific websockets version to avoid compatibility issues
 RUN C:\\Python311\\python.exe -m pip install websockets==11.0.3
 
-# Install SDK in editable mode
+# Install SDK in editable mode (requires compiler)
 RUN cd ./gluesync-sdk && C:\\Python311\\python.exe -m pip install -e .
 
 # Copy requirements and install dependencies
