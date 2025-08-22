@@ -86,11 +86,11 @@ deploy-windows:
     - build
   stage: deploy-windows
   tags:
-    - windows-runner-hq
+    - hq-windows-shell
   script:
     # Stop on first error
     - $ErrorActionPreference = "Stop"
-    
+
     # Docker login with proper error handling
     - |
       Write-Host "Logging into Docker registry..."
@@ -101,7 +101,7 @@ deploy-windows:
         Write-Error "❌ Docker login failed: $_"
         exit 1
       }
-    
+
     # Extract version information from tag
     - |
       Write-Host "Processing tag: $env:CI_COMMIT_TAG"
@@ -109,15 +109,15 @@ deploy-windows:
       $IMAGE_NAME = "molo17/$env:APP_NAME"
       $VERSION_TAG = "${IMAGE_NAME}:${TAG_PART}"
       $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-windows"
-      
+
       Write-Host "Image name: ${IMAGE_NAME}"
       Write-Host "Version tag: ${VERSION_TAG_WINDOWS}"
-      
+
       # Set environment variables for use in build
       $env:IMAGE_NAME = ${IMAGE_NAME}
       $env:VERSION_TAG_WINDOWS = ${VERSION_TAG_WINDOWS}
       $env:TAG_PART = ${TAG_PART}
-     
+
     # Ensure submodules are available in this job too (Windows runner checks out repo separately)
     - |
       Write-Host "Initializing git submodules..."
@@ -137,7 +137,7 @@ deploy-windows:
         exit $LASTEXITCODE
       }
       Write-Host "✅ Docker build completed successfully"
-    
+
     # Push Windows Docker image
     - |
       Write-Host "Pushing Windows Docker image..."
@@ -148,7 +148,7 @@ deploy-windows:
       }
       Write-Host "✅ Docker push completed successfully"
       Write-Host "Windows image available at: ${env:VERSION_TAG_WINDOWS}"
-    
+
     # Tag as latest-windows for release branches
     - |
       if ($env:CI_COMMIT_TAG -match '^release-') {
@@ -182,17 +182,17 @@ deploy-manifest:
     - deploy-windows
   script:
     - echo "Creating multi-platform manifest..."
-    
+
     # Set up Docker login
     - docker login -u danieleangeli -p "$CI_REGISTRY_PASSWORD"
-    
+
     # Extract version part from tag
     - |
       TAG_PART=$(echo $CI_COMMIT_TAG | sed 's/^\(release-\|tag-\)//')
       IMAGE_NAME="molo17/$APP_NAME"
       VERSION_TAG="${IMAGE_NAME}:${TAG_PART}"
       VERSION_TAG_WINDOWS="${IMAGE_NAME}:${TAG_PART}-windows"
-    
+
     # Check if Windows image exists and create multi-platform manifest accordingly
     - |
       # Check if Windows image exists
@@ -204,7 +204,7 @@ deploy-manifest:
         echo "Windows image not found: $VERSION_TAG_WINDOWS"
         echo "Will create Linux-only manifests"
       fi
-      
+
       if [[ $CI_COMMIT_TAG == release-* ]]; then
         echo "Creating manifest for release version..."
         if [ "$WINDOWS_EXISTS" = true ]; then
