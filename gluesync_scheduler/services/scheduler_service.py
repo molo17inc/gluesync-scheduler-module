@@ -31,7 +31,6 @@ from typing import Dict, Optional, List, Any
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.memory import MemoryJobStore
-from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from fastapi import HTTPException, status
 
 from gluesync_scheduler.config.settings import settings
@@ -72,8 +71,6 @@ class SchedulerService:
                 },
                 timezone=settings.TIMEZONE
             )
-            # Add listener to reflect real job outcome in logs based on return value
-            self.scheduler.add_listener(self._job_event_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
             
             # Start the scheduler
             self.scheduler.start()
@@ -301,27 +298,6 @@ class SchedulerService:
                 detail=f"Error removing scheduled job: {str(e)}"
             )
     
-    def _job_event_listener(self, event) -> None:
-        """APScheduler listener that logs actual job outcome using return values.
-        This avoids crashing the app while still surfacing FAILED vs SUCCEEDED clearly.
-        """
-        try:
-            job_id = getattr(event, 'job_id', 'unknown')
-            # If there was an exception at the scheduler level, log as error
-            if getattr(event, 'exception', None):
-                logger.error(f"APScheduler job {job_id} error: {getattr(event, 'exception', '')}")
-                return
-            # For executed events, inspect retval for our structured result
-            retval = getattr(event, 'retval', None)
-            if isinstance(retval, dict) and 'success' in retval:
-                status_text = 'FAILED' if not retval.get('success') else 'SUCCEEDED'
-                message = retval.get('message', '')
-                logger.info(f"APScheduler job {job_id} completed: {status_text} - {message}")
-            else:
-                logger.info(f"APScheduler job {job_id} executed (no structured result)")
-        except Exception:
-            logger.exception("Error in scheduler job event listener")
-    
     def _execute_job(self, job_id: int, job_name: str) -> None:
         """
         Execute a job
@@ -375,14 +351,13 @@ class SchedulerService:
                 # Log success or failure
                 if success:
                     logger.info(f"Successfully executed job {job_id}: {message}")
-                    return {"success": True, "message": message, "job_id": job_id}
                 else:
                     error_message = f"Error in job {job_id}: {message}"
                     with open(error_file, 'a') as f:
                         f.write(f"[{datetime.now(timezone.utc)}] {error_message}\n")
                     logger.error(error_message)
-                    # Return structured failure (no raise) so listener can log FAILED
-                    return {"success": False, "message": message, "job_id": job_id}
+                    # Propagate as exception so APScheduler marks job as failed
+                    raise RuntimeError(error_message)
             
             except Exception as e:
                 error_message = f"Exception occurred while executing job {job_id}: {str(e)}"
@@ -392,8 +367,13 @@ class SchedulerService:
                 with open(error_file, 'a') as f:
                     f.write(f"[{datetime.now(timezone.utc)}] {error_message}\n")
                 
-                # Return structured failure (no raise)
-                return {"success": False, "message": error_message, "job_id": job_id}
+                # Re-raise so the scheduler can record the failure
+                raise
+            finally:
+                try:
+                    db.close()
+                except Exception:
+                    pass
             
         except Exception as e:
             logger.exception(f"Error executing job {job_id}: {str(e)}")
@@ -405,8 +385,8 @@ class SchedulerService:
             except Exception:
                 pass
             
-            # Return structured failure (no raise)
-            return {"success": False, "message": str(e), "job_id": job_id}
+            # Re-raise so APScheduler marks the job as failed
+            raise
 
 # Create a global instance for easy import
 scheduler_service = SchedulerService.get_instance()
