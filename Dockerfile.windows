@@ -9,27 +9,39 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV GLUESYNC_LICENSE_FILE=C:/opt/gluesync/data/gs-license.dat
 ENV GLUESYNC_SECURITY_CONFIG=C:/opt/gluesync/data/security-config.json
 
-RUN md C:\opt\gluesync\data; md C:\app\data; md C:\app\logs
+# Create required directories
+RUN powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path C:\opt\gluesync\data, C:\app\data, C:\app\logs"
 
-# Install Chocolatey, Python, Git, Visual C++ Build Tools in one RUN
-RUN powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')); choco install -y python --version=3.11.9; choco install -y git; choco install -y visualcpp-build-tools --package-parameters '--includeRecommended --quiet --norestart'; setx PATH 'C:\Python311;C:\Python311\Scripts;C:\ProgramData\chocolatey\bin;%PATH%'"
+# Install Chocolatey, Python, Git, and Visual C++ Build Tools
+RUN powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')); \
+    choco install -y python --version=3.11.9; \
+    choco install -y git; \
+    choco install -y visualcpp-build-tools --package-parameters '--includeRecommended --quiet --norestart'; \
+    setx PATH 'C:\Python311;C:\Python311\Scripts;C:\ProgramData\chocolatey\bin;%PATH%'"
 
 ENV PATH="C:/Python311;C:/Python311/Scripts;C:/ProgramData/chocolatey/bin:${PATH}"
 
+# Verify Python installation and upgrade pip
 RUN C:\\Python311\\python.exe --version && C:\\Python311\\python.exe -m pip --version
 RUN C:\\Python311\\python.exe -m pip install --upgrade pip setuptools wheel
 
-# Copy SDK first
+# Copy SDK
 COPY ./gluesync-sdk ./gluesync-sdk
 
-# Install twofish and SDK in one RUN
-RUN powershell -NoProfile -Command "& 'C:\Program Files (x86)\Microsoft Visual Studio\BuildTools\VC\Auxiliary\Build\vcvarsall.bat' x64; C:\\Python311\\python.exe -m pip install websockets==11.0.3; Set-Location ./gluesync-sdk; C:\\Python311\\python.exe -m pip install -e ."
+# Install websockets and SDK
+RUN powershell -NoProfile -Command "& 'C:\Program Files (x86)\Microsoft Visual Studio\BuildTools\VC\Auxiliary\Build\vcvarsall.bat' x64; \
+    C:\\Python311\\python.exe -m pip install websockets==11.0.3; \
+    Set-Location ./gluesync-sdk; \
+    C:\\Python311\\python.exe -m pip install -e ."
 
-# Copy requirements and install dependencies in one RUN
+# Copy requirements and install dependencies
 COPY requirements.txt .
-RUN powershell -NoProfile -Command "& 'C:\Program Files (x86)\Microsoft Visual Studio\BuildTools\VC\Auxiliary\Build\vcvarsall.bat' x64; C:\\Python311\\python.exe -m pip install -r requirements.txt"
+RUN powershell -NoProfile -Command "& 'C:\Program Files (x86)\Microsoft Visual Studio\BuildTools\VC\Auxiliary\Build\vcvarsall.bat' x64; \
+    C:\\Python311\\python.exe -m pip install -r requirements.txt"
 
-# Copy application code and configs
+# Copy application code and configurations
 COPY gluesync_scheduler/ ./gluesync_scheduler/
 COPY main.py .
 COPY run_scheduler.py .
@@ -53,9 +65,13 @@ ENV TMP=C:/temp
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD C:\\Python311\\python.exe -c "import urllib.request, os; url='http://'+os.environ.get('HOST','localhost')+':8000/health'; urllib.request.urlopen(url)" || exit 1
+# Healthcheck endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD C:\\Python311\\python.exe -c "import urllib.request, os; url='http://'+os.environ.get('HOST','localhost')+':8000/health'; urllib.request.urlopen(url)" || exit 1
 
 # Create entrypoint script
-RUN powershell -Command "Set-Content -Path entrypoint.bat -Value '@echo off'; Add-Content -Path entrypoint.bat -Value 'echo Starting Gluesync Chronos Module...'; Add-Content -Path entrypoint.bat -Value 'C:\\Python311\\python.exe run_scheduler.py'"
+RUN powershell -NoProfile -Command "Set-Content -Path entrypoint.bat -Value '@echo off'; \
+    Add-Content -Path entrypoint.bat -Value 'echo Starting Gluesync Chronos Module...'; \
+    Add-Content -Path entrypoint.bat -Value 'C:\\Python311\\python.exe run_scheduler.py'"
 
 ENTRYPOINT ["entrypoint.bat"]
