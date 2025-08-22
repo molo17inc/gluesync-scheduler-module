@@ -56,6 +56,10 @@ deploy:
       if [[ $CI_COMMIT_TAG == release-* ]]; then
         echo "Building multi-architecture release with latest tag..."
         
+        # Create and use a new builder instance
+        docker buildx create --name multiarch-builder --use
+        docker buildx inspect --bootstrap
+        
         # Build and push multi-platform images with latest tag
         docker buildx build --platform linux/amd64,linux/arm64 \
           --tag $DEFAULT_NAME:latest \
