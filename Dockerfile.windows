@@ -16,31 +16,33 @@ ENV GLUESYNC_SECURITY_CONFIG=C:/opt/gluesync/data/security-config.json
 # Create necessary directories
 RUN md C:\opt\gluesync\data && md C:\app\data && md C:\app\logs
 
-# Install Chocolatey, Python 3.11.9, Git, and Visual C++ Build Tools in a single step
+# Install Chocolatey, Python 3.11.9, Git, and Visual C++ Build Tools
+# Visual C++ Build Tools are required to compile native Python packages (like twofish)
 RUN powershell -NoProfile -ExecutionPolicy Bypass -Command "\
-    $ErrorActionPreference = 'Stop'; \
+    $ErrorActionPreference='Stop'; \
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
     iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')); \
     choco install -y python --version=3.11.9; \
     choco install -y git; \
-    choco install -y visualcpp-build-tools --package-parameters '--add Microsoft.VisualCpp.BuildTools --includeRecommended --quiet --norestart'; \
-    " && \
-    setx PATH \"C:\Python311;C:\Python311\Scripts;C:\ProgramData\chocolatey\bin;%PATH%\"
+    choco install -y visualcpp-build-tools --package-parameters '--includeRecommended --quiet --norestart'; \
+    " && setx PATH \"C:\Python311;C:\Python311\Scripts;C:\ProgramData\chocolatey\bin;%PATH%\"
 
 # Ensure PATH is set for subsequent layers
 ENV PATH="C:/Python311;C:/Python311/Scripts;C:/ProgramData/chocolatey/bin:${PATH}"
 
-# Verify Python and Pip installation
-RUN C:\\Python311\\python.exe --version && \
-    C:\\Python311\\python.exe -m pip --version
+# Verify Python and pip installation
+RUN C:\\Python311\\python.exe --version && C:\\Python311\\python.exe -m pip --version
 
-# Upgrade pip and build tools
+# Upgrade pip and Python build tools (setuptools & wheel)
 RUN C:\\Python311\\python.exe -m pip install --upgrade pip setuptools wheel
 
-# Copy SDK submodule first
+# Verify that the Visual C++ compiler is available
+RUN where cl.exe
+
+# Copy SDK submodule first to leverage caching
 COPY ./gluesync-sdk ./gluesync-sdk
 
-# Install specific websockets version first (avoid compatibility issues)
+# Install specific websockets version to avoid compatibility issues
 RUN C:\\Python311\\python.exe -m pip install websockets==11.0.3
 
 # Install SDK in editable mode
@@ -50,7 +52,7 @@ RUN cd ./gluesync-sdk && C:\\Python311\\python.exe -m pip install -e .
 COPY requirements.txt .
 RUN C:\\Python311\\python.exe -m pip install -r requirements.txt
 
-# Copy application code and configs
+# Copy application code and configuration files
 COPY gluesync_scheduler/ ./gluesync_scheduler/
 COPY main.py .
 COPY run_scheduler.py .
@@ -73,17 +75,17 @@ ENV PYTHONPATH=C:/app
 ENV TEMP=C:/temp
 ENV TMP=C:/temp
 
-# Expose port
+# Expose the application port
 EXPOSE 8000
 
 # Healthcheck using Python
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD C:\\Python311\\python.exe -c "import urllib.request, os; url = 'http://' + os.environ.get('HOST', 'localhost') + ':8000/health'; urllib.request.urlopen(url)" || exit 1
+    CMD C:\\Python311\\python.exe -c "import urllib.request, os; url='http://'+os.environ.get('HOST','localhost')+':8000/health'; urllib.request.urlopen(url)" || exit 1
 
 # Create entrypoint script
 RUN powershell -Command "Set-Content -Path entrypoint.bat -Value '@echo off'" && \
     powershell -Command "Add-Content -Path entrypoint.bat -Value 'echo Starting Gluesync Chronos Module...'" && \
     powershell -Command "Add-Content -Path entrypoint.bat -Value 'C:\\Python311\\python.exe run_scheduler.py'"
 
-# Entrypoint
+# Set entrypoint
 ENTRYPOINT ["entrypoint.bat"]
