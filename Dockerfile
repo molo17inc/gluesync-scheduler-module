@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get install -y --no-install-recommends \
     gcc \
     libc6-dev \
     python3-dev && \
@@ -89,7 +89,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TIMEZONE=UTC
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get install -y --no-install-recommends \
     curl \
     openssl && \
     apt-get clean && \
@@ -118,8 +118,7 @@ COPY . .
 RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh
 
 # Install SDK dependencies one by one to avoid issues
-RUN python -m pip install --upgrade pip && \
-    python -m pip install websockets==11.0.3 && \
+RUN python -m pip install websockets==11.0.3 && \
     python -m pip install requests>=2.25.1 && \
     python -m pip install python-dateutil>=2.8.1 && \
     python -m pip install PyJWT>=2.0.1 && \
@@ -128,7 +127,7 @@ RUN python -m pip install --upgrade pip && \
     python -m pip install typing-extensions>=3.7.4.3
 
 # Install OpenSSL for certificate handling and required dependencies
-RUN apt-get update && apt-get install -y openssl build-essential libssl-dev
+RUN apt-get install -y build-essential libssl-dev
 
 # Create Python path file for SDK
 RUN mkdir -p /usr/local/lib/python3.11/site-packages/gluesync_sdk && \
