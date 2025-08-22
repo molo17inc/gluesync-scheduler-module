@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Install build dependencies
-RUN apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libc6-dev \
     python3-dev && \
@@ -89,7 +89,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TIMEZONE=UTC
 
 # Install runtime dependencies
-RUN apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     openssl && \
     apt-get clean && \
@@ -127,7 +127,7 @@ RUN python -m pip install websockets==11.0.3 && \
     python -m pip install typing-extensions>=3.7.4.3
 
 # Install OpenSSL for certificate handling and required dependencies
-RUN apt-get install -y build-essential libssl-dev
+RUN apt-get update && apt-get install -y build-essential libssl-dev
 
 # Create Python path file for SDK
 RUN mkdir -p /usr/local/lib/python3.11/site-packages/gluesync_sdk && \
