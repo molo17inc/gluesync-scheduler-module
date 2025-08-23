@@ -1,5 +1,5 @@
 # Build stage for SDK installation
-FROM python:3.11-slim AS builder
+FROM python:3.13-slim AS builder
 
 WORKDIR /build
 
@@ -41,19 +41,16 @@ RUN cd /usr/local/lib/python3.11/site-packages && \
     find . -name "*gluesync*" -o -name "*twofish*" | tar -czf /wheels/gluesync-sdk.tar.gz -T -
 
 # Final stage
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
 # Install required system packages in a single layer
-ARG DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cron \
     curl \
     procps \
     tzdata \
-    build-essential \
-    libssl-dev \
     openssl && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
