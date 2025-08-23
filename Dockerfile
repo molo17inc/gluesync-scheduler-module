@@ -45,12 +45,11 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install required system packages in a single layer
+# Install required system packages in a single layer (minimal)
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     procps \
-    tzdata \
     openssl && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
