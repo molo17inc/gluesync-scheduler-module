@@ -3,11 +3,14 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
+# Install build dependencies (single RUN)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
-    python3-dev
+    libc6-dev \
+    python3-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set environment variables for Python and dependency installation
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -15,13 +18,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libc6-dev \
-    python3-dev && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Build dependencies already installed above
 
 # Copy only the SDK submodule
 COPY ./gluesync-sdk ./gluesync-sdk
@@ -48,12 +45,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install required system packages including timezone data
-RUN apt-get update && apt-get install -y \
+# Install required system packages in a single layer
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
     cron \
     curl \
     procps \
-    tzdata && \
+    tzdata \
+    build-essential \
+    libssl-dev \
+    openssl && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Create Gluesync default directories and app data directory
@@ -88,12 +90,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SSL_SKIP_VERIFY=True \
     TIMEZONE=UTC
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    openssl && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# (combined into single apt install above)
 
 # Copy the SDK code to the final stage
 COPY --from=builder /wheels /wheels
@@ -101,6 +98,8 @@ COPY --from=builder /build/gluesync-sdk /app/gluesync-sdk
 
 # Copy requirements and setup files
 COPY ./requirements.txt .
+# Install Python dependencies early to leverage Docker cache
+RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY ./setup.py .
 COPY ./entrypoint.sh .
 COPY ./README.md .
@@ -117,25 +116,16 @@ COPY . .
 # Make scripts executable
 RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh
 
-# Install SDK dependencies one by one to avoid issues
-RUN python -m pip install websockets==11.0.3 && \
-    python -m pip install requests>=2.25.1 && \
-    python -m pip install python-dateutil>=2.8.1 && \
-    python -m pip install PyJWT>=2.0.1 && \
-    python -m pip install cryptography>=3.4.6 && \
-    python -m pip install pydantic>=1.8.1 && \
-    python -m pip install typing-extensions>=3.7.4.3
+# Python dependencies installed from requirements.txt above
 
-# Install OpenSSL for certificate handling and required dependencies
-RUN apt-get update && apt-get install -y build-essential libssl-dev
+# (build-essential and libssl-dev installed above)
 
 # Create Python path file for SDK
 RUN mkdir -p /usr/local/lib/python3.11/site-packages/gluesync_sdk && \
     cp -r /app/gluesync-sdk/gluesync_sdk/* /usr/local/lib/python3.11/site-packages/gluesync_sdk/ && \
     touch /usr/local/lib/python3.11/site-packages/gluesync_sdk/__init__.py
 
-# Install other Python dependencies
-RUN python -m pip install --no-cache-dir -r requirements.txt
+# (Python dependencies were installed earlier for better caching)
 
 # Expose the port the app runs on
 EXPOSE 1717
