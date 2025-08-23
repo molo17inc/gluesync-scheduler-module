@@ -37,7 +37,7 @@ RUN cd ./gluesync-sdk && \
     python -m pip install .
 
 # Copy the installed SDK to the wheels directory - use a more general approach
-RUN cd /usr/local/lib/python3.11/site-packages && \
+RUN cd /usr/local/lib/python3.13/site-packages && \
     find . -name "*gluesync*" -o -name "*twofish*" | tar -czf /wheels/gluesync-sdk.tar.gz -T -
 
 # Final stage
@@ -117,9 +117,9 @@ RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh
 # (build-essential and libssl-dev installed above)
 
 # Create Python path file for SDK
-RUN mkdir -p /usr/local/lib/python3.11/site-packages/gluesync_sdk && \
-    cp -r /app/gluesync-sdk/gluesync_sdk/* /usr/local/lib/python3.11/site-packages/gluesync_sdk/ && \
-    touch /usr/local/lib/python3.11/site-packages/gluesync_sdk/__init__.py
+RUN mkdir -p /usr/local/lib/python3.13/site-packages/gluesync_sdk && \
+    cp -r /app/gluesync-sdk/gluesync_sdk/* /usr/local/lib/python3.13/site-packages/gluesync_sdk/ && \
+    touch /usr/local/lib/python3.13/site-packages/gluesync_sdk/__init__.py
 
 # (Python dependencies were installed earlier for better caching)
 
