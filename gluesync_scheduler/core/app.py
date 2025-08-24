@@ -310,45 +310,15 @@ async def startup_event():
                         # Continue with other migrations
                 else:
                     logger.warning(f"Migration file not found: {migration_path}")
-                    
-            # Verify the snapshot_write_method column exists after all migrations
-            try:
-                logger.info("Verifying migration results...")
-                from sqlalchemy import inspect
-                inspector = inspect(engine)
-                if 'scheduled_jobs' in inspector.get_table_names():
-                    columns = inspector.get_columns('scheduled_jobs')
-                    column_names = [col['name'] for col in columns]
-                    logger.info(f"Final scheduled_jobs columns: {column_names}")
-                    
-                    if 'snapshot_write_method' in column_names:
-                        logger.info("✅ Verification successful: snapshot_write_method column exists")
-                    else:
-                        logger.error("❌ Verification failed: snapshot_write_method column missing after migration")
-                        # Try to add it manually as a last resort
-                        logger.info("Attempting manual column addition...")
-                        with engine.connect() as connection:
-                            connection.execute(text(
-                                "ALTER TABLE scheduled_jobs ADD COLUMN snapshot_write_method VARCHAR NOT NULL DEFAULT 'UPSERT'"
-                            ))
-                            connection.commit()
-                            logger.info("Manual column addition completed")
-                else:
-                    logger.warning("scheduled_jobs table not found during verification")
-            except Exception as verify_error:
-                logger.error(f"Error during migration verification: {str(verify_error)}")
-                    
     except Exception as e:
         logger.error(f"Error running database migrations: {str(e)}")
         # Continue with startup even if migrations fail - the app might still work
-        
-    # Verify SQLAlchemy model and database schema are synchronized after migrations
     try:
         logger.info("Verifying database schema synchronization...")
         from gluesync_scheduler.models.models import ScheduledJob
         from sqlalchemy import inspect
         
-        logger.info(f"🔍 DATABASE DEBUG: Application DB_URL: {settings.DB_URL}")
+        logger.info(f"🔍 DATABASE: Application DB_URL: {settings.DB_URL}")
         
         engine = create_engine(settings.DB_URL)
         
@@ -357,33 +327,12 @@ async def startup_event():
             db_path = settings.DB_URL.replace('sqlite:///', '')
             if db_path.startswith('./'):
                 db_path = os.path.abspath(db_path)
-            logger.info(f"🔍 DATABASE DEBUG: Resolved database file path: {db_path}")
+            logger.info(f"🔍 DATABASE: Resolved database file path: {db_path}")
             if os.path.exists(db_path):
-                logger.info(f"🔍 DATABASE DEBUG: Database file exists, size: {os.path.getsize(db_path)} bytes")
+                logger.info(f"🔍 DATABASE: Database file exists, size: {os.path.getsize(db_path)} bytes")
             else:
-                logger.error(f"🔍 DATABASE DEBUG: Database file does not exist at {db_path}")
-        
-        # Check actual database schema
-        inspector = inspect(engine)
-        if 'scheduled_jobs' in inspector.get_table_names():
-            db_columns = inspector.get_columns('scheduled_jobs')
-            db_column_names = [col['name'] for col in db_columns]
-            logger.info(f"🔍 DATABASE DEBUG: Actual database columns: {db_column_names}")
-            
-            if 'snapshot_write_method' in db_column_names:
-                logger.info("✅ Database verification: snapshot_write_method column exists in actual database")
-            else:
-                logger.error("❌ Database verification: snapshot_write_method column missing from actual database")
-        
-        # Check that the model includes the snapshot_write_method column
-        model_columns = [col.name for col in ScheduledJob.__table__.columns]
-        logger.info(f"🔍 MODEL DEBUG: SQLAlchemy model columns: {model_columns}")
-        
-        if 'snapshot_write_method' in model_columns:
-            logger.info("✅ Schema verification: snapshot_write_method column present in SQLAlchemy model")
-        else:
-            logger.warning("⚠️ Schema verification: snapshot_write_method column missing from SQLAlchemy model")
-            
+                logger.error(f"🔍 DATABASE: Database file does not exist at {db_path}")
+
     except Exception as verification_error:
         logger.error(f"Error during schema verification: {str(verification_error)}")
     
