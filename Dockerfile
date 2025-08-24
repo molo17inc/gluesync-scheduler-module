@@ -42,6 +42,13 @@ RUN python -m pip wheel --wheel-dir=/wheels -r requirements.txt
 COPY ./gluesync-sdk ./gluesync-sdk
 RUN python -m pip wheel --wheel-dir=/wheels ./gluesync-sdk
 
+# Copy project files and build the application wheel (prepackaged for offline install)
+COPY ./setup.py ./
+COPY ./pyproject.toml ./
+COPY ./README.md ./
+COPY ./gluesync_scheduler ./gluesync_scheduler
+RUN python -m pip wheel --wheel-dir=/wheels .
+
 # Final stage
 FROM python:3.13-slim
 
@@ -72,6 +79,9 @@ RUN mkdir -p /opt/gluesync/data && \
 # Gluesync SDK settings using default paths
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PIP_NO_INDEX=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
     CORE_HUB_URL= \
     ENTITY_START_TIMEOUT=2 \
     HOST=0.0.0.0 \
@@ -97,7 +107,8 @@ COPY --from=builder /wheels /wheels
 COPY ./requirements.txt .
 # Install Python dependencies from prebuilt wheels (no compiler/runtime build deps needed)
 RUN python -m pip install --no-index --find-links=/wheels -r requirements.txt && \
-    python -m pip install --no-index --find-links=/wheels gluesync-sdk
+    python -m pip install --no-index --find-links=/wheels gluesync-sdk && \
+    python -m pip install --no-index --find-links=/wheels gluesync-scheduler-module
 COPY ./setup.py .
 COPY ./entrypoint.sh .
 COPY ./README.md .

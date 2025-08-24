@@ -47,13 +47,8 @@ if [ -f "/app/run_scheduler.py" ]; then
     chmod +x /app/run_scheduler.py
 fi
 
-# Install the package in normal mode
-echo "Installing the package in normal mode..."
-pip3 install . --break-system-packages || {
-    echo "Error installing the package"
-    exit 1
-}
-echo "Package installed successfully"
+# Package is preinstalled from a wheel during image build; skip runtime installation
+echo "Package already installed from prebuilt wheel; skipping installation."
 
 # Initialize the database if it doesn't exist
 echo "Checking database initialization..."
