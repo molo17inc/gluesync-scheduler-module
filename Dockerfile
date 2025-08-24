@@ -123,7 +123,7 @@ COPY ./migrations ./migrations
 COPY . .
 
 # Make scripts executable
-RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh
 
 # Python dependencies installed from requirements.txt above
 

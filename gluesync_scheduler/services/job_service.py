@@ -829,12 +829,15 @@ class JobService:
             
             # Parse group_ids if present
             group_ids = []
+            logger.info(f"Raw job.group_ids from database: {repr(job.group_ids)} (type: {type(job.group_ids)})")
             if job.group_ids:
                 try:
                     group_ids = json.loads(job.group_ids)
-                    logger.info(f"Parsed group_ids: {group_ids}")
-                except json.JSONDecodeError:
-                    logger.warning(f"Could not parse group_ids JSON: {job.group_ids}")
+                    logger.info(f"Successfully parsed group_ids: {group_ids} (count: {len(group_ids)})")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Could not parse group_ids JSON: {job.group_ids}, error: {e}")
+            else:
+                logger.info("No group_ids found in job - job.group_ids is None or empty")
             
             # Use localhost for internal API calls, not the binding address (0.0.0.0)
             # Use HTTPS protocol when SSL is enabled
@@ -983,6 +986,25 @@ class JobService:
             
             # Determine snapshot write method from job parameters
             snapshot_write_method = getattr(job, 'snapshot_write_method', 'UPSERT')
+            
+            # Log and validate group_ids
+            logger.info(f"Group operation requested: action={action}, pipeline_id={job.pipeline_id}")
+            logger.info(f"Received group_ids parameter: {repr(group_ids)} (type: {type(group_ids)}, length: {len(group_ids) if group_ids else 'N/A'})")
+            logger.info(f"Job database group_ids field: {repr(job.group_ids)} (type: {type(job.group_ids)})")
+            
+            if not group_ids:
+                warn_msg = f"No group_ids provided for group {action} operation; aborting. Check if job was created with group_ids."
+                logger.warning(warn_msg)
+                details = {
+                    "total_groups": 0,
+                    "successful_groups": 0,
+                    "failed_groups": 0,
+                    "results": [],
+                    "action": action,
+                    "pipeline_id": job.pipeline_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+                return False, warn_msg, details
             
             success_count = 0
             total_groups = len(group_ids)
