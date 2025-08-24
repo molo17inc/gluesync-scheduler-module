@@ -344,6 +344,15 @@ class JobService:
             # Determine if job was created with cron expression or schedule
             is_cron_expression = bool(job_data.cron_expression and not job_data.schedule)
             
+            # Validate group jobs have group_ids
+            if job_data.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+                if not job_data.group_ids or len(job_data.group_ids) == 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Task type {job_data.task_type} requires group_ids to be provided"
+                    )
+                logger.info(f"Creating group job with {len(job_data.group_ids)} groups: {job_data.group_ids}")
+            
             # Create the database record
             db_job = ScheduledJob(
                 name=job_data.name,
@@ -428,6 +437,30 @@ class JobService:
             # Special handling for group_ids (convert to JSON string)
             if "group_ids" in update_data:
                 update_data["group_ids"] = json.dumps(update_data["group_ids"]) if update_data["group_ids"] else None
+            
+            # Validate group jobs have group_ids (check both new task_type and existing)
+            final_task_type = update_data.get("task_type", db_job.task_type)
+            if final_task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+                final_group_ids = update_data.get("group_ids", db_job.group_ids)
+                # Parse group_ids if it's a JSON string
+                if isinstance(final_group_ids, str) and final_group_ids:
+                    try:
+                        parsed_group_ids = json.loads(final_group_ids)
+                        if not parsed_group_ids or len(parsed_group_ids) == 0:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Task type {final_task_type} requires group_ids to be provided"
+                            )
+                    except json.JSONDecodeError:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid group_ids format - must be valid JSON array"
+                        )
+                elif not final_group_ids:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Task type {final_task_type} requires group_ids to be provided"
+                    )
             
             # Handle schedule conversion to cron_expression if schedule is provided
             if "schedule" in update_data and update_data["schedule"]:
@@ -716,44 +749,69 @@ class JobService:
 
     def run_job(self, job_id: int) -> dict:
         """
-        Run a job
+        Run a job immediately
         
         Args:
             job_id: The ID of the job to run
             
         Returns:
-            Dict with success status and message
+            A dictionary with execution results
             
         Raises:
-            HTTPException: If job not found or error running
+            HTTPException: If job not found or error running job
         """
-        db_job = self.db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
-        if not db_job:
+        # Get the job from the database
+        job = self.db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+        if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Job with ID {job_id} not found"
             )
         
+        # Log complete job details from database for debugging
+        logger.info(f"=== JOB EXECUTION DEBUG FOR JOB {job_id} ===")
+        logger.info(f"Job name: {job.name}")
+        logger.info(f"Task type: {job.task_type}")
+        logger.info(f"Pipeline ID: {job.pipeline_id}")
+        logger.info(f"Entity IDs (raw): {repr(job.entity_ids)}")
+        logger.info(f"Group IDs (raw): {repr(job.group_ids)}")
+        logger.info(f"With snapshot: {job.with_snapshot}")
+        logger.info(f"Snapshot write method: {getattr(job, 'snapshot_write_method', 'N/A')}")
+        logger.info(f"=== END JOB DEBUG ===")
+        
+        # Check for group task types without group_ids
+        if job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+            if not job.group_ids or job.group_ids == 'null' or job.group_ids == '[]':
+                error_msg = f"Job {job_id} is configured as {job.task_type} but has no group_ids. Raw value: {repr(job.group_ids)}"
+                logger.error(error_msg)
+                return {
+                    "success": False,
+                    "message": error_msg,
+                    "job_id": job_id,
+                    "task_type": str(job.task_type),
+                    "group_ids_raw": job.group_ids
+                }
+        
         try:
             # Update last run time
             now = datetime.now(timezone.utc)
-            db_job.last_run = now
+            job.last_run = now
             
             # Log job execution
-            logger.info(f"Running job {job_id}: {db_job.name}")
+            logger.info(f"Running job {job_id}: {job.name}")
             
             # Execute the job logic
-            success, message, details = self._execute_job_logic(db_job)
+            success, message, details = self._execute_job_logic(job)
             
             # Update job status based on execution result
             if success:
-                db_job.last_successful_run = now
-                db_job.last_error_message = None
-                db_job.last_run_error_time = None
+                job.last_successful_run = now
+                job.last_error_message = None
+                job.last_run_error_time = None
                 logger.info(f"Job {job_id} executed successfully: {message}")
             else:
-                db_job.last_error_message = message
-                db_job.last_run_error_time = now
+                job.last_error_message = message
+                job.last_run_error_time = now
                 logger.error(f"Job {job_id} execution failed: {message}")
             
             # Save the updated job status
