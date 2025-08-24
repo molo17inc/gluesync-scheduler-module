@@ -282,6 +282,16 @@ class Job(JobBase):
                 return None
         return v
     
+    @validator('group_ids', pre=True)
+    def parse_group_ids(cls, v):
+        """Parse group_ids from JSON string to list if it's a string"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return None
+        return v
+    
     model_config = ConfigDict(
         from_attributes = True,
         json_schema_extra = {

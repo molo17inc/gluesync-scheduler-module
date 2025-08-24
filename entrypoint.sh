@@ -58,6 +58,15 @@ DATA_DIR=/app/data DB_URL=sqlite:////${DATA_DIR}/scheduler.db python3 -c "from g
 }
 echo "Database schema initialized successfully"
 
+# Run database migrations to ensure schema is up-to-date
+echo "Running database migrations..."
+# Forward DB URL explicitly for SQLAlchemy-based migrations; group_ids migration uses file path internally
+bash /app/migrations/run_migrations.sh --db-url "${DB_URL}" || {
+    echo "Error running database migrations"
+    exit 1
+}
+echo "Database migrations completed"
+
 # Execute the CMD command
 echo "Starting application..."
 exec "$@"

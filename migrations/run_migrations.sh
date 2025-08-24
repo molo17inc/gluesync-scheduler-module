@@ -20,4 +20,8 @@ python3 "$SCRIPT_DIR/migrate_add_snapshot_write_method.py" "$@"
 echo "Running migration: migrate_add_is_cron_expression.py"
 python3 "$SCRIPT_DIR/migrate_add_is_cron_expression.py" "$@"
 
+# Add group_ids column migration (expects a SQLite file path)
+echo "Running migration: migrate_add_group_ids_field.py"
+python3 "$SCRIPT_DIR/migrate_add_group_ids_field.py" "$PROJECT_ROOT/data/scheduler.db"
+
 echo "All migrations completed."
