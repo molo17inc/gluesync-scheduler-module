@@ -26,6 +26,7 @@ default:
 variables:
   DOCKER_TLS_CERTDIR: ""
   PYTEST_ADDOPTS: "--color=yes"
+  PIP_EXTRA_INDEX_URL: "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple"
 
 deploy:
   stage: deploy
@@ -38,9 +39,6 @@ deploy:
     - echo "Building & deploying started..."
 
     - apk add --no-cache bash
-    # Initialize and update the Git submodule
-    - git submodule init
-    - git submodule update
 
     - |
       # Extract version part from tag

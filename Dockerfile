@@ -38,9 +38,7 @@ RUN python -m pip install --upgrade pip wheel setuptools
 # Build wheels for application requirements (downloads manylinux wheels when available)
 RUN python -m pip wheel --wheel-dir=/wheels -r requirements.txt
 
-# Copy the SDK submodule and build its wheel
-COPY ./gluesync-sdk ./gluesync-sdk
-RUN python -m pip wheel --wheel-dir=/wheels ./gluesync-sdk
+# SDK will be installed from GitLab PyPI registry via requirements.txt
 
 # Copy project files and build the application wheel (prepackaged for offline install)
 COPY ./setup.py ./
@@ -107,7 +105,6 @@ COPY --from=builder /wheels /wheels
 COPY ./requirements.txt .
 # Install Python dependencies from prebuilt wheels (no compiler/runtime build deps needed)
 RUN python -m pip install --no-index --find-links=/wheels -r requirements.txt && \
-    python -m pip install --no-index --find-links=/wheels gluesync-sdk && \
     python -m pip install --no-index --find-links=/wheels gluesync-scheduler-module && \
     rm -rf /wheels
 COPY ./setup.py .

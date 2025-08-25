@@ -1,3 +1,4 @@
+--extra-index-url https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple
 fastapi==0.115.12
 uvicorn==0.29.0
 pydantic==2.10.6
@@ -13,5 +14,4 @@ python-dateutil>=2.8.1
 PyJWT>=2.0.1
 cryptography>=3.4.6
 typing-extensions>=3.7.4.3
-
-# The gluesync_sdk dependency is installed directly in the Dockerfile
+gluesync-sdk==0.0.6
