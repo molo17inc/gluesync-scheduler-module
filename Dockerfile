@@ -108,7 +108,8 @@ COPY ./requirements.txt .
 # Install Python dependencies from prebuilt wheels (no compiler/runtime build deps needed)
 RUN python -m pip install --no-index --find-links=/wheels -r requirements.txt && \
     python -m pip install --no-index --find-links=/wheels gluesync-sdk && \
-    python -m pip install --no-index --find-links=/wheels gluesync-scheduler-module
+    python -m pip install --no-index --find-links=/wheels gluesync-scheduler-module && \
+    rm -rf /wheels
 COPY ./setup.py .
 COPY ./entrypoint.sh .
 COPY ./README.md .
