@@ -11,10 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     libssl-dev \
     libffi-dev \
-    pkg-config \
-    rustc \
-    cargo \
-    patchelf && \
+    pkg-config && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -53,18 +50,16 @@ COPY ./gluesync_scheduler ./gluesync_scheduler
 RUN python -m pip wheel --wheel-dir=/wheels .
 
 # Final stage
-FROM python:3.13-slim
+FROM python:3.13-alpine
 
 WORKDIR /app
 
 # Install required system packages in a single layer (minimal)
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     curl \
     procps \
     openssl && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/cache/apk/*
 
 # Create Gluesync default directories and app data directory
 RUN mkdir -p /opt/gluesync/data && \
