@@ -1,4 +1,3 @@
---extra-index-url https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple
 fastapi==0.115.12
 uvicorn==0.29.0
 pydantic==2.10.6

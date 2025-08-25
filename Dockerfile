@@ -36,7 +36,9 @@ RUN mkdir -p /wheels
 RUN python -m pip install --upgrade pip wheel setuptools
 
 # Build wheels for application requirements (downloads manylinux wheels when available)
-RUN python -m pip wheel --wheel-dir=/wheels -r requirements.txt
+RUN python -m pip wheel --wheel-dir=/wheels \
+    --extra-index-url "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple" \
+    -r requirements.txt
 
 # SDK will be installed from GitLab PyPI registry via requirements.txt
 
