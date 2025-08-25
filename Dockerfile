@@ -33,7 +33,7 @@ COPY ./requirements.txt ./requirements.txt
 RUN mkdir -p /wheels
 
 # Upgrade pip tooling to latest version for ARM wheel compatibility
-RUN python -m pip install --upgrade pip==24.0 wheel setuptools
+RUN python -m pip install --upgrade pip wheel setuptools
 
 # Build wheels for application requirements (prioritize ARM wheels)
 RUN --mount=type=cache,target=/root/.cache/pip \
