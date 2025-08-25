@@ -16,7 +16,8 @@ A backend service that provides a set of REST APIs for scheduling and managing c
 - **Multiple Task Types**:
   - Start/stop entities
   - Start/stop entire pipelines
-  - Schedule snapshots for entities
+  - Start/stop entity groups
+  - Schedule snapshots for entities, pipelines, or groups
   - More task types can be easily added
 - **Job Management**: View, create, update, disable/enable, and delete scheduled jobs
 - **Containerized Deployment**: Docker support for easy deployment
@@ -312,12 +313,18 @@ http://localhost:1717/redoc
 ### API Endpoints
 
 | Endpoint | Method | Description |
-|----------|--------|-------------|
+|----------|--------|-----------|
 | `/api/jobs` | `GET` | List all scheduled jobs |
 | `/api/jobs/{job_id}` | `GET` | Get a specific job |
 | `/api/jobs` | `POST` | Create a new scheduled job |
 | `/api/jobs/{job_id}` | `PUT` | Update an existing job |
 | `/api/jobs/{job_id}` | `DELETE` | Delete a job |
+| `/api/jobs/{job_id}/run` | `POST` | Manually trigger a job |
+| `/api/jobs/{job_id}/status` | `PATCH` | Enable/disable a job |
+| `/api/settings` | `GET` | List all settings |
+| `/api/settings/{key}` | `GET` | Get a specific setting |
+| `/api/settings` | `POST` | Create a new setting |
+| `/api/settings/{key}` | `PUT` | Update a setting |
 
 ## Scheduling Options
 
@@ -347,28 +354,43 @@ Examples:
 - Every Monday, Wednesday, and Friday at 8:30 AM: `{"days_of_week": ["monday", "wednesday", "friday"], "hour": 8, "minute": 30}`
 - Every weekend at midnight: `{"days_of_week": ["saturday", "sunday"], "hour": 0, "minute": 0}`
 
-### Multi-Entity Support
+### Multi-Entity and Group Support
 
-The scheduler supports operating on multiple entities with a single job. Instead of creating separate jobs for each entity that follows the same schedule, you can specify an array of entity IDs:
+The scheduler supports operating on multiple entities or groups with a single job:
+
+#### Entity Operations
+
+Instead of creating separate jobs for each entity that follows the same schedule, you can specify an array of entity IDs:
 
 ```json
 "entity_ids": ["entity-456", "entity-789", "entity-101"]
 ```
 
+#### Group Operations
+
+For group-level operations, you can specify an array of group IDs:
+
+```json
+"group_ids": ["group-critical", "group-analytics", "group-reporting"]
+```
+
 This is particularly useful for:
 
-- Creating snapshots of multiple related entities at the same time
+- Creating snapshots of multiple related entities or entire groups at the same time
 - Starting or stopping groups of entities together
-- Ensuring operations across multiple entities are performed in a consistent timeframe
+- Ensuring operations across multiple entities/groups are performed in a consistent timeframe
+- Managing data synchronization at the group level for better organization
 
-#### Example Job Creation Request
+#### Example Job Creation Requests
+
+**Entity-Level Job:**
 
 ```json
 POST /api/jobs
 
 {
-  "name": "Monday-Wednesday-Friday Job",
-  "description": "Runs on specific days at 8:30 AM",
+  "name": "Monday-Wednesday-Friday Entity Job",
+  "description": "Runs entity snapshots on specific days at 8:30 AM",
   "task_type": "entity_snapshot",
   "schedule": {
     "days_of_week": ["monday", "wednesday", "friday"],
@@ -378,6 +400,29 @@ POST /api/jobs
   "pipeline_id": "pipeline-123",
   "entity_ids": ["entity-456", "entity-789"],
   "with_snapshot": true,
+  "snapshot_write_method": "UPSERT",
+  "enabled": true
+}
+```
+
+**Group-Level Job:**
+
+```json
+POST /api/jobs
+
+{
+  "name": "Weekly Group Synchronization",
+  "description": "Start synchronization for critical data groups every Monday",
+  "task_type": "group_start",
+  "schedule": {
+    "days_of_week": ["monday"],
+    "hour": 9,
+    "minute": 0
+  },
+  "pipeline_id": "pipeline-123",
+  "group_ids": ["group-critical", "group-analytics"],
+  "with_snapshot": true,
+  "snapshot_write_method": "UPSERT",
   "enabled": true
 }
 ```

@@ -53,7 +53,7 @@ router = APIRouter(
 async def list_jobs(
     skip: int = Query(0, ge=0, description="Number of records to skip for pagination"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    task_type: Optional[TaskType] = Query(None, description="Filter by task type (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline"),
+    task_type: Optional[TaskType] = Query(None, description="Filter by task type (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups"),
     enabled: Optional[bool] = Query(None, description="Filter by enabled status (true/false)"),
     db: Session = Depends(get_db)
 ):
@@ -181,7 +181,9 @@ async def create_job(job_data: JobCreate = Body(..., description="Job data to cr
     - **cron_expression**: Cron expression for scheduling (optional if schedule is provided)
     - **pipeline_id**: ID of the pipeline to operate on (required)
     - **entity_ids**: List of entity IDs to operate on (optional, required for entity operations)
+    - **group_ids**: List of group IDs to operate on (optional, required for group operations)
     - **with_snapshot**: Whether to include snapshot (optional, default: false)
+    - **snapshot_write_method**: Write method for snapshot operations - UPSERT or INSERT (optional, default: UPSERT)
     - **enabled**: Whether the job is enabled (optional, default: true)
     
     ## Returns
@@ -215,6 +217,26 @@ async def create_job(job_data: JobCreate = Body(..., description="Job data to cr
       "pipeline_id": "pipeline-123",
       "entity_ids": ["entity-456", "entity-789"],
       "with_snapshot": true,
+      "snapshot_write_method": "UPSERT",
+      "enabled": true
+    }
+    ```
+    
+    ## Group Operations Example
+    ```json
+    {
+      "name": "Weekly group synchronization",
+      "description": "Start synchronization for critical data groups every Monday",
+      "task_type": "GROUP_START",
+      "schedule": {
+        "days_of_week": ["monday"],
+        "hour": 9,
+        "minute": 0
+      },
+      "pipeline_id": "pipeline-123",
+      "group_ids": ["group-critical", "group-analytics"],
+      "with_snapshot": true,
+      "snapshot_write_method": "UPSERT",
       "enabled": true
     }
     ```
@@ -284,7 +306,9 @@ async def update_job(job_id: int = Path(..., description="The ID of the job to u
     - **cron_expression**: Updated cron expression for scheduling (not required if schedule is provided)
     - **pipeline_id**: Updated pipeline ID
     - **entity_ids**: Updated list of entity IDs to operate on
+    - **group_ids**: Updated list of group IDs to operate on
     - **with_snapshot**: Updated snapshot setting
+    - **snapshot_write_method**: Updated snapshot write method (UPSERT or INSERT)
     - **enabled**: Updated enabled status
     
     ## Returns
@@ -311,6 +335,19 @@ async def update_job(job_id: int = Path(..., description="The ID of the job to u
       "name": "Updated daily entity backup",
       "description": "Updated description",
       "cron_expression": "0 0 * * *",
+      "snapshot_write_method": "INSERT",
+      "enabled": true
+    }
+    ```
+    
+    ## Group Operations Update Example
+    ```json
+    {
+      "name": "Updated group snapshot job",
+      "description": "Now creates snapshots for additional groups",
+      "task_type": "GROUP_SNAPSHOT",
+      "group_ids": ["group-critical", "group-analytics", "group-reporting"],
+      "snapshot_write_method": "INSERT",
       "enabled": true
     }
     ```
