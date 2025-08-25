@@ -32,12 +32,15 @@ COPY ./requirements.txt ./requirements.txt
 # Create wheels directory
 RUN mkdir -p /wheels
 
-# Upgrade pip tooling
-RUN python -m pip install --upgrade pip wheel setuptools
+# Upgrade pip tooling to latest version for ARM wheel compatibility
+RUN python -m pip install --upgrade pip==24.0 wheel setuptools
 
-# Build wheels for application requirements (downloads manylinux wheels when available)
-RUN python -m pip wheel --wheel-dir=/wheels \
+# Build wheels for application requirements (prioritize ARM wheels)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip wheel --wheel-dir=/wheels \
     --extra-index-url "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple" \
+    --prefer-binary \
+    --only-binary=cryptography,pyjks,websockets \
     -r requirements.txt
 
 # SDK will be installed from GitLab PyPI registry via requirements.txt
