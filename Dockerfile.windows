@@ -1,9 +1,47 @@
-# Base image: Windows Server Core LTSC 2022
+# Base image Windows Server Core LTSC2022
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
-SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop';"]
+# Use PowerShell for subsequent RUN commands, stop on errors
+SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]
+
+# Install Chocolatey package manager
+RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+# Upgrade Chocolatey and install Python, Git, and clean cache
+RUN choco upgrade chocolatey -y ; \
+    choco install python --version=3.11.9 -y --installargs '"/quiet InstallAllUsers=1 PrependPath=1"'; \
+    choco install git -y ; \
+    choco cache remove -y -f
+
+# Download Visual Studio 2022 Build Tools installer
+RUN New-Item -ItemType Directory -Path C:\TEMP_INSTALLER -Force; \
+    Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_buildtools.exe" -OutFile "C:\TEMP_INSTALLER\vs_buildtools.exe"
+
+# Install Visual C++ Build Tools (VS 2022) silently
+RUN C:\TEMP_INSTALLER\vs_buildtools.exe --quiet --wait --norestart \
+    --add Microsoft.VisualStudio.Workload.VCTools \
+    --includeRecommended \
+    --installPath C:\BuildTools;
+
+# Remove the bootstrapper after installation
+RUN Remove-Item C:\TEMP_INSTALLER\vs_buildtools.exe -Force
+
+# Verify Python and Git installation
+RUN python --version; \
+    python -m pip --version; \
+    git --version
 
 WORKDIR C:/app
+
+# Copy requirements and install dependencies
+COPY requirements.txt .
+
+# Verify Python installation and upgrade pip
+# Upgrade pip and install Python dependencies
+RUN python -m pip install --upgrade pip setuptools wheel; \
+    python -m pip install --no-cache-dir -r requirements.txt
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -14,34 +52,8 @@ ENV GLUESYNC_SECURITY_CONFIG=C:/opt/gluesync/data/security-config.json
 # Create required directories
 RUN New-Item -ItemType Directory -Force -Path C:\opt\gluesync\data, C:\app\data, C:\app\logs
 
-# Install Chocolatey, Python, Git, and Visual C++ Build Tools
-RUN [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
-    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')); \
-    choco install -y python --version=3.11.9; \
-    choco install -y git; \
-    choco install -y visualcpp-build-tools --package-parameters '--includeRecommended --quiet --norestart'; \
-    setx PATH 'C:\Python311;C:\Python311\Scripts;C:\ProgramData\chocolatey\bin;%PATH%'
-
-ENV PATH="C:/Python311;C:/Python311/Scripts;C:/ProgramData/chocolatey/bin:${PATH}"
-
-# Verify Python installation and upgrade pip
-RUN & 'C:\Python311\python.exe' --version; \
-    & 'C:\Python311\python.exe' -m pip --version; \
-    & 'C:\Python311\python.exe' -m pip install --upgrade pip setuptools wheel
-
 # Copy SDK
 COPY ./gluesync-sdk ./gluesync-sdk
-
-# Install websockets and SDK
-RUN & 'C:\Program Files (x86)\Microsoft Visual Studio\BuildTools\VC\Auxiliary\Build\vcvarsall.bat' x64; \
-    & 'C:\Python311\python.exe' -m pip install websockets==11.0.3; \
-    Set-Location ./gluesync-sdk; \
-    & 'C:\Python311\python.exe' -m pip install -e .
-
-# Copy requirements and install dependencies
-COPY requirements.txt .
-RUN & 'C:\Program Files (x86)\Microsoft Visual Studio\BuildTools\VC\Auxiliary\Build\vcvarsall.bat' x64; \
-    & 'C:\Python311\python.exe' -m pip install -r requirements.txt
 
 # Copy application code and configurations
 COPY gluesync_scheduler/ ./gluesync_scheduler/
@@ -69,11 +81,11 @@ EXPOSE 8000
 
 # Healthcheck endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD & 'C:\Python311\python.exe' -c "import urllib.request, os; url='http://'+os.environ.get('HOST','localhost')+':8000/health'; urllib.request.urlopen(url)" || exit 1
+    CMD python -c "import urllib.request, os; url='http://'+os.environ.get('HOST','localhost')+':8000/health'; urllib.request.urlopen(url)" || exit 1
 
 # Create entrypoint script
 RUN Set-Content -Path entrypoint.bat -Value '@echo off'; \
     Add-Content -Path entrypoint.bat -Value 'echo Starting Gluesync Chronos Module...'; \
-    Add-Content -Path entrypoint.bat -Value '& C:\Python311\python.exe run_scheduler.py'
+    Add-Content -Path entrypoint.bat -Value 'python run_scheduler.py'
 
 ENTRYPOINT ["entrypoint.bat"]
