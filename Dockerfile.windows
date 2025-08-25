@@ -1,3 +1,5 @@
+# escape=`
+
 # Base image Windows Server Core LTSC2022
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
@@ -5,32 +7,32 @@ FROM mcr.microsoft.com/windows/servercore:ltsc2022
 SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]
 
 # Install Chocolatey package manager
-RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+RUN Set-ExecutionPolicy Bypass -Scope Process -Force; `
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; `
     iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
 
 # Upgrade Chocolatey and install Python, Git, and clean cache
-RUN choco upgrade chocolatey -y ; \
-    choco install python --version=3.11.9 -y --installargs '"/quiet InstallAllUsers=1 PrependPath=1"'; \
-    choco install git -y ; \
+RUN choco upgrade chocolatey -y ; `
+    choco install python --version=3.11.9 -y --installargs '"/quiet InstallAllUsers=1 PrependPath=1"'; `
+    choco install git -y ; `
     choco cache remove -y -f
 
 # Download Visual Studio 2022 Build Tools installer
-RUN New-Item -ItemType Directory -Path C:\TEMP_INSTALLER -Force; \
+RUN New-Item -ItemType Directory -Path C:\TEMP_INSTALLER -Force; `
     Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_buildtools.exe" -OutFile "C:\TEMP_INSTALLER\vs_buildtools.exe"
 
 # Install Visual C++ Build Tools (VS 2022) silently
-RUN C:\TEMP_INSTALLER\vs_buildtools.exe --quiet --wait --norestart \
-    --add Microsoft.VisualStudio.Workload.VCTools \
-    --includeRecommended \
+RUN C:\TEMP_INSTALLER\vs_buildtools.exe --quiet --wait --norestart `
+    --add Microsoft.VisualStudio.Workload.VCTools `
+    --includeRecommended `
     --installPath C:\BuildTools;
 
 # Remove the bootstrapper after installation
 RUN Remove-Item C:\TEMP_INSTALLER\vs_buildtools.exe -Force
 
 # Verify Python and Git installation
-RUN python --version; \
-    python -m pip --version; \
+RUN python --version; `
+    python -m pip --version; `
     git --version
 
 WORKDIR C:/app
@@ -40,7 +42,7 @@ COPY requirements.txt .
 
 # Verify Python installation and upgrade pip
 # Upgrade pip and install Python dependencies
-RUN python -m pip install --upgrade pip setuptools wheel; \
+RUN python -m pip install --upgrade pip setuptools wheel; `
     python -m pip install --no-cache-dir -r requirements.txt
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -80,12 +82,14 @@ ENV TMP=C:/temp
 EXPOSE 8000
 
 # Healthcheck endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 `
     CMD python -c "import urllib.request, os; url='http://'+os.environ.get('HOST','localhost')+':8000/health'; urllib.request.urlopen(url)" || exit 1
 
 # Create entrypoint script
-RUN Set-Content -Path entrypoint.bat -Value '@echo off'; \
-    Add-Content -Path entrypoint.bat -Value 'echo Starting Gluesync Chronos Module...'; \
+RUN Set-Content -Path entrypoint.bat -Value '@echo off'; `
+    Add-Content -Path entrypoint.bat -Value 'echo Starting Gluesync Chronos Module...'; `
     Add-Content -Path entrypoint.bat -Value 'python run_scheduler.py'
 
 ENTRYPOINT ["entrypoint.bat"]
+# Alternative: keep container running for debugging
+# CMD ["powershell", "-Command", "while ($true) { Start-Sleep -Seconds 3600 }"]
