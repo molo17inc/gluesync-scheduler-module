@@ -186,6 +186,9 @@ deploy-manifest:
     - name: docker:dind
       variables:
         DOCKER_TLS_CERTDIR: ""
+  needs:
+    - job: deploy-linux
+    - job: deploy-windows
   dependencies:
     - deploy-linux
     - deploy-windows

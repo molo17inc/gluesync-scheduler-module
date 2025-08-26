@@ -3,6 +3,20 @@
 # Base image Windows Server Core LTSC2022
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
+# Use PowerShell for subsequent RUN commands, stop on errors
+SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]
+
+# Install Chocolatey package manager
+RUN Set-ExecutionPolicy Bypass -Scope Process -Force; `
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; `
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+# Upgrade Chocolatey and install Python, Git, and clean cache
+RUN choco upgrade chocolatey -y ; `
+    choco install python --version=3.11.9 -y --installargs '"/quiet InstallAllUsers=1 PrependPath=1"'; `
+    choco install git -y ; `
+    choco cache remove -y -f
+
 # Restore the default Windows shell for correct batch processing.
 SHELL ["cmd", "/S", "/C"]
 
@@ -19,33 +33,24 @@ RUN `
     # Cleanup
     && del /q vs_buildtools.exe
 
-# Use PowerShell for subsequent RUN commands, stop on errors
-SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]
-
-# Install Chocolatey package manager
-RUN Set-ExecutionPolicy Bypass -Scope Process -Force; `
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; `
-    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-
-# Upgrade Chocolatey and install Python, Git, and clean cache
-RUN choco upgrade chocolatey -y ; `
-    choco install python --version=3.11.9 -y --installargs '"/quiet InstallAllUsers=1 PrependPath=1"'; `
-    choco install git -y ; `
-    choco cache remove -y -f
-
 # Verify Python and Git installation
-RUN python --version; `
-    python -m pip --version; `
+RUN python --version && `
+    python -m pip --version && `
     git --version
 
 WORKDIR C:/app
+
+# Ensure directories exist
+RUN if not exist C:\opt\gluesync\data mkdir C:\opt\gluesync\data && `
+    if not exist C:\app\data mkdir C:\app\data && `
+    if not exist C:\app\logs mkdir C:\app\logs
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
 
 # Verify Python installation and upgrade pip
 # Upgrade pip and install Python dependencies
-RUN python -m pip install --upgrade pip setuptools wheel; `
+RUN python -m pip install --upgrade pip setuptools wheel && `
     python -m pip install --no-cache-dir -r requirements.txt
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -53,22 +58,6 @@ ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV GLUESYNC_LICENSE_FILE=C:/opt/gluesync/data/gs-license.dat
 ENV GLUESYNC_SECURITY_CONFIG=C:/opt/gluesync/data/security-config.json
-
-# Create required directories
-RUN New-Item -ItemType Directory -Force -Path C:\opt\gluesync\data, C:\app\data, C:\app\logs
-
-# Copy SDK
-COPY ./gluesync-sdk ./gluesync-sdk
-
-# Copy application code and configurations
-COPY gluesync_scheduler/ ./gluesync_scheduler/
-COPY main.py .
-COPY run_scheduler.py .
-COPY setup.py .
-COPY migrations/ ./migrations/
-COPY gs-license.dat C:/opt/gluesync/data/gs-license.dat
-COPY security-config.json C:/opt/gluesync/data/security-config.json
-
 ENV DB_URL=sqlite:///C:/app/data/scheduler.db
 ENV LOG_DIR=C:/app/logs
 ENV CRON_LOG_DIR=C:/app/logs
@@ -82,6 +71,18 @@ ENV PYTHONPATH=C:/app
 ENV TEMP=C:/temp
 ENV TMP=C:/temp
 
+# Copy SDK
+COPY ./gluesync-sdk ./gluesync-sdk
+
+# Copy application code and configurations
+COPY gluesync_scheduler/ ./gluesync_scheduler/
+COPY main.py .
+COPY run_scheduler.py .
+COPY setup.py .
+COPY migrations/ ./migrations/
+COPY gs-license.dat C:/opt/gluesync/data/gs-license.dat
+COPY security-config.json C:/opt/gluesync/data/security-config.json
+
 EXPOSE 8000
 
 # Healthcheck endpoint
@@ -89,9 +90,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 `
     CMD python -c "import urllib.request, os; url='http://'+os.environ.get('HOST','localhost')+':8000/health'; urllib.request.urlopen(url)" || exit 1
 
 # Create entrypoint script
-RUN Set-Content -Path entrypoint.bat -Value '@echo off'; `
-    Add-Content -Path entrypoint.bat -Value 'echo Starting Gluesync Chronos Module...'; `
-    Add-Content -Path entrypoint.bat -Value 'python run_scheduler.py'
+RUN echo @echo off > entrypoint.bat && `
+    echo echo Starting Gluesync Chronos Module... >> entrypoint.bat && `
+    echo python run_scheduler.py >> entrypoint.bat
 
 ENTRYPOINT ["entrypoint.bat"]
 # Alternative: keep container running for debugging
