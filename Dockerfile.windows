@@ -3,6 +3,22 @@
 # Base image Windows Server Core LTSC2022
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
+# Restore the default Windows shell for correct batch processing.
+SHELL ["cmd", "/S", "/C"]
+
+RUN `
+    # Download the Build Tools bootstrapper.
+    curl -SL --output vs_buildtools.exe https://aka.ms/vs/17/release/vs_buildtools.exe `
+    `
+    # Install Build Tools with the Microsoft.VisualStudio.Workload.AzureBuildTools workload, excluding workloads and components with known issues.
+    && (start /w vs_buildtools.exe --quiet --wait --norestart --nocache `
+    --installPath "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools" `
+    --add Microsoft.VisualStudio.Workload.VCTools `
+    || IF "%ERRORLEVEL%"=="3010" EXIT 0) `
+    `
+    # Cleanup
+    && del /q vs_buildtools.exe
+
 # Use PowerShell for subsequent RUN commands, stop on errors
 SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]
 
@@ -16,19 +32,6 @@ RUN choco upgrade chocolatey -y ; `
     choco install python --version=3.11.9 -y --installargs '"/quiet InstallAllUsers=1 PrependPath=1"'; `
     choco install git -y ; `
     choco cache remove -y -f
-
-# Download Visual Studio 2022 Build Tools installer
-RUN New-Item -ItemType Directory -Path C:\TEMP_INSTALLER -Force; `
-    Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_buildtools.exe" -OutFile "C:\TEMP_INSTALLER\vs_buildtools.exe"
-
-# Install Visual C++ Build Tools (VS 2022) silently
-RUN C:\TEMP_INSTALLER\vs_buildtools.exe --quiet --wait --norestart `
-    --add Microsoft.VisualStudio.Workload.VCTools `
-    --includeRecommended `
-    --installPath C:\BuildTools;
-
-# Remove the bootstrapper after installation
-RUN Remove-Item C:\TEMP_INSTALLER\vs_buildtools.exe -Force
 
 # Verify Python and Git installation
 RUN python --version; `
