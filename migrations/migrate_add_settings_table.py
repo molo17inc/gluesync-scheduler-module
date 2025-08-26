@@ -28,8 +28,7 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 from sqlalchemy import Column, Integer, String, DateTime, create_engine, inspect, text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 # Configure logging
 logging.basicConfig(

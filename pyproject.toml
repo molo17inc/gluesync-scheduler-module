@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gluesync-scheduler-module"
+version = "1.0.0"
+authors = [
+    {name = "MOLO17", email = "info@molo17.com"},
+]
+description = "Scheduler module for Gluesync pipelines"
+readme = "README.md"
+license = {text = "GPL-3.0-or-later"}
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+]
+keywords = ["gluesync", "scheduler", "pipeline", "cron", "automation"]
+dependencies = [
+    "fastapi==0.115.12",
+    "uvicorn==0.29.0",
+    "pydantic==2.10.6",
+    "requests==2.32.3",
+    "sqlalchemy==2.0.43",
+    "python-dotenv==1.0.1",
+    "httpx==0.27.0",
+    "croniter==2.0.1",
+    "apscheduler==3.11.0",
+    "pyjks==20.0.0",
+    "websockets==11.0.3",
+    "python-dateutil>=2.8.1",
+    "PyJWT>=2.0.1",
+    "cryptography>=3.4.6",
+    "typing-extensions>=3.7.4.3",
+]
+
+[project.urls]
+Homepage = "https://github.com/molo17-public/gluesync/gluesync-scheduler-module"
+Repository = "https://github.com/molo17-public/gluesync/gluesync-scheduler-module"
+Issues = "https://github.com/molo17-public/gluesync/gluesync-scheduler-module/issues"
+
+[project.scripts]
+gluesync-scheduler = "run_scheduler:main"
+gluesync-job-runner = "gluesync_scheduler.cli.job_runner:main"
+
+[tool.setuptools]
+packages = ["gluesync_scheduler"]
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[tool.setuptools.package-data]
+gluesync_scheduler = ["**/*.py"]

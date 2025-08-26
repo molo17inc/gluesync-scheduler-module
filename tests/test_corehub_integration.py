@@ -40,7 +40,7 @@ from datetime import datetime, timedelta
 # Add the project root directory to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from play_pause import CoreHubClient, PipelineManager
-from gluesync_sdk_client import GluesyncSDKClient
+from gluesync_scheduler.core.gluesync_sdk_client import GluesyncSDKClient
 
 
 class MockResponse:

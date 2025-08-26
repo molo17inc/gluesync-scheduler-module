@@ -37,6 +37,7 @@ import uuid
 
 from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+from gluesync_scheduler.services.group_service import group_service
 
 # Configure logging
 # Ensure timestamps are always included in logs, even when run as a standalone script
@@ -388,12 +389,13 @@ class CoreHubClient:
             return response
         return None
     
-    def start_entity(self, pipeline_id: str, entity_id: str, with_snapshot: bool = False) -> bool:
+    def start_entity(self, pipeline_id: str, entity_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
         """Start a specific entity in a pipeline"""
         path = f'/pipelines/{pipeline_id}/commands/sync/start'
         params = {
             'entity': entity_id,
-            'withSnapshot': 'true' if with_snapshot else 'false'
+            'withSnapshot': 'true' if with_snapshot else 'false',
+            'snapshotWriteMethod': snapshot_write_method
         }
             
         response = self.fetch_core_hub(path, method='POST', params=params)
@@ -445,11 +447,12 @@ class CoreHubClient:
             # Don't hide errors anymore
             return False
     
-    def start_pipeline(self, pipeline_id: str, with_snapshot: bool = False) -> bool:
+    def start_pipeline(self, pipeline_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
         """Start all entities in a pipeline"""
         path = f'/pipelines/{pipeline_id}/commands/sync/start'
         params = {
-            'withSnapshot': 'true' if with_snapshot else 'false'
+            'withSnapshot': 'true' if with_snapshot else 'false',
+            'snapshotWriteMethod': snapshot_write_method
         }
             
         try:
@@ -518,6 +521,84 @@ class CoreHubClient:
         except Exception as e:
             logger.error(f"Error resyncing pipeline {pipeline_id}: {str(e)}")
             # Don't hide errors anymore
+            return False
+    
+    def start_group(self, pipeline_id: str, group_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
+        """Start all entities in a specific group within a pipeline"""
+        path = f'/pipelines/{pipeline_id}/commands/sync/start-group'
+        params = {
+            'groupId': group_id,
+            'withSnapshot': 'true' if with_snapshot else 'false',
+            'snapshotWriteMethod': snapshot_write_method
+        }
+            
+        try:
+            response = self.fetch_core_hub(path, method='POST', params=params)
+            
+            # Check for auth errors specifically
+            if response and isinstance(response, dict) and response.get('status') == 'error':
+                logger.error(f"Error starting group {group_id} in pipeline {pipeline_id}: {response.get('message')}")
+                return False
+                
+            success = response is not None
+            if success:
+                logger.info(f"Successfully started group {group_id} in pipeline {pipeline_id}")
+            else:
+                logger.error(f"Failed to start group {group_id} in pipeline {pipeline_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error starting group {group_id} in pipeline {pipeline_id}: {str(e)}")
+            return False
+    
+    def stop_group(self, pipeline_id: str, group_id: str) -> bool:
+        """Stop all entities in a specific group within a pipeline"""
+        path = f'/pipelines/{pipeline_id}/commands/sync/stop-group'
+        params = {
+            'groupId': group_id
+        }
+        
+        try:
+            response = self.fetch_core_hub(path, method='POST', params=params)
+            
+            # Check for auth errors specifically
+            if response and isinstance(response, dict) and response.get('status') == 'error':
+                logger.error(f"Error stopping group {group_id} in pipeline {pipeline_id}: {response.get('message')}")
+                return False
+                
+            success = response is not None
+            if success:
+                logger.info(f"Successfully stopped group {group_id} in pipeline {pipeline_id}")
+            else:
+                logger.error(f"Failed to stop group {group_id} in pipeline {pipeline_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error stopping group {group_id} in pipeline {pipeline_id}: {str(e)}")
+            return False
+    
+    def resync_group(self, pipeline_id: str, group_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
+        """Trigger a one-time snapshot for all entities in a specific group within a pipeline"""
+        path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot-group'
+        params = {
+            'groupId': group_id,
+            'snapshotWriteMethod': snapshot_write_method
+        }
+        
+        try:
+            response = self.fetch_core_hub(path, method='POST', params=params)
+            
+            # Check for auth errors specifically
+            if response and isinstance(response, dict) and response.get('status') == 'error':
+                logger.error(f"Error resyncing group {group_id} in pipeline {pipeline_id}: {response.get('message')}")
+                return False
+                
+            success = response is not None
+            if success:
+                logger.info(f"Successfully resynced group {group_id} in pipeline {pipeline_id}")
+            else:
+                logger.error(f"Failed to resync group {group_id} in pipeline {pipeline_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error resyncing group {group_id} in pipeline {pipeline_id}: {str(e)}")
             return False
 
 
@@ -774,6 +855,95 @@ class PipelineManager:
                 return await self.pause_pipeline(pipeline_id)
         else:
             logger.error(f"Unknown action: {action}")
+            return False
+    
+    async def play_groups(self, pipeline_id: str, group_ids: List[str], with_snapshot: bool = False) -> bool:
+        """Start all entities in specific groups within a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            group_ids: List of group IDs to start
+            with_snapshot: Start entities with snapshot
+            
+        Returns:
+            bool: True if all operations were successful, False otherwise
+        """
+        try:
+            logger.info(f"Starting groups {group_ids} in pipeline {pipeline_id} (with_snapshot={with_snapshot})")
+            
+            # Get all entity IDs for the specified groups
+            entity_ids = await group_service.get_multiple_groups_entities(pipeline_id, group_ids)
+            
+            if not entity_ids:
+                logger.warning(f"No entities found in groups {group_ids} for pipeline {pipeline_id}")
+                return True  # Consider this successful since there's nothing to start
+            
+            logger.info(f"Found {len(entity_ids)} entities in groups {group_ids}: {entity_ids}")
+            
+            # Start the entities using existing entity-level functionality
+            return await self.play_entities(pipeline_id, entity_ids, with_snapshot)
+            
+        except Exception as e:
+            logger.error(f"Error starting groups {group_ids} in pipeline {pipeline_id}: {str(e)}")
+            return False
+    
+    async def pause_groups(self, pipeline_id: str, group_ids: List[str]) -> bool:
+        """Stop all entities in specific groups within a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            group_ids: List of group IDs to stop
+            
+        Returns:
+            bool: True if all operations were successful, False otherwise
+        """
+        try:
+            logger.info(f"Stopping groups {group_ids} in pipeline {pipeline_id}")
+            
+            # Get all entity IDs for the specified groups
+            entity_ids = await group_service.get_multiple_groups_entities(pipeline_id, group_ids)
+            
+            if not entity_ids:
+                logger.warning(f"No entities found in groups {group_ids} for pipeline {pipeline_id}")
+                return True  # Consider this successful since there's nothing to stop
+            
+            logger.info(f"Found {len(entity_ids)} entities in groups {group_ids}: {entity_ids}")
+            
+            # Stop the entities using existing entity-level functionality
+            return await self.pause_entities(pipeline_id, entity_ids)
+            
+        except Exception as e:
+            logger.error(f"Error stopping groups {group_ids} in pipeline {pipeline_id}: {str(e)}")
+            return False
+    
+    async def resync_groups(self, pipeline_id: str, group_ids: List[str], snapshot_write_method: str = 'UPSERT') -> bool:
+        """Trigger a one-time snapshot for all entities in specific groups within a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            group_ids: List of group IDs to resync
+            snapshot_write_method: Write method for the snapshot (default: UPSERT)
+            
+        Returns:
+            bool: True if all operations were successful, False otherwise
+        """
+        try:
+            logger.info(f"Resyncing groups {group_ids} in pipeline {pipeline_id} (method={snapshot_write_method})")
+            
+            # Get all entity IDs for the specified groups
+            entity_ids = await group_service.get_multiple_groups_entities(pipeline_id, group_ids)
+            
+            if not entity_ids:
+                logger.warning(f"No entities found in groups {group_ids} for pipeline {pipeline_id}")
+                return True  # Consider this successful since there's nothing to resync
+            
+            logger.info(f"Found {len(entity_ids)} entities in groups {group_ids}: {entity_ids}")
+            
+            # Resync the entities using existing entity-level functionality
+            return await self.resync_entities(pipeline_id, entity_ids, snapshot_write_method)
+            
+        except Exception as e:
+            logger.error(f"Error resyncing groups {group_ids} in pipeline {pipeline_id}: {str(e)}")
             return False
 
 

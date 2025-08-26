@@ -1,13 +1,22 @@
 # Build stage for SDK installation
-FROM python:3.11-slim AS builder
+FROM python:3.13-slim AS builder
 
 WORKDIR /build
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
+# Install build dependencies (single RUN)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
-    python3-dev
+    libc6-dev \
+    python3-dev \
+    libssl-dev \
+    libffi-dev \
+    pkg-config \
+    rustc \
+    cargo \
+    patchelf && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set environment variables for Python and dependency installation
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -15,48 +24,46 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libc6-dev \
-    python3-dev && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Build dependencies already installed above
 
-# Copy only the SDK submodule
-COPY ./gluesync-sdk ./gluesync-sdk
-
-# Install specific websockets version first to avoid compatibility issues
-RUN python -m pip install websockets==11.0.3
+# Copy requirements and prebuild wheels for all Python deps
+COPY ./requirements.txt ./requirements.txt
 
 # Create wheels directory
 RUN mkdir -p /wheels
 
-# Install wheel and setuptools
+# Upgrade pip tooling to latest version for ARM wheel compatibility
 RUN python -m pip install --upgrade pip wheel setuptools
 
-# Install the SDK directly instead of trying to create a wheel
-RUN cd ./gluesync-sdk && \
-    python -m pip install -e .
+# Build wheels for application requirements (prioritize ARM wheels)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip wheel --wheel-dir=/wheels \
+    --extra-index-url "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple" \
+    --prefer-binary \
+    --only-binary=cryptography,pyjks,websockets \
+    -r requirements.txt
 
-# List the site-packages directory to see what's installed
-RUN ls -la /usr/local/lib/python3.11/site-packages
+# SDK will be installed from GitLab PyPI registry via requirements.txt
 
-# Copy the installed SDK to the wheels directory - use a more general approach
-RUN cd /usr/local/lib/python3.11/site-packages && \
-    find . -name "*gluesync*" -o -name "*twofish*" | tar -czf /wheels/gluesync-sdk.tar.gz -T -
+# Copy project files and build the application wheel (prepackaged for offline install)
+COPY ./setup.py ./
+COPY ./pyproject.toml ./
+COPY ./README.md ./
+COPY ./gluesync_scheduler ./gluesync_scheduler
+RUN python -m pip wheel --wheel-dir=/wheels .
 
 # Final stage
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install required system packages including timezone data
-RUN apt-get update && apt-get install -y \
-    cron \
+# Install required system packages in a single layer (minimal)
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     procps \
-    tzdata && \
+    openssl && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Create Gluesync default directories and app data directory
@@ -75,6 +82,9 @@ RUN mkdir -p /opt/gluesync/data && \
 # Gluesync SDK settings using default paths
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PIP_NO_INDEX=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
     CORE_HUB_URL= \
     ENTITY_START_TIMEOUT=2 \
     HOST=0.0.0.0 \
@@ -91,19 +101,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SSL_SKIP_VERIFY=True \
     TIMEZONE=UTC
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    openssl && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# (combined into single apt install above)
 
-# Copy the SDK code to the final stage
+# Copy built wheels from builder stage
 COPY --from=builder /wheels /wheels
-COPY --from=builder /build/gluesync-sdk /app/gluesync-sdk
 
 # Copy requirements and setup files
 COPY ./requirements.txt .
+# Install Python dependencies from prebuilt wheels (no compiler/runtime build deps needed)
+RUN python -m pip install --no-index --find-links=/wheels -r requirements.txt && \
+    python -m pip install --no-index --find-links=/wheels gluesync-scheduler-module && \
+    rm -rf /wheels
 COPY ./setup.py .
 COPY ./entrypoint.sh .
 COPY ./README.md .
@@ -118,28 +126,15 @@ COPY ./migrations ./migrations
 COPY . .
 
 # Make scripts executable
-RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh
 
-# Install SDK dependencies one by one to avoid issues
-RUN python -m pip install --upgrade pip && \
-    python -m pip install websockets==11.0.3 && \
-    python -m pip install requests>=2.25.1 && \
-    python -m pip install python-dateutil>=2.8.1 && \
-    python -m pip install PyJWT>=2.0.1 && \
-    python -m pip install cryptography>=3.4.6 && \
-    python -m pip install pydantic>=1.8.1 && \
-    python -m pip install typing-extensions>=3.7.4.3
+# Python dependencies installed from requirements.txt above
 
-# Install OpenSSL for certificate handling and required dependencies
-RUN apt-get update && apt-get install -y openssl build-essential libssl-dev
+# (build-essential and libssl-dev installed above)
 
-# Create Python path file for SDK
-RUN mkdir -p /usr/local/lib/python3.11/site-packages/gluesync_sdk && \
-    cp -r /app/gluesync-sdk/gluesync_sdk/* /usr/local/lib/python3.11/site-packages/gluesync_sdk/ && \
-    touch /usr/local/lib/python3.11/site-packages/gluesync_sdk/__init__.py
+# SDK installed from wheels; no manual site-packages copy needed
 
-# Install other Python dependencies
-RUN python -m pip install --no-cache-dir -r requirements.txt
+# (Python dependencies were installed earlier for better caching)
 
 # Expose the port the app runs on
 EXPOSE 1717

@@ -47,13 +47,8 @@ if [ -f "/app/run_scheduler.py" ]; then
     chmod +x /app/run_scheduler.py
 fi
 
-# Install the package in normal mode
-echo "Installing the package in normal mode..."
-pip3 install . --break-system-packages || {
-    echo "Error installing the package"
-    exit 1
-}
-echo "Package installed successfully"
+# Package is preinstalled from a wheel during image build; skip runtime installation
+echo "Package already installed from prebuilt wheel; skipping installation."
 
 # Initialize the database if it doesn't exist
 echo "Checking database initialization..."
@@ -62,6 +57,15 @@ DATA_DIR=/app/data DB_URL=sqlite:////${DATA_DIR}/scheduler.db python3 -c "from g
     exit 1
 }
 echo "Database schema initialized successfully"
+
+# Run database migrations to ensure schema is up-to-date
+echo "Running database migrations..."
+# Forward DB URL explicitly for SQLAlchemy-based migrations; group_ids migration uses file path internally
+bash /app/migrations/run_migrations.sh --db-url "${DB_URL}" || {
+    echo "Error running database migrations"
+    exit 1
+}
+echo "Database migrations completed"
 
 # Execute the CMD command
 echo "Starting application..."
