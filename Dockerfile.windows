@@ -30,8 +30,7 @@ RUN `
     # --add Microsoft.VisualStudio.Workload.VCTools `
     --add Microsoft.Component.MSBuild `
     --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-    --add Microsoft.Component.VC.Runtime.UCRTSDK `
-    # --add Microsoft.VisualStudio.Component.Windows10SDK.19041 `
+    --add Microsoft.VisualStudio.Component.Windows10SDK.19041 `
     || IF "%ERRORLEVEL%"=="3010" EXIT 0) `
     `
     # Cleanup
@@ -58,28 +57,29 @@ RUN python -m pip install --upgrade pip setuptools wheel && `
     python -m pip install --no-cache-dir -r requirements.txt `
     --extra-index-url "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple"
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-ENV GLUESYNC_LICENSE_FILE=C:/opt/gluesync/data/gs-license.dat
-ENV GLUESYNC_SECURITY_CONFIG=C:/opt/gluesync/data/security-config.json
-ENV DB_URL=sqlite:///C:/app/data/scheduler.db
-ENV LOG_DIR=C:/app/logs
-ENV CRON_LOG_DIR=C:/app/logs
-ENV DATA_DIR=C:/app/data
-ENV HOST=0.0.0.0
-ENV PORT=8000
-ENV SSL_ENABLED=false
-ENV GLUESYNC_MODULE_TAG=scheduler-module
-ENV GLUESYNC_USE_SSL=false
-ENV PYTHONPATH=C:/app
-ENV TEMP=C:/temp
-ENV TMP=C:/temp
+ENV PYTHONDONTWRITEBYTECODE=1 `
+    PYTHONUNBUFFERED=1 `
+    PIP_DISABLE_PIP_VERSION_CHECK=1 `
+    GLUESYNC_LICENSE_FILE=C:/opt/gluesync/data/gs-license.dat `
+    GLUESYNC_SECURITY_CONFIG=C:/opt/gluesync/data/security-config.json `
+    DB_URL=sqlite:///C:/app/data/scheduler.db `
+    LOG_DIR=C:/app/logs `
+    CRON_LOG_DIR=C:/app/logs `
+    DATA_DIR=C:/app/data `
+    HOST=0.0.0.0 `
+    PORT=8000 `
+    SSL_ENABLED=false `
+    GLUESYNC_MODULE_TAG=scheduler-module `
+    GLUESYNC_USE_SSL=false `
+    PYTHONPATH=C:/app `
+    TEMP=C:/temp `
+    TMP=C:/temp
 
 # Copy SDK
 COPY ./gluesync-sdk ./gluesync-sdk
 
 # Copy application code and configurations
+COPY pyproject.toml .
 COPY gluesync_scheduler/ ./gluesync_scheduler/
 COPY main.py .
 COPY run_scheduler.py .
