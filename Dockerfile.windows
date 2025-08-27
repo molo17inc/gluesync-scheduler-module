@@ -85,8 +85,6 @@ COPY main.py .
 COPY run_scheduler.py .
 COPY setup.py .
 COPY migrations/ ./migrations/
-COPY gs-license.dat C:/opt/gluesync/data/gs-license.dat
-COPY security-config.json C:/opt/gluesync/data/security-config.json
 
 EXPOSE 8000
 
