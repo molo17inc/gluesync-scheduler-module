@@ -25,6 +25,7 @@ import os
 import logging
 from typing import Optional
 from zoneinfo import ZoneInfo
+from pathlib import Path
 from gluesync_scheduler.utils.path_utils import (
     get_platform_specific_path,
     get_safe_sqlite_url,
