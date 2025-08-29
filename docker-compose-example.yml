@@ -1,11 +1,9 @@
-version: "3.8"
-
 services:
   scheduler-module:
     build:
       context: .
       dockerfile: Dockerfile
-    image: gluesync-scheduler-module # molo17/gluesync-chronos if using MOLO17 Commercial License
+    # image: gluesync-scheduler-module # molo17/gluesync-chronos if using MOLO17 Commercial License
     container_name: gluesync-scheduler-module
     network_mode: host
     volumes:
