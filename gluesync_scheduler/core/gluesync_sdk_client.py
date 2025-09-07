@@ -124,9 +124,12 @@ class GluesyncSDKClient:
         The method will retry indefinitely with exponential backoff starting at 1 second,
         doubling each time up to 30 seconds, then resetting back to 1 second.
         """
-        if self._is_initialized:
-            logger.info("Gluesync SDK client already initialized")
+        if self._is_initialized and self._token:
+            logger.info("Gluesync SDK client already initialized with valid token")
             return
+        elif self._is_initialized and not self._token:
+            logger.warning("SDK client marked as initialized but no token available - reinitializing")
+            self._is_initialized = False
         
         # Parse host and port from CORE_HUB_URL if provided
         host = None
@@ -267,8 +270,23 @@ class GluesyncSDKClient:
                 logger.error(f"{type(e).__name__}: {e}")
                 raise
         
-        self._is_initialized = True
-        logger.info("Gluesync SDK client initialized successfully")
+        # Verify we have a token after connection
+        connection_timeout = 10  # seconds
+        token_check_interval = 0.5  # seconds
+        total_wait = 0
+        
+        while total_wait < connection_timeout and not self._token:
+            await asyncio.sleep(token_check_interval)
+            total_wait += token_check_interval
+            logger.debug(f"Waiting for token... ({total_wait}s/{connection_timeout}s)")
+        
+        if self._token:
+            self._is_initialized = True
+            logger.info("Gluesync SDK client initialized successfully with token")
+        else:
+            self._is_initialized = False
+            logger.error("SDK client connected but no token received within timeout")
+            raise GluesyncAuthenticationError("No authentication token received after connection")
     
     async def shutdown(self):
         """Shutdown the Gluesync client"""
@@ -285,10 +303,15 @@ class GluesyncSDKClient:
         Args:
             token: The JWT token received from the server
         """
-        self._token = token
-        self._is_initialized = True  # Mark as initialized when connected
-        logger.info(f"Connected to CoreHub successfully! Token received.")
-        logger.debug(f"Token: {token}")
+        if token:
+            self._token = token
+            self._is_initialized = True  # Mark as initialized when connected
+            logger.info(f"Connected to CoreHub successfully! Token received and stored.")
+            logger.debug(f"Token length: {len(token) if token else 0} characters")
+        else:
+            logger.error("Connected to CoreHub but no token provided in callback")
+            self._token = None
+            self._is_initialized = False
     
     async def _on_disconnected(self, reason):
         """
@@ -297,9 +320,15 @@ class GluesyncSDKClient:
         Args:
             reason: The reason for disconnection
         """
+        logger.warning(f"Disconnected from CoreHub: {reason}")
+        
+        # Clear authentication state
+        old_token = self._token
         self._token = None
         self._is_initialized = False
-        logger.info(f"Disconnected from CoreHub: {reason}")
+        
+        if old_token:
+            logger.info("Previous authentication token invalidated")
         
         # Note: The SDK handles reconnection internally, so we don't need to start a reconnection task
         logger.info("SDK will handle reconnection automatically")

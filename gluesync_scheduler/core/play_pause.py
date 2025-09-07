@@ -219,6 +219,7 @@ class CoreHubClient:
         # No fallback - if SDK is not properly connected, we should not use any token
         logger.error("SDK client not available or not initialized - no valid token available")
         logger.error("API requests will fail until SDK reconnects successfully")
+        logger.error("Token retrieval result: FAILED (no token available)")
         return None, False  # Return tuple: (token, from_sdk)
     
     def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None):
@@ -254,6 +255,26 @@ class CoreHubClient:
             logger.info(f"Using token: {current_token[:20]}...{current_token[-10:] if len(current_token) > 30 else ''}")
         else:
             logger.warning("No authentication token available - proceeding with unauthenticated request")
+            # Attempt SDK reconnection if not initialized
+            if gluesync_sdk_client and not gluesync_sdk_client.is_initialized:
+                logger.info("Attempting to reinitialize SDK client...")
+                try:
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Schedule reinitialization for later
+                        asyncio.create_task(gluesync_sdk_client.initialize())
+                        logger.info("SDK reinitialization scheduled")
+                    else:
+                        # Run sync initialization
+                        loop.run_until_complete(gluesync_sdk_client.initialize())
+                        logger.info("SDK reinitialization completed")
+                        # Retry token retrieval
+                        current_token, from_sdk = self._get_current_token()
+                        if current_token:
+                            logger.info("Token retrieved after SDK reinitialization")
+                except Exception as reinit_error:
+                    logger.error(f"Failed to reinitialize SDK: {reinit_error}")
             
         url = f"{current_url}{path}"
         headers = {

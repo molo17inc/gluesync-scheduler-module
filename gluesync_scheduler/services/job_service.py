@@ -847,29 +847,28 @@ class JobService:
             # Try to parse as JSON
             import json
             data = json.loads(response_text)
-            
-            # Don't even attempt to process the response structure
-            # Just return a minimal dictionary with status information
             return {
                 "status": "success",
-                "response_size": len(response_text),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "message": str(data.get("message", "Operation completed"))[:200],
+                "timestamp": datetime.now().isoformat()
+            }
+        except json.JSONDecodeError:
+            return {
+                "status": "success", 
+                "message": str(response_text)[:200],
+                "timestamp": datetime.now().isoformat()
             }
         except Exception as e:
-            # If parsing fails, return a simple error message
             return {
                 "status": "error",
-                "error": str(e)[:100],
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "message": str(e)[:200],
+                "timestamp": datetime.now().isoformat()
             }
-    
-    def _execute_job_logic(self, job: ScheduledJob) -> tuple[bool, str, dict]:
+
+    def _execute_job_logic(self, job) -> tuple:
         """
-        Execute the job logic based on its type and parameters
+        Execute the job logic and return results
         
-        Args:
-            job: The scheduled job to execute
-            
         Returns:
             Tuple of (success, message, details)
         """
