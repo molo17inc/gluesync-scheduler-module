@@ -15,6 +15,7 @@ RUN Set-ExecutionPolicy Bypass -Scope Process -Force; `
 RUN choco upgrade chocolatey -y ; `
   choco install python --version=3.11.9 -y --installargs '"/quiet InstallAllUsers=1 PrependPath=1"'; `
   choco install git -y ; `
+  choco install openssl.light -y ; `
   choco cache remove -y -f
 
 # Restore the default Windows shell for correct batch processing.
@@ -41,7 +42,10 @@ RUN python --version && `
   python -m pip --version && `
   git --version
 
-WORKDIR C:/app
+# Make sure temp dir exists
+RUN if not exist C:\temp mkdir C:\temp
+
+WORKDIR C:\app
 
 # Ensure directories exist
 RUN if not exist C:\opt\gluesync\data mkdir C:\opt\gluesync\data && `
@@ -60,20 +64,21 @@ RUN python -m pip install --upgrade pip setuptools wheel && `
 ENV PYTHONDONTWRITEBYTECODE=1 `
   PYTHONUNBUFFERED=1 `
   PIP_DISABLE_PIP_VERSION_CHECK=1 `
-  GLUESYNC_LICENSE_FILE=C:/opt/gluesync/data/gs-license.dat `
-  GLUESYNC_SECURITY_CONFIG=C:/opt/gluesync/data/security-config.json `
+  PYTHONUTF8=1 `
+  GLUESYNC_LICENSE_FILE=C:\opt\gluesync\data\gs-license.dat `
+  GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\data\security-config.json `
   DB_URL=sqlite:///C:/app/data/scheduler.db `
-  LOG_DIR=C:/app/logs `
-  CRON_LOG_DIR=C:/app/logs `
-  DATA_DIR=C:/app/data `
+  LOG_DIR=C:\app\logs `
+  CRON_LOG_DIR=C:\app\logs `
+  DATA_DIR=C:\app\data `
   HOST=0.0.0.0 `
   PORT=8000 `
   SSL_ENABLED=false `
   GLUESYNC_MODULE_TAG=scheduler-module `
   GLUESYNC_USE_SSL=false `
-  PYTHONPATH=C:/app `
-  TEMP=C:/temp `
-  TMP=C:/temp
+  PYTHONPATH=C:\app `
+  TEMP=C:\temp `
+  TMP=C:\temp
 
 # Copy SDK
 COPY ./gluesync-sdk ./gluesync-sdk
