@@ -355,7 +355,7 @@ async def pause_pipeline(
             detail=f"Error stopping pipeline: {str(e)}"
         )
 
-@router.post("/{pipeline_id}/resync", response_model=OperationResponse, summary="Create a data snapshot for a pipeline or entities")
+@router.post("/{pipeline_id}/one-time-snapshot", response_model=OperationResponse, summary="Create a data snapshot for a pipeline or entities")
 async def resync_pipeline(
     request: Request,
     pipeline_id: str = Path(..., description="The ID of the pipeline to resync"),

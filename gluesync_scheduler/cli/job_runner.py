@@ -177,7 +177,7 @@ def execute_job(job: ScheduledJob) -> bool:
         elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/pause"
         elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/resync"
+            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/one-time-snapshot"
         else:
             logger.error(f"Unknown task type: {job.task_type}")
             return False

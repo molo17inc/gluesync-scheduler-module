@@ -912,8 +912,10 @@ class JobService:
                 action = "play"
             elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP, TaskType.GROUP_STOP]:
                 action = "pause"
-            elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT, TaskType.GROUP_SNAPSHOT]:
-                action = "resync"
+            elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
+                action = "one-time-snapshot"
+            elif job.task_type in [TaskType.GROUP_SNAPSHOT]:
+                action = "one-time-snapshot-group"
             else:
                 error_msg = f"Unknown task type: {job.task_type}"
                 logger.error(error_msg)
