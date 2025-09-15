@@ -36,7 +36,7 @@ export SSL_ENABLED=False
 export GLUESYNC_SECURITY_CONFIG=./tests/gluesync/data/security-config.json
 export DB_URL=sqlite:///./tests/data/test_scheduler.db
 export DEBUG=True
-export CORE_HUB_URL=http://localhost:8080
+export GLUESYNC_HOST=http://localhost:8080
 export CRONTAB_USER=$USER
 export HOST=0.0.0.0 # Bind to all interfaces
 

@@ -112,14 +112,14 @@ class CoreHubClient:
         """Initialize the CoreHub URL for API requests
         
         The URL is determined using the following priority order:
-        1. settings.CORE_HUB_URL
+        1. settings.GLUESYNC_HOST
         2. Previously discovered URL
         3. URL from SDK client 
         4. Default URL (localhost:1717)
         """
         # Priority 1: Use the URL from settings
-        if settings.CORE_HUB_URL:
-            self.base_url = settings.CORE_HUB_URL
+        if settings.GLUESYNC_HOST:
+            self.base_url = settings.GLUESYNC_HOST
             # Store in class variable for future use
             CoreHubClient._discovered_url = self.base_url
             logger.info(f"Using CoreHub URL from settings: {self.base_url}")

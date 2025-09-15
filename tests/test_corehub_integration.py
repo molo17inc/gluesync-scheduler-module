@@ -74,8 +74,8 @@ def mock_requests():
 
 def test_corehub_client_initialization(mock_sdk_client):
     """Test that CoreHubClient initializes correctly with SDK token"""
-    # Mock the settings.CORE_HUB_URL
-    with patch('play_pause.settings.CORE_HUB_URL', "http://localhost:8080"):
+    # Mock the settings.GLUESYNC_HOST
+    with patch('play_pause.settings.GLUESYNC_HOST', "http://localhost:8080"):
         client = CoreHubClient()
         assert client.token == "mock_token_123"
         assert client.base_url == "http://localhost:8080"

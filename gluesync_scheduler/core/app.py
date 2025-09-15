@@ -374,11 +374,11 @@ async def startup_event():
             
             # Update settings with the discovered URL
             settings.update_corehub_url(corehub_url)
-            logger.info(f"Updated CoreHub URL in settings: {settings.CORE_HUB_URL}")
+            logger.info(f"Updated CoreHub URL in settings: {settings.GLUESYNC_HOST}")
         
         # If we have a CoreHub URL in settings, log it
-        if settings.CORE_HUB_URL:
-            logger.info(f"CoreHub URL is set to: {settings.CORE_HUB_URL}")
+        if settings.GLUESYNC_HOST:
+            logger.info(f"CoreHub URL is set to: {settings.GLUESYNC_HOST}")
         else:
             logger.warning("CoreHub URL is not set yet. Will attempt to extract it from the SDK client.")
             
@@ -435,7 +435,7 @@ async def startup_event():
     logger.info(f"Port: {settings.PORT}")
     logger.info(f"Database URL: {settings.DB_URL}")
     logger.info(f"SSL Enabled: {settings.SSL_ENABLED}")
-    logger.info(f"CoreHub URL: {settings.CORE_HUB_URL}")
+    logger.info(f"CoreHub URL: {settings.GLUESYNC_HOST}")
     logger.info(f"Gluesync Module Tag: {settings.GLUESYNC_MODULE_TAG}")
     logger.info(f"Gluesync License File: {settings.GLUESYNC_LICENSE_FILE}")
     logger.info(f"Gluesync Security Config: {settings.GLUESYNC_SECURITY_CONFIG}")

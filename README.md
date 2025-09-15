@@ -106,7 +106,7 @@ gluesync-scheduler-module/
 2. Run the container:
 
    ```bash
-   docker run -p 1717:1717 -e CORE_HUB_URL=http://your-core-hub:1717 gluesync-scheduler-module:latest
+   docker run -p 1717:1717 -e GLUESYNC_HOST=http://your-core-hub:1717 gluesync-scheduler-module:latest
    ```
 
 ## Configuration
@@ -115,7 +115,7 @@ Configure the application using environment variables:
 
 | Variable | Description | Default |
 |----------|-------------|----------|
-| `CORE_HUB_URL` | URL of the Gluesync Core Hub (dynamically updated from SDK discovery if available) | `http://localhost:1717` |
+| `GLUESYNC_HOST` | URL of the Gluesync Core Hub (dynamically updated from SDK discovery if available) | `http://localhost:1717` |
 | `HOST` | Host to bind the API server | `0.0.0.0` |
 | `PORT` | Port to bind the API server | `1717` |
 | `DEBUG` | Enable debug mode for Uvicorn server logs | `False` |
@@ -166,7 +166,7 @@ To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with
    GLUESYNC_SECURITY_CONFIG=/path/to/security-config.json
    DB_URL=sqlite:///./data/test_scheduler.db
    DEBUG=True
-   CORE_HUB_URL=http://localhost:8080
+   GLUESYNC_HOST=http://localhost:8080
    CRONTAB_USER=$USER
    HOST=0.0.0.0
    ```

@@ -17,7 +17,7 @@ services:
       - "1717:1717"
     command: uvicorn app:app --host 0.0.0.0 --port 1717
     environment:
-      - CORE_HUB_URL=
+      - GLUESYNC_HOST=
       - ENTITY_START_TIMEOUT=2
       - HOST=0.0.0.0
       - PORT=1717

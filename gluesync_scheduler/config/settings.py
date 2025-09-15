@@ -36,15 +36,15 @@ load_dotenv(dotenv_path=env_path)
 
 class Settings:
     # Core Hub settings
-    # CORE_HUB_URL will be dynamically set from the SDK after discovery
+    # GLUESYNC_HOST will be dynamically set from the SDK after discovery
     # If not provided, UDP discovery will be used to find the CoreHub
-    CORE_HUB_URL = os.getenv('CORE_HUB_URL', '')
+    GLUESYNC_HOST = os.getenv('GLUESYNC_HOST', '')
     ENTITY_START_TIMEOUT = int(os.getenv('ENTITY_START_TIMEOUT', '2'))
     
     def update_corehub_url(self, url: str):
         """Update the CoreHub URL from the SDK"""
         if url:
-            self.CORE_HUB_URL = url
+            self.GLUESYNC_HOST = url
     
     # Web server settings
     HOST = os.getenv('HOST', '0.0.0.0')

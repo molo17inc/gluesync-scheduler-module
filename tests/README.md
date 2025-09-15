@@ -28,7 +28,7 @@ To run the tests locally, you'll need to have Python 3.9+ installed and the requ
    ```env
    DB_URL=sqlite:///./tests/data/test_scheduler.db
    DEBUG=True
-   CORE_HUB_URL=http://localhost:8080
+   GLUESYNC_HOST=http://localhost:8080
    GLUESYNC_LICENSE_FILE=gs-license.dat
    GLUESYNC_MODULE_TAG=chronos
    SSL_ENABLED=False

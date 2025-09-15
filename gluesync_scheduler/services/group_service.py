@@ -37,7 +37,7 @@ class GroupService:
     """Service for managing groups within pipelines via CoreHub API"""
     
     def __init__(self):
-        self.core_hub_url = settings.CORE_HUB_URL
+        self.GLUESYNC_HOST = settings.GLUESYNC_HOST
         self.ssl_verify = not settings.SSL_SKIP_VERIFY if settings.SSL_ENABLED else True
         self._setup_session()
     
@@ -84,7 +84,7 @@ class GroupService:
         """
         try:
             headers = await self._get_auth_headers()
-            url = f"{self.core_hub_url}/pipelines/{pipeline_id}/config/groups"
+            url = f"{self.GLUESYNC_HOST}/pipelines/{pipeline_id}/config/groups"
             
             logger.info(f"Fetching groups for pipeline {pipeline_id} from {url}")
             
@@ -120,7 +120,7 @@ class GroupService:
         """
         try:
             headers = await self._get_auth_headers()
-            url = f"{self.core_hub_url}/pipelines/{pipeline_id}/config/entities"
+            url = f"{self.GLUESYNC_HOST}/pipelines/{pipeline_id}/config/entities"
             
             logger.info(f"Fetching entities for pipeline {pipeline_id} to filter by group {group_id}")
             

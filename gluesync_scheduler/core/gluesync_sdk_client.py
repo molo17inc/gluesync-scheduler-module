@@ -131,14 +131,14 @@ class GluesyncSDKClient:
             logger.warning("SDK client marked as initialized but no token available - reinitializing")
             self._is_initialized = False
         
-        # Parse host and port from CORE_HUB_URL if provided
+        # Parse host and port from GLUESYNC_HOST if provided
         host = None
         port = None
         use_discovery = True
         parsed_url = None
         
-        if settings.CORE_HUB_URL:
-            parsed_url = urlparse(settings.CORE_HUB_URL)
+        if settings.GLUESYNC_HOST:
+            parsed_url = urlparse(settings.GLUESYNC_HOST)
             host = parsed_url.hostname
             port = parsed_url.port
             use_discovery = False
@@ -162,8 +162,8 @@ class GluesyncSDKClient:
             # SSL configuration - sync with web server settings
             use_ssl = settings.SSL_ENABLED
             
-            # If CORE_HUB_URL is https://, consider using SSL
-            if settings.CORE_HUB_URL and parsed_url and parsed_url.scheme == "https":
+            # If GLUESYNC_HOST is https://, consider using SSL
+            if settings.GLUESYNC_HOST and parsed_url and parsed_url.scheme == "https":
                 use_ssl = True
                 logger.info("Enforcing SSL because CoreHub URL uses HTTPS scheme")
             
