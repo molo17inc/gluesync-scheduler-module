@@ -234,127 +234,84 @@ async def startup_event():
     os.makedirs(settings.CRON_LOG_DIR, exist_ok=True)
     os.makedirs(os.path.dirname(settings.DB_URL.replace('sqlite:///', '')), exist_ok=True)
     
-    # Run database migrations
+    # Initialize database
     try:
-        logger.info("Running database migrations...")
-        import importlib.util
-        import sys
-        import subprocess
-        
-        logger.info(f"Running migrations with DB_URL: {settings.DB_URL}")
-        
-        # Ensure database directory exists
-        if settings.DB_URL.startswith('sqlite:///'):
-            db_path = settings.DB_URL.replace('sqlite:///', '')
-            db_dir = os.path.dirname(os.path.abspath(db_path))
-            os.makedirs(db_dir, exist_ok=True)
-            logger.info(f"Ensuring database directory exists at {db_dir}")
-        
-        # Run migrations using the run_migrations.sh script
-        result = subprocess.run(
-            ['/bin/bash', 'migrations/run_migrations.sh', '--db-url', settings.DB_URL],
-            capture_output=True,
-            text=True,
-            check=False
-        )
-        
-        if result.returncode == 0:
-            logger.info("✅ Migrations completed successfully")
-            # Force SQLAlchemy to refresh its schema cache
-            from sqlalchemy import MetaData
-            from gluesync_scheduler.db.database import engine
-            MetaData().reflect(bind=engine)
-            logger.info("✅ SQLAlchemy metadata refreshed after migration")
-        else:
-            logger.error(f"❌ Migration failed with error code {result.returncode}")
-            logger.error(f"Migration script output: {result.stdout}")
-            logger.error(f"Migration script errors: {result.stderr}")
-            
-            # Fallback: try to run individual migrations
-            logger.info("Attempting to run individual migrations...")
-            
-            # List of migration files to run in order
-            migration_files = [
-                "migrate_add_settings_table.py",
-                "migrate_add_snapshot_write_method.py"
-            ]
-            
-            logger.info(f"Creating engine for database: {settings.DB_URL}")
-            engine = create_engine(settings.DB_URL)
-            
-            for migration_file in migration_files:
-                migration_path = os.path.join(migrations_dir, migration_file)
-                if os.path.exists(migration_path):
-                    try:
-                        logger.info(f"Running migration: {migration_file}")
-                        
-                        # Load and execute the migration module
-                        module_name = migration_file.replace('.py', '')
-                        spec = importlib.util.spec_from_file_location(module_name, migration_path)
-                        migration_module = importlib.util.module_from_spec(spec)
-                        sys.modules[module_name] = migration_module
-                        spec.loader.exec_module(migration_module)
-                        
-                        # Run the appropriate migration function
-                        if hasattr(migration_module, 'create_settings_table'):
-                            migration_module.create_settings_table(engine)
-                        elif hasattr(migration_module, 'add_snapshot_write_method_column'):
-                            migration_module.add_snapshot_write_method_column(engine)
-                        elif hasattr(migration_module, 'main'):
-                            # Some migrations might have a main function
-                            pass  # Skip main function as it expects command line args
-                        
-                        logger.info(f"Successfully completed migration: {migration_file}")
-                    except Exception as migration_error:
-                        logger.error(f"Error running migration {migration_file}: {str(migration_error)}")
-                        # Continue with other migrations
-                else:
-                    logger.warning(f"Migration file not found: {migration_path}")
-    except Exception as e:
-        logger.error(f"Error running database migrations: {str(e)}")
-        # Continue with startup even if migrations fail - the app might still work
-    try:
-        logger.info("Verifying database schema synchronization...")
-        from gluesync_scheduler.models.models import ScheduledJob
-        from sqlalchemy import inspect
-        
+        logger.info("Verifying database schema...")
         logger.info(f"🔍 DATABASE: Application DB_URL: {settings.DB_URL}")
         
-        engine = create_engine(settings.DB_URL)
-        
-        # Check if the database file actually exists and get its path
-        if settings.DB_URL.startswith('sqlite:///'):
+        # For SQLite, verify the database file
+        if settings.DB_URL.startswith('sqlite:'):
             db_path = settings.DB_URL.replace('sqlite:///', '')
-            if db_path.startswith('./'):
-                db_path = os.path.abspath(db_path)
+            # Handle Windows paths
+            if ':' in db_path and len(db_path) > 2 and db_path[1] == ':':
+                db_path = db_path[1:]  # Remove leading slash for Windows paths
+            
+            db_path = os.path.abspath(db_path)
             logger.info(f"🔍 DATABASE: Resolved database file path: {db_path}")
+            
+            # Check if database file exists
             if os.path.exists(db_path):
-                logger.info(f"🔍 DATABASE: Database file exists, size: {os.path.getsize(db_path)} bytes")
+                db_size = os.path.getsize(db_path)
+                logger.info(f"🔍 DATABASE: Database file exists, size: {db_size} bytes")
             else:
-                logger.error(f"🔍 DATABASE: Database file does not exist at {db_path}")
-
-    except Exception as verification_error:
-        logger.error(f"Error during schema verification: {str(verification_error)}")
+                logger.info("🔍 DATABASE: Database file does not exist, it will be created")
+        
+        # Create all database tables if they don't exist
+        from gluesync_scheduler.db.database import Base, engine
+        logger.info("Creating database tables if they don't exist...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables verified/created successfully")
+        
+        # Run any pending migrations
+        try:
+            from gluesync_scheduler.db.migrate import run_migrations
+            logger.info("Checking for pending migrations...")
+            run_migrations()
+            logger.info("Database migrations completed successfully")
+        except Exception as mig_error:
+            logger.warning(f"Skipping migrations (may not be critical): {mig_error}")
+            
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+        # Continue startup even if there's an error, as the schema might be partially functional
     
     # Initialize default settings
-    engine = create_engine(settings.DB_URL)
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    db = SessionLocal()
     try:
-        from gluesync_scheduler.services.settings_service import SettingsService
-        settings_service = SettingsService(db)
-        created_settings = settings_service.initialize_default_settings()
-        if created_settings:
-            logger.info(f"Initialized default settings: {created_settings}")
+        from gluesync_scheduler.db.database import SessionLocal
+        db = SessionLocal()
         
-        # Load settings from database
-        timezone_setting = settings_service.get_setting_by_key("timezone")
-        if timezone_setting and timezone_setting.value:
-            settings.TIMEZONE = timezone_setting.value
-            logger.info(f"Loaded timezone from database: {settings.TIMEZONE}")
+        # Check if settings table exists
+        from sqlalchemy import inspect
+        inspector = inspect(db.get_bind())
+        
+        if 'settings' in inspector.get_table_names():
+            try:
+                from gluesync_scheduler.services.settings_service import SettingsService
+                settings_service = SettingsService(db)
+                
+                # Initialize default settings
+                created_settings = settings_service.initialize_default_settings()
+                if created_settings:
+                    logger.info("Initialized default settings")
+                else:
+                    logger.info("Default settings already exist")
+                
+                # Load settings from database
+                timezone_setting = settings_service.get_setting_by_key("timezone")
+                if timezone_setting and timezone_setting.value:
+                    settings.TIMEZONE = timezone_setting.value
+                    logger.info(f"Loaded timezone from database: {settings.TIMEZONE}")
+                    
+            except Exception as e:
+                logger.warning(f"Could not initialize settings (table may be empty): {e}")
+        else:
+            logger.warning("Settings table does not exist yet. Will be created when settings are first saved.")
+            
+        # Close the session
+        db.close()
     except Exception as e:
-        logger.error(f"Error initializing settings: {str(e)}")
-    finally:
+        logger.error(f"Error initializing settings: {e}")
+        logger.warning("The application will continue with default settings")
         db.close()
     
     # Initialize the Gluesync SDK client
@@ -403,47 +360,25 @@ async def startup_event():
         logger.error(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("The application will continue, but some functionality may be limited")
     
-    # Initialize database schema if it doesn't exist
-    try:
-        logger.info("Initializing database schema...")
-        engine = create_engine(settings.DB_URL)
-        
-        # Import Base and models to ensure all tables are registered
-        from gluesync_scheduler.db.database import Base
-        from gluesync_scheduler.models import models  # Import models to register tables
-        
-        # Create all tables
-        Base.metadata.create_all(bind=engine)
-        logger.info(f"Database schema initialized successfully at {settings.DB_URL}")
-    except Exception as e:
-        logger.error(f"Error initializing database schema: {str(e)}")
-        logger.warning("The application will continue, but database operations may fail")
-    
-    # Initialize the scheduler service and load existing jobs
+    # Load existing jobs into the scheduler
     try:
         logger.info("Loading existing jobs into scheduler...")
-        # Create a database session
-        engine = create_engine(settings.DB_URL)
-        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        db = SessionLocal()
+        job_service = JobService()
         
-        # Get all enabled jobs from the database
-        jobs = db.query(ScheduledJob).filter(ScheduledJob.enabled == True).all()
-        logger.info(f"Found {len(jobs)} enabled jobs in the database")
+        # Ensure the jobs table exists before trying to load jobs
+        from gluesync_scheduler.db.database import Base, engine, SessionLocal
+        from sqlalchemy import inspect
         
-        # Add each job to the scheduler
-        for job in jobs:
-            try:
-                job_id = scheduler_service.create_job(job)
-                logger.info(f"Loaded job {job.id}: {job.name} into scheduler with ID {job_id}")
-            except Exception as e:
-                logger.error(f"Error loading job {job.id}: {str(e)}")
-        
-        # Close the database session
-        db.close()
-        logger.info("Finished loading jobs into scheduler")
+        # Check if the scheduled_jobs table exists
+        inspector = inspect(engine)
+        if 'scheduled_jobs' in inspector.get_table_names():
+            job_service.load_jobs_into_scheduler()
+            logger.info("Successfully loaded existing jobs into scheduler")
+        else:
+            logger.warning("scheduled_jobs table does not exist yet. No jobs to load.")
+            
     except Exception as e:
-        logger.error(f"Error loading jobs into scheduler: {str(e)}")
+        logger.error(f"Error loading jobs into scheduler: {e}")
         logger.warning("The scheduler will continue, but existing jobs may not be loaded")
     
     # Log configuration
