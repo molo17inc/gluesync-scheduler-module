@@ -22,34 +22,60 @@
 """
 
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
+import sys
+from pathlib import Path
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 from gluesync_scheduler.config.settings import settings
 
-# Ensure data directory exists if using SQLite
-if settings.DB_URL.startswith('sqlite:'):
+def ensure_sqlite_db_path():
+    """Ensure the SQLite database directory exists and return the path."""
+    if not settings.DB_URL.startswith('sqlite:'):
+        return
+        
+    # Extract the database path
     db_path = settings.DB_URL.replace('sqlite:///', '')
-    # Handle Windows paths
-    if os.name == 'nt' and ':' in db_path:
-        # Windows absolute path like C:/app/data/scheduler.db
-        db_dir = os.path.dirname(db_path)
-    else:
-        # Unix path or relative path
-        db_dir = os.path.dirname(os.path.abspath(db_path))
     
-    if db_dir and not os.path.exists(db_dir):
-        os.makedirs(db_dir, exist_ok=True)
-        print(f"Created database directory: {db_dir}")
+    # Handle Windows paths (C:/path/db.sqlite)
+    if ':' in db_path and len(db_path) > 2 and db_path[1] == ':':
+        db_path = db_path[2:]  # Remove the leading / from /C:/path
+    
+    db_path = Path(db_path).absolute()
+    db_dir = db_path.parent
+    
+    # Create directory if it doesn't exist
+    try:
+        db_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[Database] Created database directory: {db_dir}", file=sys.stderr)
+    except Exception as e:
+        print(f"[Database] Error creating directory {db_dir}: {e}", file=sys.stderr)
+        raise
+    
+    return str(db_path)
+
+# Ensure SQLite database directory exists
+db_path = ensure_sqlite_db_path() if settings.DB_URL.startswith('sqlite:') else None
 
 # Create SQLAlchemy engine with appropriate connection args
 if settings.DB_URL.startswith('sqlite:'):
-    # SQLite-specific connection arguments
-    engine = create_engine(settings.DB_URL, connect_args={"check_same_thread": False})
+    # Use URI format that works on both Windows and Unix
+    db_uri = f'sqlite:///{db_path}'
+    engine = create_engine(
+        db_uri,
+        connect_args={"check_same_thread": False},
+        pool_pre_ping=True
+    )
+    
+    # Enable foreign key constraints for SQLite
+    @event.listens_for(engine, 'connect')
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 else:
-    # For other database types, don't use SQLite-specific args
-    engine = create_engine(settings.DB_URL)
+    # For other database types
+    engine = create_engine(settings.DB_URL, pool_pre_ping=True)
 
 # Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
