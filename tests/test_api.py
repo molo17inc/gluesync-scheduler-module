@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 # Import mock gluesync_sdk before any other imports that might use it
 from tests.mock_gluesync_sdk import GluesyncSDK
-from models import TaskType
+from gluesync_scheduler.models.models import TaskType
 
 # Test configuration
 TEST_DB_URL = "sqlite:///./tests/data/test_api_scheduler.db"
