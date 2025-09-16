@@ -269,7 +269,7 @@ class Job(JobBase):
             # This ensures we at least have a value for next_run
             from datetime import datetime, timezone, timedelta
             return datetime.now(timezone.utc) + timedelta(days=1)
-    start_time: Optional[str] = Field(None, description="Current time with timezone information when the job data was retrieved", example="2025-04-14T23:19:46+0200")
+    start_time: Optional[str] = Field(None, description="Scheduled start time for the job in the job's timezone", example="2025-04-14T23:19:46+02:00")
     timezone_name: Optional[str] = Field(None, description="Name of the timezone used for scheduling", example="Asia/Tokyo")
     
     @validator('entity_ids', pre=True)
@@ -325,15 +325,76 @@ class Job(JobBase):
     def serialize_datetime(self, dt: Optional[datetime], info) -> Optional[str]:
         if dt is None:
             return None
+        
+        # Get the job's timezone or use settings timezone as fallback
+        tz = None
+        if hasattr(self, 'timezone_name') and self.timezone_name:
+            try:
+                tz = pytz.timezone(self.timezone_name)
+            except:
+                pass
+        
+        # Fallback to settings timezone if job doesn't have one
+        if tz is None:
+            try:
+                tz = pytz.timezone(settings.TIMEZONE)
+            except:
+                tz = pytz.UTC
+        
         # Ensure datetime has timezone information
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=pytz.UTC)
-        # For next_run, format as 'YYYY-MM-DDTHH:MM:SS+0000' (no colon in offset)
-        if info.field_name == 'next_run':
-            # Use strftime to format offset without colon
-            return dt.strftime('%Y-%m-%dT%H:%M:%S%z')
-        # For other fields, use ISO8601 (with colon)
-        return dt.isoformat()
+            # If no timezone info, assume it's in UTC
+            dt = pytz.UTC.localize(dt)
+        
+        # Convert to the job's timezone
+        dt_in_timezone = dt.astimezone(tz)
+        
+        # Return consistent ISO8601 format with colon in offset for all fields
+        return dt_in_timezone.isoformat()
+    
+    @field_serializer('start_time')
+    def serialize_start_time(self, start_time: Optional[str], info) -> Optional[str]:
+        if start_time is None:
+            return None
+        
+        # If it's already a properly formatted string with timezone, parse and reformat
+        try:
+            # Parse the datetime string
+            if isinstance(start_time, str):
+                # Handle various formats
+                dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            elif isinstance(start_time, datetime):
+                dt = start_time
+            else:
+                return start_time
+            
+            # Get the job's timezone
+            tz = None
+            if hasattr(self, 'timezone_name') and self.timezone_name:
+                try:
+                    tz = pytz.timezone(self.timezone_name)
+                except:
+                    pass
+            
+            # Fallback to settings timezone
+            if tz is None:
+                try:
+                    tz = pytz.timezone(settings.TIMEZONE)
+                except:
+                    tz = pytz.UTC
+            
+            # Ensure datetime has timezone information
+            if dt.tzinfo is None:
+                dt = pytz.UTC.localize(dt)
+            
+            # Convert to the job's timezone
+            dt_in_timezone = dt.astimezone(tz)
+            
+            # Return consistent ISO8601 format
+            return dt_in_timezone.isoformat()
+        except Exception as e:
+            # If we can't parse it, return as is
+            return start_time
 
 
 class JobList(BaseModel):

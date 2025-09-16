@@ -27,7 +27,7 @@ import logging
 import os
 import requests
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
 # Add the parent directory to sys.path to allow imports from the package
@@ -131,16 +131,17 @@ def update_job_status(job_identifier: str, success: bool, error_message: Optiona
             logger.error(f"Job with identifier {job_identifier} not found in the database")
             return False
         
-        # Update the job status
-        job.last_run = datetime.now()
+        # Update the job status with timezone-aware datetime
+        now = datetime.now(timezone.utc)
+        job.last_run = now
         
         if success:
-            job.last_successful_run = datetime.now()
+            job.last_successful_run = now
             job.last_error_message = None
             job.last_run_error_time = None
         else:
             job.last_error_message = error_message
-            job.last_run_error_time = datetime.now()
+            job.last_run_error_time = now
         
         # Commit the changes
         db.commit()
