@@ -403,6 +403,22 @@ async def startup_event():
         logger.error(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("The application will continue, but some functionality may be limited")
     
+    # Initialize database schema if it doesn't exist
+    try:
+        logger.info("Initializing database schema...")
+        engine = create_engine(settings.DB_URL)
+        
+        # Import Base and models to ensure all tables are registered
+        from gluesync_scheduler.db.database import Base
+        from gluesync_scheduler.models import models  # Import models to register tables
+        
+        # Create all tables
+        Base.metadata.create_all(bind=engine)
+        logger.info(f"Database schema initialized successfully at {settings.DB_URL}")
+    except Exception as e:
+        logger.error(f"Error initializing database schema: {str(e)}")
+        logger.warning("The application will continue, but database operations may fail")
+    
     # Initialize the scheduler service and load existing jobs
     try:
         logger.info("Loading existing jobs into scheduler...")
