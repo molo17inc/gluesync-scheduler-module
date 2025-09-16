@@ -21,14 +21,35 @@
  * Copyright (C) 2025 MOLO17. All rights reserved.
 """
 
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 from gluesync_scheduler.config.settings import settings
 
-# Create SQLAlchemy engine
-engine = create_engine(settings.DB_URL, connect_args={"check_same_thread": False})
+# Ensure data directory exists if using SQLite
+if settings.DB_URL.startswith('sqlite:'):
+    db_path = settings.DB_URL.replace('sqlite:///', '')
+    # Handle Windows paths
+    if os.name == 'nt' and ':' in db_path:
+        # Windows absolute path like C:/app/data/scheduler.db
+        db_dir = os.path.dirname(db_path)
+    else:
+        # Unix path or relative path
+        db_dir = os.path.dirname(os.path.abspath(db_path))
+    
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+        print(f"Created database directory: {db_dir}")
+
+# Create SQLAlchemy engine with appropriate connection args
+if settings.DB_URL.startswith('sqlite:'):
+    # SQLite-specific connection arguments
+    engine = create_engine(settings.DB_URL, connect_args={"check_same_thread": False})
+else:
+    # For other database types, don't use SQLite-specific args
+    engine = create_engine(settings.DB_URL)
 
 # Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
