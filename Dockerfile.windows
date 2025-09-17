@@ -67,6 +67,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   PYTHONUTF8=1 `
   GLUESYNC_LICENSE_FILE=C:\opt\gluesync\data\gs-license.dat `
   GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\data\security-config.json `
+  GLUESYNC_HOST= `
   DB_URL=sqlite:///C:/app/data/scheduler.db `
   LOG_DIR=C:\app\logs `
   CRON_LOG_DIR=C:\app\logs `
