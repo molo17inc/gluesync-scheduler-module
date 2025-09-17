@@ -65,23 +65,26 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   PYTHONUNBUFFERED=1 `
   PIP_DISABLE_PIP_VERSION_CHECK=1 `
   PYTHONUTF8=1 `
+  PYTHONPATH=C:\app `
   GLUESYNC_LICENSE_FILE=C:\opt\gluesync\data\gs-license.dat `
   GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\data\security-config.json `
+  GLUESYNC_MODULE_TAG=scheduler-module `
+  GLUESYNC_USE_SSL=false `
   GLUESYNC_HOST= `
   DB_URL=sqlite:///C:/app/data/scheduler.db `
+  ENTITY_START_TIMEOUT=2 `
+  HOST=0.0.0.0 `
+  PORT=1717 `
+  DEBUG=False `
+  LOG_LEVEL=INFO `
   LOG_DIR=C:\app\logs `
   CRON_LOG_DIR=C:\app\logs `
   DATA_DIR=C:\app\data `
-  HOST=0.0.0.0 `
-  PORT=1717 `
   SSL_ENABLED=false `
   SSL_SKIP_VERIFY=True `
-  TIMEZONE=UTC `
-  GLUESYNC_MODULE_TAG=scheduler-module `
-  GLUESYNC_USE_SSL=false `
-  PYTHONPATH=C:\app `
   TEMP=C:\temp `
-  TMP=C:\temp
+  TMP=C:\temp `
+  TIMEZONE=UTC
 
 # Copy SDK
 COPY ./gluesync-sdk ./gluesync-sdk
