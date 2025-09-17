@@ -1083,13 +1083,14 @@ class JobService:
                         )
                     elif action == "pause":
                         result = corehub_client.stop_group(job.pipeline_id, group_id)
-                    elif action == "resync":
+                    elif action == "resync" or action == "one-time-snapshot-group":
                         result = corehub_client.resync_group(
                             job.pipeline_id, 
                             group_id,
                             snapshot_write_method=snapshot_write_method
                         )
                     else:
+                        logger.error(f"Unknown action for group operation: {action}")
                         result = False
                     
                     if result:
