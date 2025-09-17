@@ -372,14 +372,32 @@ async def startup_event():
         # Create a database session
         db = SessionLocal()
         try:
-            # Create job service with database session
-            job_service = JobService(db)
-            
             # Check if the scheduled_jobs table exists
             inspector = inspect(engine)
             if 'scheduled_jobs' in inspector.get_table_names():
-                job_service.load_jobs_into_scheduler()
-                logger.info("Successfully loaded existing jobs into scheduler")
+                # Get all enabled jobs from the database
+                enabled_jobs = db.query(ScheduledJob).filter(ScheduledJob.enabled == True).all()
+                
+                if enabled_jobs:
+                    logger.info(f"Found {len(enabled_jobs)} enabled job(s) to load into scheduler")
+                    
+                    # Add each enabled job to the scheduler
+                    for job in enabled_jobs:
+                        try:
+                            # Use the scheduler service to create the job
+                            job_id = scheduler_service.create_job(job)
+                            logger.info(f"Loaded job '{job.name}' (ID: {job.id}) into scheduler with scheduler ID: {job_id}")
+                            
+                            # Update the command field to store the scheduler job ID
+                            job.command = f"Scheduled job ID: {job_id}"
+                            db.commit()
+                        except Exception as job_error:
+                            logger.error(f"Failed to load job '{job.name}' (ID: {job.id}) into scheduler: {job_error}")
+                            continue
+                    
+                    logger.info("Successfully loaded existing jobs into scheduler")
+                else:
+                    logger.info("No enabled jobs found to load into scheduler")
             else:
                 logger.warning("scheduled_jobs table does not exist yet. No jobs to load.")
         finally:
