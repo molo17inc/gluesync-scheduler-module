@@ -138,11 +138,15 @@ class GluesyncSDKClient:
         parsed_url = None
         
         if settings.GLUESYNC_HOST:
+            logger.info(f"GLUESYNC_HOST environment variable set to: {settings.GLUESYNC_HOST}")
             parsed_url = urlparse(settings.GLUESYNC_HOST)
             host = parsed_url.hostname
             port = parsed_url.port
             use_discovery = False
-            logger.info(f"Using provided CoreHub host: {host} at port: {port}")
+            logger.info(f"Parsed URL - scheme: {parsed_url.scheme}, host: {host}, port: {port}")
+            if not port:
+                port = 1717
+                logger.info(f"No port specified in URL, using default: {port}")
         else:
             logger.info("No CoreHub URL provided, will use UDP discovery instead")
         
@@ -188,6 +192,15 @@ class GluesyncSDKClient:
             if settings.GLUESYNC_SECURITY_CONFIG and os.path.exists(settings.GLUESYNC_SECURITY_CONFIG):
                 logger.info(f"Security config found at {settings.GLUESYNC_SECURITY_CONFIG} but SSL is disabled - ignoring security config")
             
+        # Log final configuration before creating client
+        logger.info(f"Creating GluesyncClient with:")
+        logger.info(f"  - host: {host}")
+        logger.info(f"  - port: {port if port is not None else 1717}")
+        logger.info(f"  - use_ssl: {use_ssl}")
+        logger.info(f"  - security_config: {security_config}")
+        logger.info(f"  - verify_ssl: {not settings.SSL_SKIP_VERIFY}")
+        logger.info(f"  - module_tag: {settings.GLUESYNC_MODULE_TAG}")
+        
         # Create the client
         self._client = GluesyncClient(
             host=host,  # None will trigger UDP discovery
