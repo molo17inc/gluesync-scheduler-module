@@ -145,7 +145,7 @@ deploy-windows:
     - |
       Write-Host "Building Windows Docker image..."
       Write-Host "Using Dockerfile: Dockerfile.windows"
-      docker build --file Dockerfile.windows --tag "${env:VERSION_TAG_WINDOWS}" .
+      docker build --no-cache --file Dockerfile.windows --tag "${env:VERSION_TAG_WINDOWS}" .
       if ($LASTEXITCODE -ne 0) {
         Write-Error "❌ Docker build failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE
