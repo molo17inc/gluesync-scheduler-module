@@ -42,6 +42,7 @@ from gluesync_scheduler.api.pipeline_router import router as pipeline_router
 from gluesync_scheduler.api.settings_router import router as settings_router
 from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+from gluesync_scheduler.services.job_service import JobService
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.models.models import ScheduledJob
 from sqlalchemy import create_engine
@@ -363,19 +364,27 @@ async def startup_event():
     # Load existing jobs into the scheduler
     try:
         logger.info("Loading existing jobs into scheduler...")
-        job_service = JobService()
         
-        # Ensure the jobs table exists before trying to load jobs
+        # Import database components
         from gluesync_scheduler.db.database import Base, engine, SessionLocal
         from sqlalchemy import inspect
         
-        # Check if the scheduled_jobs table exists
-        inspector = inspect(engine)
-        if 'scheduled_jobs' in inspector.get_table_names():
-            job_service.load_jobs_into_scheduler()
-            logger.info("Successfully loaded existing jobs into scheduler")
-        else:
-            logger.warning("scheduled_jobs table does not exist yet. No jobs to load.")
+        # Create a database session
+        db = SessionLocal()
+        try:
+            # Create job service with database session
+            job_service = JobService(db)
+            
+            # Check if the scheduled_jobs table exists
+            inspector = inspect(engine)
+            if 'scheduled_jobs' in inspector.get_table_names():
+                job_service.load_jobs_into_scheduler()
+                logger.info("Successfully loaded existing jobs into scheduler")
+            else:
+                logger.warning("scheduled_jobs table does not exist yet. No jobs to load.")
+        finally:
+            # Ensure the database session is closed
+            db.close()
             
     except Exception as e:
         logger.error(f"Error loading jobs into scheduler: {e}")
