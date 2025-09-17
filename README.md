@@ -381,6 +381,35 @@ This is particularly useful for:
 - Ensuring operations across multiple entities/groups are performed in a consistent timeframe
 - Managing data synchronization at the group level for better organization
 
+#### Available Task Types
+
+The scheduler supports the following task types for job creation:
+
+**Entity-Level Operations:**
+
+- `entity_start` - Start synchronization for specific entities within a pipeline
+- `entity_stop` - Stop synchronization for specific entities within a pipeline  
+- `entity_snapshot` - Create a snapshot (one-time synchronization) for specific entities
+
+**Pipeline-Level Operations:**
+
+- `pipeline_start` - Start synchronization for an entire pipeline
+- `pipeline_stop` - Stop synchronization for an entire pipeline
+- `pipeline_snapshot` - Create a snapshot (one-time synchronization) for an entire pipeline
+
+**Group-Level Operations:**
+
+- `group_start` - Start synchronization for specific groups within a pipeline
+- `group_stop` - Stop synchronization for specific groups within a pipeline
+- `group_snapshot` - Create a snapshot (one-time synchronization) for specific groups
+
+**Operation Parameters:**
+
+- For entity operations: Requires `entity_ids` array
+- For group operations: Requires `group_ids` array  
+- For pipeline operations: No additional IDs needed (operates on entire pipeline)
+- Snapshot operations support `with_snapshot` (boolean) and `snapshot_write_method` ("UPSERT" or "INSERT")
+
 #### Example Job Creation Requests
 
 **Entity-Level Job:**
