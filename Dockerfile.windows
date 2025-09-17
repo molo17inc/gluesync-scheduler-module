@@ -97,11 +97,11 @@ COPY run_scheduler.py .
 COPY setup.py .
 COPY migrations/ ./migrations/
 
-EXPOSE 8000
+EXPOSE 1717
 
 # Healthcheck endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 `
-  CMD python -c "import urllib.request, os; url='http://'+os.environ.get('HOST','localhost')+':8000/health'; urllib.request.urlopen(url)" || exit 1
+  CMD python -c "import urllib.request, os; url='http://'+os.environ.get('HOST','localhost')+':'+os.environ.get('PORT','1717')+'/health'; urllib.request.urlopen(url)" || exit 1
 
 # Create entrypoint script
 RUN echo @echo off > entrypoint.bat && `

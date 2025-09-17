@@ -139,6 +139,10 @@ RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_mi
 # Expose the port the app runs on
 EXPOSE 1717
 
+# Healthcheck endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD python3 -c "import urllib.request, os; url='http://localhost:'+os.environ.get('PORT','1717')+'/health'; urllib.request.urlopen(url)" || exit 1
+
 # Set entrypoint to ensure cron service starts
 ENTRYPOINT ["/app/entrypoint.sh"]
 
