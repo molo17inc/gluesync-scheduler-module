@@ -114,7 +114,8 @@ deploy-windows:
     # Extract version information from tag
     - |
       Write-Host "Processing tag: $env:CI_COMMIT_TAG"
-      $TAG_PART = $env:CI_COMMIT_TAG -replace '^(release-|tag-)', ''
+      # Extract version part, removing 'v' prefix if present and any release/tag prefix
+      $TAG_PART = $env:CI_COMMIT_TAG -replace '^(release-|tag-|v)', ''
       $IMAGE_NAME = "molo17/$env:APP_NAME"
       $VERSION_TAG = "${IMAGE_NAME}:${TAG_PART}"
       $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-windows"
