@@ -11,7 +11,6 @@ services:
       - DEBUG=True
       - GLUESYNC_HOST=http://mock-corehub:8080
       - GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat
-      - GLUESYNC_MODULE_TAG=chronos-module
       - SSL_ENABLED=False
       - GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
       - CRONTAB_USER=root
