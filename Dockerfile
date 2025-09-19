@@ -106,7 +106,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Copy built wheels from builder stage
 COPY --from=builder /wheels /wheels
-COPY --from=builder /app/gluesync_sdk /app/gluesync_sdk
+
 # Copy VERSION file to the final image
 COPY --from=builder /build/VERSION /app/
 COPY ./requirements.txt .
