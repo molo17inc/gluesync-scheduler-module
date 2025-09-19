@@ -1,4 +1,4 @@
-# Gluesync Scheduler Module (Chronos)
+# Gluesync Chronos module (Chronos)
 
 A scheduling module for Gluesync pipelines, allowing automated execution of pipeline operations based on cron schedules. (aka Chronos)
 
@@ -6,6 +6,35 @@ A scheduling module for Gluesync pipelines, allowing automated execution of pipe
 ![License](https://img.shields.io/badge/license-Dual-green)
 
 A backend service that provides a set of REST APIs for scheduling and managing cron jobs to automate Gluesync tasks, including starting/stopping entities and pipelines, as well as running snapshots.
+
+## Versioning
+
+The project follows [Semantic Versioning](https://semver.org/) (SemVer) for version numbering. The version is automatically managed during the CI/CD build process and is included in the application's output at startup.
+
+### How Versioning Works
+
+1. **Build Process**:
+   - The version is extracted from the Git tag during the CI/CD build process
+   - A `VERSION` file is created with the version string
+   - The file is included in the Docker image at `/app/VERSION`
+
+2. **Runtime**:
+   - The application reads the version from the `VERSION` file at startup
+   - If the file doesn't exist, it defaults to `0.0.0-dev`
+   - The version is displayed in the application logs at startup
+
+3. **Version Display**:
+
+   ```text
+   ================================================================================
+   Gluesync Chronos module v1.2.3
+   ================================================================================
+   ```
+
+### Version File Location
+
+- **Linux Containers**: `/app/VERSION`
+- **Windows Containers**: `C:\app\VERSION`
 
 ## Features
 
@@ -146,7 +175,7 @@ You can set these in a `.env` file in the project root.
 
 ## Running Locally and Testing with Postman
 
-To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with Postman, follow these steps:
+To run the Gluesync Chronos module (aka Chronos) locally and test the API with Postman, follow these steps:
 
 ### Setup Prerequisites
 
@@ -186,7 +215,7 @@ To run the Gluesync Scheduler Module (aka Chronos) locally and test the API with
 
 ### Database Migrations
 
-The Gluesync Scheduler Module automatically runs database migrations during startup, so you don't need to run them manually when starting the application. However, if you're upgrading an existing installation or need to run migrations separately, the project includes migration scripts for all schema changes.
+The Gluesync Chronos module automatically runs database migrations during startup, so you don't need to run them manually when starting the application. However, if you're upgrading an existing installation or need to run migrations separately, the project includes migration scripts for all schema changes.
 
 #### Running Migrations Manually
 

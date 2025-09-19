@@ -46,8 +46,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # SDK will be installed from GitLab PyPI registry via requirements.txt
 
 # Copy project files and build the application wheel (prepackaged for offline install)
-COPY ./setup.py ./
-COPY ./pyproject.toml ./
+COPY --chmod=644 ./setup.py ./
+COPY --chmod=644 ./pyproject.toml ./
+COPY --chmod=644 ./VERSION ./
 COPY ./README.md ./
 COPY ./gluesync_scheduler ./gluesync_scheduler
 RUN python -m pip wheel --wheel-dir=/wheels .
@@ -105,8 +106,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Copy built wheels from builder stage
 COPY --from=builder /wheels /wheels
-
-# Copy requirements and setup files
+COPY --from=builder /app/gluesync_sdk /app/gluesync_sdk
+# Copy VERSION file to the final image
+COPY --from=builder /build/VERSION /app/
 COPY ./requirements.txt .
 # Install Python dependencies from prebuilt wheels (no compiler/runtime build deps needed)
 RUN python -m pip install --no-index --find-links=/wheels -r requirements.txt && \

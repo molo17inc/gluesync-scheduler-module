@@ -1,5 +1,5 @@
-# This file is part of Gluesync Scheduler Module (aka Chronos).
-# Gluesync Scheduler Module (aka Chronos) is dual-licensed under the following licenses:
+# This file is part of Gluesync Chronos module (aka Chronos).
+# Gluesync Chronos module (aka Chronos) is dual-licensed under the following licenses:
 
 # 1. GNU General Public License (GPL) Version 3
 #    You may use, modify, and distribute this software under the terms of the GPL v3.
@@ -45,6 +45,10 @@ deploy-linux:
       TAGPART=`echo $CI_COMMIT_TAG | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)'`
       DEFAULT_NAME=${DOCKER_REGISTRY}/${APP_NAME}
       VERSION_TAG="${DEFAULT_NAME}:${TAGPART}"
+      
+      # Create VERSION file
+      echo "${TAGPART}" > VERSION
+      echo "VERSION file created with content: $(cat VERSION)"
 
     # Set up Docker login
     - docker login -u danieleangeli -p "$CI_REGISTRY_PASSWORD"
@@ -140,6 +144,13 @@ deploy-windows:
       git submodule update --recursive
       if ($LASTEXITCODE -ne 0) { Write-Error "git submodule update failed"; exit $LASTEXITCODE }
       Write-Host "✅ Submodules ready"
+
+    # Create VERSION file for Windows build
+    - |
+      Write-Host "Creating VERSION file..."
+      $VERSION_CONTENT = $env:TAG_PART
+      Set-Content -Path "VERSION" -Value $VERSION_CONTENT
+      Write-Host "VERSION file created with content: $(Get-Content VERSION)"
 
     # Build Windows Docker image
     - |

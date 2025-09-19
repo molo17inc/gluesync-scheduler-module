@@ -88,13 +88,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
 # Copy SDK
 COPY ./gluesync-sdk ./gluesync-sdk
 
-# Copy application code and configurations
-COPY pyproject.toml .
-COPY gluesync_scheduler/ ./gluesync_scheduler/
-COPY main.py .
-COPY run_scheduler.py .
-COPY setup.py .
-COPY migrations/ ./migrations/
+# Copy application files
+COPY . .
+
+# Ensure VERSION file exists (will be created by CI)
+RUN if not exist VERSION (echo 0.0.0-dev > VERSION)
 
 EXPOSE 1717
 # Create entrypoint script

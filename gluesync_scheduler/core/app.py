@@ -28,6 +28,7 @@ import ssl
 import json
 import uvicorn
 from datetime import datetime
+from gluesync_scheduler.version import __version__
 import pytz
 from fastapi import FastAPI, Request
 import fastapi
@@ -227,7 +228,12 @@ app.middleware("http")(catch_exceptions_middleware)
 @app.on_event("startup")
 async def startup_event():
     """Initialize resources on startup"""
-    logger.info("Starting Gluesync Scheduler Module...")
+    # Display version at startup
+    print(f"\n{'='*80}")
+    print(f"Gluesync Chronos module v{__version__}")
+    print(f"{'='*80}\n")
+    
+    logger.info("Starting Gluesync Chronos module...")
     
     # Create necessary directories
     os.makedirs(settings.DATA_DIR, exist_ok=True)
