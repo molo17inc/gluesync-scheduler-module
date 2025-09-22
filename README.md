@@ -198,7 +198,10 @@ To run the Gluesync Chronos module (aka Chronos) locally and test the API with P
    GLUESYNC_HOST=http://localhost:8080
    CRONTAB_USER=$USER
    HOST=0.0.0.0
+   FIRE_ONCE=False
    ```
+
+   **Note**: Set `FIRE_ONCE=True` to have jobs automatically disabled after their first execution.
 
 ### Running the Application
 

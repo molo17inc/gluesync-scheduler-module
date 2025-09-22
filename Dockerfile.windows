@@ -83,7 +83,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   SSL_SKIP_VERIFY=True `
   TEMP=C:\temp `
   TMP=C:\temp `
-  TIMEZONE=UTC
+  TIMEZONE=UTC `
+  FIRE_ONCE=False
 
 # Copy SDK
 COPY ./gluesync-sdk ./gluesync-sdk

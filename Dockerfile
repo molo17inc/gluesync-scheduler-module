@@ -100,7 +100,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CRONTAB_USER=root \
     SSL_ENABLED=False \
     SSL_SKIP_VERIFY=True \
-    TIMEZONE=UTC
+    TIMEZONE=UTC \
+    FIRE_ONCE=False
 
 # (combined into single apt install above)
 

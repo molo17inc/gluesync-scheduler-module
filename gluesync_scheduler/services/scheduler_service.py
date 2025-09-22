@@ -321,6 +321,7 @@ class SchedulerService:
             # Import here to avoid circular imports
             from gluesync_scheduler.db.database import get_db
             from gluesync_scheduler.services.job_service import JobService
+            from gluesync_scheduler.models.models import ScheduledJob
             
             # Get a database connection
             db = next(get_db())
@@ -351,6 +352,28 @@ class SchedulerService:
                 # Log success or failure
                 if success:
                     logger.info(f"Successfully executed job {job_id}: {message}")
+                    
+                    # If FIRE_ONCE is enabled, disable the job after successful execution
+                    if settings.FIRE_ONCE:
+                        logger.info(f"FIRE_ONCE is enabled. Disabling job {job_id} after first execution")
+                        
+                        # Get the job from database
+                        job = db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+                        if job:
+                            # Disable the job
+                            job.enabled = False
+                            job.updated_at = datetime.now(timezone.utc)
+                            db.commit()
+                            
+                            # Remove the job from the scheduler
+                            scheduler_job_id = f"job_{job_id}"
+                            if self.scheduler.get_job(scheduler_job_id):
+                                self.scheduler.remove_job(scheduler_job_id)
+                                logger.info(f"Removed job {scheduler_job_id} from scheduler due to FIRE_ONCE setting")
+                            
+                            # Log the disabling
+                            with open(log_file, 'a') as f:
+                                f.write(f"[{datetime.now(timezone.utc)}] Job disabled due to FIRE_ONCE setting\n")
                 else:
                     error_message = f"Error in job {job_id}: {message}"
                     with open(error_file, 'a') as f:

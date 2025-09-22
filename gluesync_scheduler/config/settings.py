@@ -92,6 +92,10 @@ class Settings:
     # Use current user for crontab by default (True), or specific user if provided
     CRONTAB_USER = os.getenv('CRONTAB_USER', '')
     CRON_LOG_DIR = os.getenv('CRON_LOG_DIR', './logs')
+    
+    # Job execution settings
+    # When FIRE_ONCE is True, jobs will be disabled after their first execution
+    FIRE_ONCE = os.getenv('FIRE_ONCE', 'False').lower() in ('true', '1', 't')
 
 
 settings = Settings()

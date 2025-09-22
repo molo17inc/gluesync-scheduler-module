@@ -27,3 +27,4 @@ services:
       - SSL_ENABLED=False
       - GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
       - TIMEZONE=Europe/Rome
+      - FIRE_ONCE=False
