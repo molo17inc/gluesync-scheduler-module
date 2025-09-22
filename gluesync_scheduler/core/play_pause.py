@@ -443,6 +443,18 @@ class CoreHubClient:
     
     def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for a specific entity"""
+        # First, stop the entity to ensure data consistency during snapshot
+        logger.info(f"Stopping entity {entity_id} before snapshot...")
+        stop_success = self.stop_entity(pipeline_id, entity_id)
+        if not stop_success:
+            logger.error(f"Failed to stop entity {entity_id} before snapshot")
+            return False
+        
+        # Wait a moment to ensure the entity is fully stopped
+        import time
+        time.sleep(5)
+        
+        # Now perform the snapshot
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         params = {
             'entity': entity_id,
@@ -520,6 +532,18 @@ class CoreHubClient:
     
     def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for all entities in a pipeline"""
+        # First, stop the pipeline to ensure data consistency during snapshot
+        logger.info(f"Stopping pipeline {pipeline_id} before snapshot...")
+        stop_success = self.stop_pipeline(pipeline_id)
+        if not stop_success:
+            logger.error(f"Failed to stop pipeline {pipeline_id} before snapshot")
+            return False
+        
+        # Wait a moment to ensure the pipeline is fully stopped
+        import time
+        time.sleep(5)
+        
+        # Now perform the snapshot
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         params = {
             'snapshotWriteMethod': snapshot_write_method
@@ -598,6 +622,18 @@ class CoreHubClient:
     
     def resync_group(self, pipeline_id: str, group_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for all entities in a specific group within a pipeline"""
+        # First, stop the group to ensure data consistency during snapshot
+        logger.info(f"Stopping group {group_id} before snapshot...")
+        stop_success = self.stop_group(pipeline_id, group_id)
+        if not stop_success:
+            logger.error(f"Failed to stop group {group_id} before snapshot")
+            return False
+        
+        # Wait a moment to ensure the group is fully stopped
+        import time
+        time.sleep(5)
+        
+        # Now perform the snapshot
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot-group'
         params = {
             'groupId': group_id,
