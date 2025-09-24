@@ -29,6 +29,7 @@ from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.executors.asyncio import AsyncIOExecutor
+from apscheduler.jobstores.memory import MemoryJobStore
 from croniter import croniter
 from sqlalchemy.orm import Session
 
@@ -59,7 +60,7 @@ class SchedulerService:
             os.makedirs(settings.CRON_LOG_DIR, exist_ok=True)
             
             # Initialize the scheduler
-            self.scheduler = BackgroundScheduler(
+            self.scheduler = AsyncIOScheduler(
                 jobstores={
                     'default': MemoryJobStore()
                 },
@@ -77,10 +78,7 @@ class SchedulerService:
             
         except Exception as e:
             logger.error(f"Error initializing scheduler: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error initializing scheduler: {str(e)}"
-            )
+            raise RuntimeError(f"Error initializing scheduler: {str(e)}")
     
     def create_job(self, job: ScheduledJob) -> str:
         """
@@ -93,7 +91,7 @@ class SchedulerService:
             The job ID
             
         Raises:
-            HTTPException: If there's an error creating the job
+            RuntimeError: If there's an error creating the job
         """
         try:
             # Parse the cron expression
@@ -232,10 +230,7 @@ class SchedulerService:
             
         except Exception as e:
             logger.error(f"Error creating scheduled job: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error creating scheduled job: {str(e)}"
-            )
+            raise RuntimeError(f"Error creating scheduled job: {str(e)}")
     
     def update_job(self, job: ScheduledJob) -> str:
         """
@@ -248,7 +243,7 @@ class SchedulerService:
             The job ID
             
         Raises:
-            HTTPException: If there's an error updating the job
+            RuntimeError: If there's an error updating the job
         """
         try:
             # Log more details about the job we're updating for debugging
@@ -266,10 +261,7 @@ class SchedulerService:
             
         except Exception as e:
             logger.error(f"Error updating scheduled job: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error updating scheduled job: {str(e)}"
-            )
+            raise RuntimeError(f"Error updating scheduled job: {str(e)}")
     
     def remove_job(self, job_id: int) -> None:
         """
@@ -279,7 +271,7 @@ class SchedulerService:
             job_id: The ID of the job to remove
             
         Raises:
-            HTTPException: If there's an error removing the job
+            RuntimeError: If there's an error removing the job
         """
         try:
             # Remove the job from the scheduler
@@ -292,10 +284,7 @@ class SchedulerService:
             
         except Exception as e:
             logger.error(f"Error removing scheduled job: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error removing scheduled job: {str(e)}"
-            )
+            raise RuntimeError(f"Error removing scheduled job: {str(e)}")
     
     def _execute_job(self, job_id: int, job_name: str) -> None:
         """
