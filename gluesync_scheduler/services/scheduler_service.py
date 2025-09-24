@@ -23,15 +23,15 @@
 
 import logging
 import os
-import requests
-from datetime import datetime, timezone
-import json
-from typing import Dict, Optional, List, Any
-
-from apscheduler.schedulers.background import BackgroundScheduler
+import sys
+from typing import Optional
+from datetime import datetime, timezone, timedelta
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.jobstores.memory import MemoryJobStore
-from fastapi import HTTPException, status
+from apscheduler.executors.asyncio import AsyncIOExecutor
+from croniter import croniter
+from sqlalchemy.orm import Session
+import logging, status
 
 from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.models.models import ScheduledJob
@@ -379,8 +379,27 @@ class SchedulerService:
                     with open(error_file, 'a') as f:
                         f.write(f"[{datetime.now(timezone.utc)}] {error_message}\n")
                     logger.error(error_message)
-                    # Propagate as exception so APScheduler marks job as failed
-                    raise RuntimeError(error_message)
+                    
+                    # Check if we should fail silently or raise exception
+                    # If SDK connection issues, we should continue instead of crashing
+                    if "Failed to connect" in message or "WebSocket" in message or "SDK" in message:
+                        logger.warning(f"Job {job_id} failed due to connection issue - continuing scheduler operation")
+                        # Don't raise exception for connection issues, just log
+                    else:
+                        # For other errors, still propagate as exception so APScheduler marks job as failed
+                        # But limit how many times we retry before giving up
+                        job = db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+                        if job and job.last_error_message:
+                            # Check if this is a recurring error
+                            if job.last_run_error_time:
+                                time_since_last_error = datetime.now(timezone.utc) - job.last_run_error_time
+                                if time_since_last_error < timedelta(hours=1):
+                                    # If errors are happening frequently, log but don't raise to prevent scheduler crash
+                                    logger.warning(f"Job {job_id} experiencing recurring errors - skipping exception raise to prevent scheduler crash")
+                                    return
+                        
+                        # Otherwise, raise the exception
+                        raise RuntimeError(error_message)
             
             except Exception as e:
                 error_message = f"Exception occurred while executing job {job_id}: {str(e)}"
