@@ -31,7 +31,6 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from croniter import croniter
 from sqlalchemy.orm import Session
-import logging, status
 
 from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.models.models import ScheduledJob
