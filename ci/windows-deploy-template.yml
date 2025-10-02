@@ -1,4 +1,4 @@
-.windows-deploy-template: &windows-deploy-template
+.windows-deploy-template:
   stage: deploy
   script:
     # Stop on first error

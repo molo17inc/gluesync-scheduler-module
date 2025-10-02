@@ -33,7 +33,7 @@ include:
 
 # Parallel deployment for multiple Windows Nano Server versions
 deploy-windows-nanoserver:
-  <<: *windows-deploy-template
+  extends: .windows-deploy-template
   parallel:
     matrix:
       # - NANO_SERVER_TAG: "ltsc2019"
