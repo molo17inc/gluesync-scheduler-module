@@ -28,75 +28,173 @@ variables:
   PYTEST_ADDOPTS: "--color=yes"
   PIP_EXTRA_INDEX_URL: "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple"
 
-deploy-linux:
-  stage: deploy
-  image: docker:latest
-  services:
-    - name: docker:dind
-      variables:
-        DOCKER_TLS_CERTDIR: ""
-  script:
-    - echo "Building & deploying started..."
+# deploy-linux:
+#   stage: deploy
+#   image: docker:latest
+#   services:
+#     - name: docker:dind
+#       variables:
+#         DOCKER_TLS_CERTDIR: ""
+#   script:
+#     - echo "Building & deploying started..."
 
-    - apk add --no-cache bash
+#     - apk add --no-cache bash
 
-    - |
-      # Extract version part from tag
-      TAGPART=`echo $CI_COMMIT_TAG | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)'`
-      DEFAULT_NAME=${DOCKER_REGISTRY}/${APP_NAME}
-      VERSION_TAG="${DEFAULT_NAME}:${TAGPART}"
-      
-      # Create VERSION file
-      echo "${TAGPART}" > VERSION
-      echo "VERSION file created with content: $(cat VERSION)"
+#     - |
+#       # Extract version part from tag
+#       TAGPART=`echo $CI_COMMIT_TAG | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)'`
+#       DEFAULT_NAME=${DOCKER_REGISTRY}/${APP_NAME}
+#       VERSION_TAG="${DEFAULT_NAME}:${TAGPART}"
 
-    # Set up Docker login
-    - docker login -u danieleangeli -p "$CI_REGISTRY_PASSWORD"
+#       # Create VERSION file
+#       echo "${TAGPART}" > VERSION
+#       echo "VERSION file created with content: $(cat VERSION)"
 
-    # Check if it's a release tag, beta tag, or regular tag and build accordingly
-    - |
-      if [[ $CI_COMMIT_TAG == release-* ]]; then
-        echo "Building multi-architecture release with latest tag..."
-        # Install QEMU for multi-architecture builds
-        docker run --privileged --rm tonistiigi/binfmt --install all
-        # Create and use a new builder instance
-        docker buildx create --name multiarch-builder --use
-        docker buildx inspect --bootstrap
-        
-        # Build and push multi-platform images with latest tag
-        docker buildx build --platform linux/amd64,linux/arm64 \
-          --no-cache \
-          --tag $DEFAULT_NAME:latest \
-          --tag "$VERSION_TAG" \
-          --push .
-      elif [[ $CI_COMMIT_TAG == beta-* ]]; then
-        echo "Building multi-architecture beta with beta tag..."
-        # Install QEMU for multi-architecture builds
-        docker run --privileged --rm tonistiigi/binfmt --install all
-        # Create and use a new builder instance
-        docker buildx create --name multiarch-builder --use
-        docker buildx inspect --bootstrap
-        
-        # Build and push multi-platform images with beta tag
-        docker buildx build --platform linux/amd64,linux/arm64 \
-          --no-cache \
-          --tag $DEFAULT_NAME:beta \
-          --tag "$VERSION_TAG" \
-          --push .
-      elif [[ $CI_COMMIT_TAG == tag-* ]]; then
-        echo "Building amd64-only version without latest tag..."
-        # Build and push only amd64 image without latest tag
-        docker build --no-cache --tag "$VERSION_TAG" .
-        docker push "$VERSION_TAG"
-      else
-        echo "Unknown tag format: $CI_COMMIT_TAG"
-        exit 1
-      fi
-  rules:
-    - if: $CI_COMMIT_TAG
+#     # Set up Docker login
+#     - docker login -u danieleangeli -p "$CI_REGISTRY_PASSWORD"
+
+#     # Check if it's a release tag, beta tag, or regular tag and build accordingly
+#     - |
+#       if [[ $CI_COMMIT_TAG == release-* ]]; then
+#         echo "Building multi-architecture release with latest tag..."
+#         # Install QEMU for multi-architecture builds
+#         docker run --privileged --rm tonistiigi/binfmt --install all
+#         # Create and use a new builder instance
+#         docker buildx create --name multiarch-builder --use
+#         docker buildx inspect --bootstrap
+
+#         # Build and push multi-platform images with latest tag
+#         docker buildx build --platform linux/amd64,linux/arm64 \
+#           --no-cache \
+#           --tag $DEFAULT_NAME:latest \
+#           --tag "$VERSION_TAG" \
+#           --push .
+#       elif [[ $CI_COMMIT_TAG == beta-* ]]; then
+#         echo "Building multi-architecture beta with beta tag..."
+#         # Install QEMU for multi-architecture builds
+#         docker run --privileged --rm tonistiigi/binfmt --install all
+#         # Create and use a new builder instance
+#         docker buildx create --name multiarch-builder --use
+#         docker buildx inspect --bootstrap
+
+#         # Build and push multi-platform images with beta tag
+#         docker buildx build --platform linux/amd64,linux/arm64 \
+#           --no-cache \
+#           --tag $DEFAULT_NAME:beta \
+#           --tag "$VERSION_TAG" \
+#           --push .
+#       elif [[ $CI_COMMIT_TAG == tag-* ]]; then
+#         echo "Building amd64-only version without latest tag..."
+#         # Build and push only amd64 image without latest tag
+#         docker build --no-cache --tag "$VERSION_TAG" .
+#         docker push "$VERSION_TAG"
+#       else
+#         echo "Unknown tag format: $CI_COMMIT_TAG"
+#         exit 1
+#       fi
+#   rules:
+#     - if: $CI_COMMIT_TAG
 
 # Windows deployment jobs
-deploy-windows:
+# deploy-windows:
+#   stage: deploy
+#   tags:
+#     - hq-windows-shell
+#   script:
+#     # Stop on first error
+#     - $ErrorActionPreference = "Stop"
+
+#     # Docker login with proper error handling
+#     - |
+#       Write-Host "Logging into Docker registry..."
+#       try {
+#         docker login -u danieleangeli -p "$env:CI_REGISTRY_PASSWORD"
+#         Write-Host "✅ Docker login successful"
+#       } catch {
+#         Write-Error "❌ Docker login failed: $_"
+#         exit 1
+#       }
+
+#     # Extract version information from tag
+#     - |
+#       Write-Host "Processing tag: $env:CI_COMMIT_TAG"
+#       # Match the Linux build's tag extraction exactly
+#       $TAG_PART = [regex]::Match($env:CI_COMMIT_TAG, '[0-9]+\.[0-9]+\.[0-9](.*)').Value
+#       if (-not $TAG_PART) {
+#         Write-Error "❌ Could not extract version from tag: $env:CI_COMMIT_TAG"
+#         exit 1
+#       }
+#       $IMAGE_NAME = "molo17/$env:APP_NAME"
+#       $VERSION_TAG = "${IMAGE_NAME}:${TAG_PART}"
+#       $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-windows"
+
+#       Write-Host "Image name: ${IMAGE_NAME}"
+#       Write-Host "Version tag: ${VERSION_TAG_WINDOWS}"
+
+#       # Set environment variables for use in build
+#       $env:IMAGE_NAME = ${IMAGE_NAME}
+#       $env:VERSION_TAG_WINDOWS = ${VERSION_TAG_WINDOWS}
+#       $env:TAG_PART = ${TAG_PART}
+
+#     # Ensure submodules are available in this job too (Windows runner checks out repo separately)
+#     - |
+#       Write-Host "Initializing git submodules..."
+#       git submodule init
+#       if ($LASTEXITCODE -ne 0) { Write-Error "git submodule init failed"; exit $LASTEXITCODE }
+#       git submodule update --recursive
+#       if ($LASTEXITCODE -ne 0) { Write-Error "git submodule update failed"; exit $LASTEXITCODE }
+#       Write-Host "✅ Submodules ready"
+
+#     # Create VERSION file for Windows build
+#     - |
+#       Write-Host "Creating VERSION file..."
+#       $VERSION_CONTENT = $env:TAG_PART
+#       Set-Content -Path "VERSION" -Value $VERSION_CONTENT
+#       Write-Host "VERSION file created with content: $(Get-Content VERSION)"
+
+#     # Build Windows Docker image
+#     - |
+#       Write-Host "Building Windows Docker image..."
+#       Write-Host "Using Dockerfile: Dockerfile.windows"
+#       docker build --file Dockerfile.windows --tag "${env:VERSION_TAG_WINDOWS}" .
+#       if ($LASTEXITCODE -ne 0) {
+#         Write-Error "❌ Docker build failed with exit code $LASTEXITCODE"
+#         exit $LASTEXITCODE
+#       }
+#       Write-Host "✅ Docker build completed successfully"
+
+#     # Push Windows Docker image
+#     - |
+#       Write-Host "Pushing Windows Docker image..."
+#       docker push "${env:VERSION_TAG_WINDOWS}"
+#       if ($LASTEXITCODE -ne 0) {
+#         Write-Error "❌ Docker push failed with exit code $LASTEXITCODE"
+#         exit $LASTEXITCODE
+#       }
+#       Write-Host "✅ Docker push completed successfully"
+#       Write-Host "Windows image available at: ${env:VERSION_TAG_WINDOWS}"
+
+#     # Tag as latest-windows for release branches
+#     - |
+#       if ($env:CI_COMMIT_TAG -match '^release-') {
+#         Write-Host "Tagging as latest-windows..."
+#         $LATEST_WINDOWS = "${env:IMAGE_NAME}:latest-windows"
+#         docker tag "${env:VERSION_TAG_WINDOWS}" "${LATEST_WINDOWS}"
+#         if ($LASTEXITCODE -ne 0) {
+#           Write-Error "❌ docker tag failed with exit code $LASTEXITCODE"
+#           exit $LASTEXITCODE
+#         }
+#         docker push "${LATEST_WINDOWS}"
+#         if ($LASTEXITCODE -ne 0) {
+#           Write-Error "❌ Failed to push latest-windows tag with exit code $LASTEXITCODE"
+#           exit $LASTEXITCODE
+#         }
+#         Write-Host "✅ Latest-windows tag pushed successfully"
+#       }
+#   rules:
+#     - if: $CI_COMMIT_TAG
+
+deploy-windows-nanoserver-2022:
   stage: deploy
   tags:
     - hq-windows-shell
@@ -126,7 +224,7 @@ deploy-windows:
       }
       $IMAGE_NAME = "molo17/$env:APP_NAME"
       $VERSION_TAG = "${IMAGE_NAME}:${TAG_PART}"
-      $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-windows"
+      $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-win-nanoserver-ltsc2022"
 
       Write-Host "Image name: ${IMAGE_NAME}"
       Write-Host "Version tag: ${VERSION_TAG_WINDOWS}"
@@ -155,8 +253,8 @@ deploy-windows:
     # Build Windows Docker image
     - |
       Write-Host "Building Windows Docker image..."
-      Write-Host "Using Dockerfile: Dockerfile.windows"
-      docker build --file Dockerfile.windows --tag "${env:VERSION_TAG_WINDOWS}" .
+      Write-Host "Using Dockerfile: Dockerfile.windows.nanoserver.2022"
+      docker build --file Dockerfile.windows.nanoserver.2022 --tag "${env:VERSION_TAG_WINDOWS}" .
       if ($LASTEXITCODE -ne 0) {
         Write-Error "❌ Docker build failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE
