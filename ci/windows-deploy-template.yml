@@ -25,7 +25,7 @@
       }
       $IMAGE_NAME = "molo17/$env:APP_NAME"
       $VERSION_TAG = "${IMAGE_NAME}:${TAG_PART}"
-      $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-win-nanoserver-${env:NANO_SERVER_TAG}"
+      $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-win-nanoserver-${env:WINDOWS_TAG}"
 
       Write-Host "Image name: ${IMAGE_NAME}"
       Write-Host "Version tag: ${VERSION_TAG_WINDOWS}"
@@ -55,7 +55,7 @@
     - |
       Write-Host "Building Windows Docker image..."
       Write-Host "Using Dockerfile: Dockerfile.windows.nanoserver"
-      docker build --file "Dockerfile.windows.nanoserver" --build-arg NANO_SERVER_TAG=${env:NANO_SERVER_TAG} --tag "${env:VERSION_TAG_WINDOWS}" .
+      docker build --file "Dockerfile.windows.nanoserver" --build-arg WINDOWS_TAG=${env:WINDOWS_TAG} --tag "${env:VERSION_TAG_WINDOWS}" .
       if ($LASTEXITCODE -ne 0) {
         Write-Error "❌ Docker build failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE

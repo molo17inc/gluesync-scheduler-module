@@ -1,13 +1,13 @@
 # escape=`
 
 # Use build argument to specify base tag for flexibility with default
-ARG NANO_SERVER_TAG=ltsc2022
+ARG WINDOWS_TAG=ltsc2022
 
 # ------------------
 # Stage 1: Build exe (Server Core)
 # ------------------
-# Base image Windows Server Core ${NANO_SERVER_TAG}
-FROM mcr.microsoft.com/windows/servercore:${NANO_SERVER_TAG} AS builder
+# Base image Windows Server Core ${WINDOWS_TAG}
+FROM mcr.microsoft.com/windows/servercore:${WINDOWS_TAG} AS builder
 
 # Use PowerShell for subsequent RUN commands, stop on errors
 SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]
@@ -124,7 +124,7 @@ RUN pyinstaller `
 # ------------------
 # Stage 2: Runtime (Nano Server)
 # ------------------
-FROM mcr.microsoft.com/windows/nanoserver:${NANO_SERVER_TAG}
+FROM mcr.microsoft.com/windows/nanoserver:${WINDOWS_TAG}
 
 WORKDIR C:\app
 
