@@ -21,12 +21,29 @@ stages:
 
 default:
   tags:
-    - gs-runners-hq
+    - hq-linux-docker
 
 variables:
   DOCKER_TLS_CERTDIR: ""
   PYTEST_ADDOPTS: "--color=yes"
   PIP_EXTRA_INDEX_URL: "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple"
+
+include:
+  - local: "ci/windows-deploy-template.yml"
+
+# Parallel deployment for multiple Windows Nano Server versions
+deploy-windows-nanoserver:
+  <<: *windows-deploy-template
+  parallel:
+    matrix:
+      # - NANO_SERVER_TAG: "ltsc2019"
+      #   WINDOWS_RUNNER_VERSION: "2019"
+      - NANO_SERVER_TAG: "ltsc2022"
+        WINDOWS_RUNNER_VERSION: "2022"
+      # - NANO_SERVER_TAG: "ltsc2025"
+      #   WINDOWS_RUNNER_VERSION: "2025"
+  tags:
+    - "hq-windows-shell-${WINDOWS_RUNNER_VERSION}"
 
 deploy-linux:
   stage: deploy
@@ -45,7 +62,7 @@ deploy-linux:
       TAGPART=`echo $CI_COMMIT_TAG | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)'`
       DEFAULT_NAME=${DOCKER_REGISTRY}/${APP_NAME}
       VERSION_TAG="${DEFAULT_NAME}:${TAGPART}"
-      
+
       # Create VERSION file
       echo "${TAGPART}" > VERSION
       echo "VERSION file created with content: $(cat VERSION)"
@@ -99,7 +116,7 @@ deploy-linux:
 deploy-windows:
   stage: deploy
   tags:
-    - hq-windows-shell
+    - hq-windows-shell-2022
   script:
     # Stop on first error
     - $ErrorActionPreference = "Stop"
