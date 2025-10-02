@@ -103,6 +103,7 @@ RUN if not exist VERSION (echo 0.0.0-dev > VERSION)
 RUN pyinstaller `
   --onefile `
   --name GluesyncScheduler `
+  --collect-all gluesync_scheduler `
   --add-data "gluesync-sdk;gluesync-sdk" `
   --add-data "data;data" `
   run_scheduler.py
