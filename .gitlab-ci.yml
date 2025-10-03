@@ -28,22 +28,22 @@ variables:
   PYTEST_ADDOPTS: "--color=yes"
   PIP_EXTRA_INDEX_URL: "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple"
 
-include:
-  - local: "ci/windows-deploy-template.yml"
+# include:
+#   - local: "ci/windows-deploy-template.yml"
 
 # Parallel deployment for multiple Windows Nano Server versions
-deploy-windows-nanoserver:
-  extends: .windows-deploy-template
-  parallel:
-    matrix:
-      # - WINDOWS_TAG: "ltsc2019"
-      #   WINDOWS_RUNNER_VERSION: "2019"
-      - WINDOWS_TAG: "ltsc2022"
-        WINDOWS_RUNNER_VERSION: "2022"
-      # - WINDOWS_TAG: "ltsc2025"
-      #   WINDOWS_RUNNER_VERSION: "2025"
-  tags:
-    - "hq-windows-shell-${WINDOWS_RUNNER_VERSION}"
+# deploy-windows-nanoserver:
+#   extends: .windows-deploy-template
+#   parallel:
+#     matrix:
+#       # - WINDOWS_TAG: "ltsc2019"
+#       #   WINDOWS_RUNNER_VERSION: "2019"
+#       - WINDOWS_TAG: "ltsc2022"
+#         WINDOWS_RUNNER_VERSION: "2022"
+#       # - WINDOWS_TAG: "ltsc2025"
+#       #   WINDOWS_RUNNER_VERSION: "2025"
+#   tags:
+#     - "hq-windows-shell-${WINDOWS_RUNNER_VERSION}"
 
 deploy-linux:
   stage: deploy
