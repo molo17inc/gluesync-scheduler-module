@@ -131,8 +131,8 @@ deploy-windows:
     - $TAG_PART = [regex]::Match($env:CI_COMMIT_TAG, '[0-9]+\.[0-9]+\.[0-9](.*)').Value
     - if (-not $TAG_PART) { throw "Could not extract version from tag" }
     - $IMAGE_NAME = "molo17/$env:APP_NAME"
-    - $VERSION_TAG_WINDOWS = "$IMAGE_NAME:$TAG_PART-windows"
-    - 'Write-Host "Image name: $IMAGE_NAME"; Write-Host "Version tag: $VERSION_TAG_WINDOWS"'
+    - $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-windows"
+    - 'Write-Host "Image name: ${IMAGE_NAME}"; Write-Host "Version tag: ${VERSION_TAG_WINDOWS}"'
 
     # Initialize git submodules
     - Write-Host "Initializing git submodules..."
@@ -145,19 +145,19 @@ deploy-windows:
 
     # Build Windows Docker image
     - Write-Host "Building Windows Docker image..."
-    - docker build --file Dockerfile.windows --tag $VERSION_TAG_WINDOWS --progress=plain -ErrorAction Stop
+    - docker build --file Dockerfile.windows --tag "${VERSION_TAG_WINDOWS}" --progress=plain -ErrorAction Stop
     - Write-Host "✅ Docker build completed successfully"
 
     # Push Windows Docker image
-    - docker push $VERSION_TAG_WINDOWS -ErrorAction Stop
-    - Write-Host "✅ Pushed $VERSION_TAG_WINDOWS"
+    - docker push "${VERSION_TAG_WINDOWS}" -ErrorAction Stop
+    - Write-Host "✅ Pushed ${VERSION_TAG_WINDOWS}"
 
     # Tag and push latest-windows for release branches
     - |
       if ($env:CI_COMMIT_TAG -match '^release-') {
-        $LATEST_WINDOWS = "$IMAGE_NAME:latest-windows"
-        docker tag $VERSION_TAG_WINDOWS $LATEST_WINDOWS -ErrorAction Stop
-        docker push $LATEST_WINDOWS -ErrorAction Stop
+        $LATEST_WINDOWS = "${IMAGE_NAME}:latest-windows"
+        docker tag "${VERSION_TAG_WINDOWS}" "${LATEST_WINDOWS}" -ErrorAction Stop
+        docker push "${LATEST_WINDOWS}" -ErrorAction Stop
         Write-Host "✅ Latest-windows tag pushed successfully"
       }
 
