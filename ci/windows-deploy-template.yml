@@ -6,17 +6,17 @@
 
     # Docker login
     - Write-Host "Logging into Docker registry..."
-    - $env:CI_REGISTRY_PASSWORD | docker login -u "${env:CI_REGISTRY_USER}" --password-stdin
+    - $env:CI_REGISTRY_PASSWORD | docker login -u "$env:CI_REGISTRY_USER" --password-stdin
     - if ($LASTEXITCODE -ne 0) { throw "❌ Docker login failed" }
     - Write-Host "✅ Docker login successful"
 
     # Extract version from tag
-    - 'Write-Host "Processing tag: ${env:CI_COMMIT_TAG}"'
-    - $TAG_PART = [regex]::Match("${env:CI_COMMIT_TAG}", '[0-9]+\.[0-9]+\.[0-9](.*)').Value
+    - "Write-Host Processing tag: $env:CI_COMMIT_TAG"
+    - $TAG_PART = [regex]::Match($env:CI_COMMIT_TAG, '[0-9]+\.[0-9]+\.[0-9](.*)').Value
     - if (-not $TAG_PART) { throw "❌ Could not extract version from tag" }
-    - $IMAGE_NAME = "molo17/${env:APP_NAME}"
-    - $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-win-nanoserver-${env:WINDOWS_TAG}"
-    - 'Write-Host "Image name: ${IMAGE_NAME}"; Write-Host "Version tag: ${VERSION_TAG_WINDOWS}"'
+    - $IMAGE_NAME = "molo17/$env:APP_NAME"
+    - $VERSION_TAG_WINDOWS = "$IMAGE_NAME:$TAG_PART-win-nanoserver-$env:WINDOWS_TAG"
+    - "Write-Host Image name: $IMAGE_NAME; Write-Host Version tag: $VERSION_TAG_WINDOWS"
 
     # Initialize git submodules
     - Write-Host "Initializing git submodules..."
@@ -26,26 +26,26 @@
 
     # Create VERSION file
     - Set-Content -Path "VERSION" -Value $TAG_PART
-    - 'Write-Host "✅ VERSION file created with content: $(Get-Content VERSION)"'
+    - "Write-Host ✅ VERSION file created with content: $(Get-Content VERSION)"
 
     # Build Windows Docker image
     - Write-Host "Building Windows Docker image..."
-    - docker build --file Dockerfile.windows.nanoserver --build-arg WINDOWS_TAG="${env:WINDOWS_TAG}" --tag "${env:VERSION_TAG_WINDOWS}" .
+    - docker build --file Dockerfile.windows.nanoserver --build-arg WINDOWS_TAG="$env:WINDOWS_TAG" --tag "$VERSION_TAG_WINDOWS" .
     - if ($LASTEXITCODE -ne 0) { throw "❌ Docker build failed" }
     - Write-Host "✅ Docker build completed successfully"
 
     # Push Windows Docker image
-    - docker push "${VERSION_TAG_WINDOWS}"
+    - docker push "$VERSION_TAG_WINDOWS"
     - if ($LASTEXITCODE -ne 0) { throw "❌ Docker push failed" }
-    - Write-Host "✅ Pushed ${VERSION_TAG_WINDOWS}"
+    - Write-Host "✅ Pushed $VERSION_TAG_WINDOWS"
 
     # Tag and push latest-windows for release branches
     - |
-      if ("${env:CI_COMMIT_TAG}" -match '^release-') {
-        $LATEST_WINDOWS = "${IMAGE_NAME}:latest-windows"
-        docker tag "${VERSION_TAG_WINDOWS}" "${LATEST_WINDOWS}"
+      if ($env:CI_COMMIT_TAG -match '^release-') {
+        $LATEST_WINDOWS = "$IMAGE_NAME:latest-windows"
+        docker tag "$VERSION_TAG_WINDOWS" "$LATEST_WINDOWS"
         if ($LASTEXITCODE -ne 0) { throw "❌ Docker tag failed" }
-        docker push "${LATEST_WINDOWS}"
+        docker push "$LATEST_WINDOWS"
         if ($LASTEXITCODE -ne 0) { throw "❌ Docker push latest-windows failed" }
         Write-Host "✅ Latest-windows tag pushed successfully"
       }
