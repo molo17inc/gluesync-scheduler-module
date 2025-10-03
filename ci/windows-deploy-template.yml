@@ -30,7 +30,7 @@
 
     # Build Windows Docker image
     - Write-Host "Building Windows Docker image..."
-    - docker build --file Dockerfile.windows.nanoserver --build-arg WINDOWS_TAG="${env:WINDOWS_TAG}"" --tag "${env:VERSION_TAG_WINDOWS}" .
+    - docker build --file Dockerfile.windows.nanoserver --build-arg WINDOWS_TAG="${env:WINDOWS_TAG}" --tag "${env:VERSION_TAG_WINDOWS}" .
     - if ($LASTEXITCODE -ne 0) { throw "❌ Docker build failed" }
     - Write-Host "✅ Docker build completed successfully"
 
