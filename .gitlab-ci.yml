@@ -147,7 +147,7 @@ deploy-windows:
 
     # Build Windows Docker image
     - Write-Host "Building Windows Docker image..."
-    - docker build --file Dockerfile.windows --tag "${VERSION_TAG_WINDOWS}"
+    - docker build --file Dockerfile.windows --tag "${VERSION_TAG_WINDOWS}" .
     - if ($LASTEXITCODE -ne 0) { throw "❌ Docker build failed" }
     - Write-Host "✅ Docker build completed successfully"
 
