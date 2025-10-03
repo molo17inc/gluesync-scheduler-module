@@ -123,20 +123,22 @@ deploy-windows:
 
     # Docker login
     - Write-Host "Logging into Docker registry..."
-    - docker login -u danieleangeli -p "$env:CI_REGISTRY_PASSWORD" -ErrorAction Stop
+    - docker login -u danieleangeli -p "$env:CI_REGISTRY_PASSWORD"
+    - if ($LASTEXITCODE -ne 0) { throw "❌ Docker login failed" }
     - Write-Host "✅ Docker login successful"
 
     # Extract version from tag
     - 'Write-Host "Processing tag: $env:CI_COMMIT_TAG"'
     - $TAG_PART = [regex]::Match($env:CI_COMMIT_TAG, '[0-9]+\.[0-9]+\.[0-9](.*)').Value
-    - if (-not $TAG_PART) { throw "Could not extract version from tag" }
+    - if (-not $TAG_PART) { throw "❌ Could not extract version from tag" }
     - $IMAGE_NAME = "molo17/$env:APP_NAME"
     - $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-windows"
     - 'Write-Host "Image name: ${IMAGE_NAME}"; Write-Host "Version tag: ${VERSION_TAG_WINDOWS}"'
 
     # Initialize git submodules
     - Write-Host "Initializing git submodules..."
-    - git submodule update --init --recursive -ErrorAction Stop
+    - git submodule update --init --recursive
+    - if ($LASTEXITCODE -ne 0) { throw "❌ Git submodule update failed" }
     - Write-Host "✅ Submodules ready"
 
     # Create VERSION file
@@ -145,19 +147,23 @@ deploy-windows:
 
     # Build Windows Docker image
     - Write-Host "Building Windows Docker image..."
-    - docker build --file Dockerfile.windows --tag "${VERSION_TAG_WINDOWS}" --progress=plain -ErrorAction Stop
+    - docker build --file Dockerfile.windows --tag "${VERSION_TAG_WINDOWS}" --progress=plain
+    - if ($LASTEXITCODE -ne 0) { throw "❌ Docker build failed" }
     - Write-Host "✅ Docker build completed successfully"
 
     # Push Windows Docker image
-    - docker push "${VERSION_TAG_WINDOWS}" -ErrorAction Stop
+    - docker push "${VERSION_TAG_WINDOWS}"
+    - if ($LASTEXITCODE -ne 0) { throw "❌ Docker push failed" }
     - Write-Host "✅ Pushed ${VERSION_TAG_WINDOWS}"
 
     # Tag and push latest-windows for release branches
     - |
       if ($env:CI_COMMIT_TAG -match '^release-') {
         $LATEST_WINDOWS = "${IMAGE_NAME}:latest-windows"
-        docker tag "${VERSION_TAG_WINDOWS}" "${LATEST_WINDOWS}" -ErrorAction Stop
-        docker push "${LATEST_WINDOWS}" -ErrorAction Stop
+        docker tag "${VERSION_TAG_WINDOWS}" "${LATEST_WINDOWS}"
+        if ($LASTEXITCODE -ne 0) { throw "❌ Docker tag failed" }
+        docker push "${LATEST_WINDOWS}"
+        if ($LASTEXITCODE -ne 0) { throw "❌ Docker push latest-windows failed" }
         Write-Host "✅ Latest-windows tag pushed successfully"
       }
 
