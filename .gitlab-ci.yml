@@ -28,22 +28,22 @@ variables:
   PYTEST_ADDOPTS: "--color=yes"
   PIP_EXTRA_INDEX_URL: "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple"
 
-# include:
-#   - local: "ci/windows-deploy-template.yml"
+include:
+  - local: "ci/windows-deploy-template.yml"
 
 # Parallel deployment for multiple Windows Nano Server versions
-# deploy-windows-nanoserver:
-#   extends: .windows-deploy-template
-#   parallel:
-#     matrix:
-#       # - WINDOWS_TAG: "ltsc2019"
-#       #   WINDOWS_RUNNER_VERSION: "2019"
-#       - WINDOWS_TAG: "ltsc2022"
-#         WINDOWS_RUNNER_VERSION: "2022"
-#       # - WINDOWS_TAG: "ltsc2025"
-#       #   WINDOWS_RUNNER_VERSION: "2025"
-#   tags:
-#     - "hq-windows-shell-${WINDOWS_RUNNER_VERSION}"
+deploy-windows-nanoserver:
+  extends: .windows-deploy-template
+  parallel:
+    matrix:
+      # - WINDOWS_TAG: "ltsc2019"
+      #   WINDOWS_RUNNER_VERSION: "2019"
+      - WINDOWS_TAG: "ltsc2022"
+        WINDOWS_RUNNER_VERSION: "2022"
+      # - WINDOWS_TAG: "ltsc2025"
+      #   WINDOWS_RUNNER_VERSION: "2025"
+  tags:
+    - "hq-windows-shell-${WINDOWS_RUNNER_VERSION}"
 
 deploy-linux:
   stage: deploy
@@ -123,15 +123,15 @@ deploy-windows:
 
     # Docker login
     - Write-Host "Logging into Docker registry..."
-    - docker login -u danieleangeli -p "$env:CI_REGISTRY_PASSWORD"
+    - $env:CI_REGISTRY_PASSWORD | docker login -u "${env:CI_REGISTRY_USER}" --password-stdin
     - if ($LASTEXITCODE -ne 0) { throw "❌ Docker login failed" }
     - Write-Host "✅ Docker login successful"
 
     # Extract version from tag
-    - 'Write-Host "Processing tag: $env:CI_COMMIT_TAG"'
-    - $TAG_PART = [regex]::Match($env:CI_COMMIT_TAG, '[0-9]+\.[0-9]+\.[0-9](.*)').Value
+    - 'Write-Host "Processing tag: ${env:CI_COMMIT_TAG}"'
+    - $TAG_PART = [regex]::Match("${env:CI_COMMIT_TAG}", '[0-9]+\.[0-9]+\.[0-9](.*)').Value
     - if (-not $TAG_PART) { throw "❌ Could not extract version from tag" }
-    - $IMAGE_NAME = "molo17/$env:APP_NAME"
+    - $IMAGE_NAME = "molo17/${env:APP_NAME}"
     - $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-windows"
     - 'Write-Host "Image name: ${IMAGE_NAME}"; Write-Host "Version tag: ${VERSION_TAG_WINDOWS}"'
 
@@ -158,7 +158,7 @@ deploy-windows:
 
     # Tag and push latest-windows for release branches
     - |
-      if ($env:CI_COMMIT_TAG -match '^release-') {
+      if ("${env:CI_COMMIT_TAG}" -match '^release-') {
         $LATEST_WINDOWS = "${IMAGE_NAME}:latest-windows"
         docker tag "${VERSION_TAG_WINDOWS}" "${LATEST_WINDOWS}"
         if ($LASTEXITCODE -ne 0) { throw "❌ Docker tag failed" }
