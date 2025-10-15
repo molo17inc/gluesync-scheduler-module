@@ -169,7 +169,7 @@ def execute_job(job: ScheduledJob) -> bool:
         
         # Use HTTPS protocol when SSL is enabled
         protocol = "https" if settings.SSL_ENABLED else "http"
-        base_url = f"{protocol}://{settings.HOST}:{settings.PORT}/api"
+        base_url = f"{protocol}://{settings.HOST}:{settings.PORT}/chronos/api"
         logger.info(f"Using API URL: {base_url} (SSL: {settings.SSL_ENABLED})")
         
         # Determine the endpoint based on task type

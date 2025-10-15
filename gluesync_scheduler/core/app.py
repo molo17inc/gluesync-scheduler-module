@@ -159,9 +159,9 @@ app = FastAPI(
     title="Gluesync Scheduler Module",
     description="API for scheduling and managing pipelines in Gluesync",
     version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
+    docs_url="/chronos/api/docs",
+    redoc_url="/chronos/api/redoc",
+    openapi_url="/chronos/api/openapi.json",
     default_response_class=SafeJSONResponse  # Use our safe response class by default
 )
 
@@ -448,10 +448,10 @@ async def shutdown_event():
 
 # Middleware class for HTTPS redirection is defined above
 
-# Include the API routers
-app.include_router(router, prefix="/api")
-app.include_router(settings_router, prefix="/api")
-app.include_router(pipeline_router, prefix="/api")
+# Include the API routers with /chronos/api prefix
+app.include_router(router, prefix="/chronos/api")
+app.include_router(settings_router, prefix="/chronos/api")
+app.include_router(pipeline_router, prefix="/chronos/api")
 
 # Custom JSON encoder to handle datetime objects
 class JSONEncoder(json.JSONEncoder):
@@ -471,7 +471,7 @@ fastapi.encoders.jsonable_encoder = lambda obj, *args, **kwargs: json.loads(
 # Root endpoint that redirects to API documentation
 @app.get("/")
 async def root():
-    return RedirectResponse(url="/api/docs")
+    return RedirectResponse(url="/chronos/api/docs")
 
 def create_ssl_context():
     """Create SSL context with relaxed protocol settings for broader client compatibility"""

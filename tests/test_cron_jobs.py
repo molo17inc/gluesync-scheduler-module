@@ -44,7 +44,7 @@ from services.job_service import JobService
 
 # Test configuration
 TEST_DB_URL = "sqlite:///./tests/data/test_scheduler.db"
-TEST_API_URL = "http://127.0.0.1:1717/api"  # Use IP address instead of localhost
+TEST_API_URL = "http://127.0.0.1:1717/chronos/api"  # Use IP address instead of localhost and include /chronos prefix
 TEST_PIPELINE_ID = "test-pipeline-123"
 TEST_ENTITY_ID = "test-entity-456"
 

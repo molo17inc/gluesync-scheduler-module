@@ -899,10 +899,10 @@ class JobService:
             # Use localhost for internal API calls, not the binding address (0.0.0.0)
             # Use HTTPS protocol when SSL is enabled
             protocol = "https" if settings.SSL_ENABLED else "http"
-            base_url = f"{protocol}://localhost:{settings.PORT}/api"
+            base_url = f"{protocol}://localhost:{settings.PORT}/chronos/api"
             
             # Clean log output to remove any potential hidden characters
-            logger.info(f"Using internal API URL: {protocol}://localhost:{settings.PORT}/api (SSL: {settings.SSL_ENABLED})")
+            logger.info(f"Using internal API URL: {base_url} (SSL: {settings.SSL_ENABLED})")
             
             # Determine the endpoint based on task type and set the HTTP method
             method = "POST"  # All our endpoints use POST method
@@ -950,7 +950,7 @@ class JobService:
             # Log the request details
             logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
             # Use a clean format to avoid any hidden characters
-            logger.info(f"Endpoint: {method} {protocol}://localhost:{settings.PORT}/api/pipelines/{job.pipeline_id}/{action}")
+            logger.info(f"Endpoint: {method} {protocol}://localhost:{settings.PORT}/chronos/api/pipelines/{job.pipeline_id}/{action}")
             logger.info(f"JSON Payload: {json_data}")
             
             try:
