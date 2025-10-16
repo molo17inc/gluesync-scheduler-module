@@ -42,12 +42,22 @@
     # Tag and push latest-windows for release branches
     - |
       if ($env:CI_COMMIT_TAG -match '^release-') {
-        $LATEST_WINDOWS = "$IMAGE_NAME:latest-windows"
-        docker tag "$VERSION_TAG_WINDOWS" "$LATEST_WINDOWS"
+        $LATEST_WINDOWS = "$IMAGE_NAME:latest"
+
+        docker tag "$VERSION_TAG_WINDOWS" "$LATEST_WINDOWS-win-nanoserver-$env:WINDOWS_TAG"
         if ($LASTEXITCODE -ne 0) { throw "❌ Docker tag failed" }
-        docker push "$LATEST_WINDOWS"
+        docker push "$LATEST_WINDOWS-win-nanoserver-$env:WINDOWS_TAG"
         if ($LASTEXITCODE -ne 0) { throw "❌ Docker push latest-windows failed" }
         Write-Host "✅ Latest-windows tag pushed successfully"
+
+        # Backwards compatibility for ltsc2022
+        if ($env:WINDOWS_TAG -eq "ltsc2022") {
+          docker tag "$VERSION_TAG_WINDOWS" "$LATEST_WINDOWS-windows"
+          if ($LASTEXITCODE -ne 0) { throw "❌ Docker tag latest generic failed" }
+          docker push "$LATEST_WINDOWS-windows"
+          if ($LASTEXITCODE -ne 0) { throw "❌ Docker push latest generic failed" }
+          Write-Host "✅ Latest generic tag pushed successfully (legacy for ltsc2022)"
+        }
       }
 
   rules:
