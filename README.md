@@ -346,17 +346,17 @@ http://localhost:1717/redoc
 
 | Endpoint | Method | Description |
 |----------|--------|-----------|
-| `/api/jobs` | `GET` | List all scheduled jobs |
-| `/api/jobs/{job_id}` | `GET` | Get a specific job |
-| `/api/jobs` | `POST` | Create a new scheduled job |
-| `/api/jobs/{job_id}` | `PUT` | Update an existing job |
-| `/api/jobs/{job_id}` | `DELETE` | Delete a job |
-| `/api/jobs/{job_id}/run` | `POST` | Manually trigger a job |
-| `/api/jobs/{job_id}/status` | `PATCH` | Enable/disable a job |
-| `/api/settings` | `GET` | List all settings |
-| `/api/settings/{key}` | `GET` | Get a specific setting |
-| `/api/settings` | `POST` | Create a new setting |
-| `/api/settings/{key}` | `PUT` | Update a setting |
+| `/chronos/api/jobs` | `GET` | List all scheduled jobs |
+| `/chronos/api/jobs/{job_id}` | `GET` | Get a specific job |
+| `/chronos/api/jobs` | `POST` | Create a new scheduled job |
+| `/chronos/api/jobs/{job_id}` | `PUT` | Update an existing job |
+| `/chronos/api/jobs/{job_id}` | `DELETE` | Delete a job |
+| `/chronos/api/jobs/{job_id}/run` | `POST` | Manually trigger a job |
+| `/chronos/api/jobs/{job_id}/status` | `PATCH` | Enable/disable a job |
+| `/chronos/api/settings` | `GET` | List all settings |
+| `/chronos/api/settings/{key}` | `GET` | Get a specific setting |
+| `/chronos/api/settings` | `POST` | Create a new setting |
+| `/chronos/api/settings/{key}` | `PUT` | Update a setting |
 
 ## Scheduling Options
 
@@ -608,7 +608,7 @@ The module includes comprehensive tests to ensure functionality and reliability.
 You can manually trigger a job using the API:
 
 ```bash
-curl -X POST "http://localhost:1717/api/jobs/{job_id}/run"
+curl -X POST "http://localhost:1717/chronos/api/jobs/{job_id}/run"
 ```
 
 Or using the CLI module directly:
