@@ -1,0 +1,64 @@
+.windows-deploy-template:
+  stage: deploy
+  script:
+    # Fail immediately on any error
+    - $ErrorActionPreference = "Stop"
+
+    # Docker login
+    - Write-Host "Logging into Docker registry..."
+    - $env:CI_REGISTRY_PASSWORD | docker login -u "$env:CI_REGISTRY_USER" --password-stdin
+    - if ($LASTEXITCODE -ne 0) { throw "❌ Docker login failed" }
+    - Write-Host "✅ Docker login successful"
+
+    # Extract version from tag
+    - "Write-Host Processing tag: $env:CI_COMMIT_TAG"
+    - $TAG_PART = [regex]::Match($env:CI_COMMIT_TAG, '[0-9]+\.[0-9]+\.[0-9](.*)').Value
+    - if (-not $TAG_PART) { throw "❌ Could not extract version from tag" }
+    - $IMAGE_NAME = "molo17/$env:APP_NAME"
+    - $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-win-nanoserver-$env:WINDOWS_TAG"
+    - "Write-Host Image name: $IMAGE_NAME; Write-Host Version tag: $VERSION_TAG_WINDOWS"
+
+    # Initialize git submodules
+    - Write-Host "Initializing git submodules..."
+    - git submodule update --init --recursive
+    - if ($LASTEXITCODE -ne 0) { throw "❌ Git submodule update failed" }
+    - Write-Host "✅ Submodules ready"
+
+    # Create VERSION file
+    - Set-Content -Path "VERSION" -Value $TAG_PART
+    - "Write-Host ✅ VERSION file created with content: $(Get-Content VERSION)"
+
+    # Build Windows Docker image
+    - Write-Host "Building Windows Docker image..."
+    - docker build --file Dockerfile.windows.nanoserver --build-arg WINDOWS_TAG="$env:WINDOWS_TAG" --tag "$VERSION_TAG_WINDOWS" .
+    - if ($LASTEXITCODE -ne 0) { throw "❌ Docker build failed" }
+    - Write-Host "✅ Docker build completed successfully"
+
+    # Push Windows Docker image
+    - docker push "$VERSION_TAG_WINDOWS"
+    - if ($LASTEXITCODE -ne 0) { throw "❌ Docker push failed" }
+    - Write-Host "✅ Pushed $VERSION_TAG_WINDOWS"
+
+    # Tag and push latest-windows for release branches
+    - |
+      if ($env:CI_COMMIT_TAG -match '^release-') {
+        $LATEST_WINDOWS = "$IMAGE_NAME:latest"
+
+        docker tag "$VERSION_TAG_WINDOWS" "$LATEST_WINDOWS-win-nanoserver-$env:WINDOWS_TAG"
+        if ($LASTEXITCODE -ne 0) { throw "❌ Docker tag failed" }
+        docker push "$LATEST_WINDOWS-win-nanoserver-$env:WINDOWS_TAG"
+        if ($LASTEXITCODE -ne 0) { throw "❌ Docker push latest-windows failed" }
+        Write-Host "✅ Latest-windows tag pushed successfully"
+
+        # Backwards compatibility for ltsc2022
+        if ($env:WINDOWS_TAG -eq "ltsc2022") {
+          docker tag "$VERSION_TAG_WINDOWS" "$LATEST_WINDOWS-windows"
+          if ($LASTEXITCODE -ne 0) { throw "❌ Docker tag latest generic failed" }
+          docker push "$LATEST_WINDOWS-windows"
+          if ($LASTEXITCODE -ne 0) { throw "❌ Docker push latest generic failed" }
+          Write-Host "✅ Latest generic tag pushed successfully (legacy for ltsc2022)"
+        }
+      }
+
+  rules:
+    - if: $CI_COMMIT_TAG
