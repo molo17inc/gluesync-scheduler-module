@@ -2,12 +2,13 @@
 
 # Use build argument to specify base tag for flexibility with default
 ARG WINDOWS_TAG=ltsc2022
+ARG BASE_IMAGE=mcr.microsoft.com/windows/servercore:${WINDOWS_TAG}
 
 # ------------------
 # Stage 1: Build exe (Server Core)
 # ------------------
-# Base image Windows Server Core ${WINDOWS_TAG}
-FROM mcr.microsoft.com/windows/servercore:${WINDOWS_TAG} AS builder
+# Use the selected base image
+FROM ${BASE_IMAGE} AS builder
 
 # Use PowerShell for subsequent RUN commands, stop on errors
 SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]

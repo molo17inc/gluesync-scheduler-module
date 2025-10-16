@@ -28,11 +28,27 @@
     - Set-Content -Path "VERSION" -Value $TAG_PART
     - "Write-Host ✅ VERSION file created with content: $(Get-Content VERSION)"
 
-    # Build Windows Docker image
-    - Write-Host "Building Windows Docker image..."
-    - docker build --file Dockerfile.windows.nanoserver --build-arg WINDOWS_TAG="$env:WINDOWS_TAG" --tag "$VERSION_TAG_WINDOWS" .
-    - if ($LASTEXITCODE -ne 0) { throw "❌ Docker build failed" }
-    - Write-Host "✅ Docker build completed successfully"
+    # Build Windows Docker image (conditional on WINDOWS_TAG)
+    - |
+      if ($env:WINDOWS_TAG -eq "ltsc2019") {
+          $BASE_IMAGE = "mcr.microsoft.com/dotnet/framework/sdk:4.8-windowsservercore-ltsc2019"
+          Write-Host "Building Docker image for LTSC2019 using BASE_IMAGE='$BASE_IMAGE'..."
+
+          docker build --file Dockerfile.windows.nanoserver `
+                      --build-arg WINDOWS_TAG="$env:WINDOWS_TAG" `
+                      --build-arg BASE_IMAGE="$BASE_IMAGE" `
+                      --tag "$VERSION_TAG_WINDOWS" .
+      }
+      else {
+          Write-Host "Building Docker image for $env:WINDOWS_TAG using default Server Core..."
+
+          docker build --file Dockerfile.windows.nanoserver `
+                      --build-arg WINDOWS_TAG="$env:WINDOWS_TAG" `
+                      --tag "$VERSION_TAG_WINDOWS" .
+      }
+
+      if ($LASTEXITCODE -ne 0) { throw "❌ Docker build failed" }
+      Write-Host "✅ Docker build completed successfully for $env:WINDOWS_TAG"
 
     # Push Windows Docker image
     - docker push "$VERSION_TAG_WINDOWS"
@@ -53,6 +69,7 @@
 
         Write-Host "✅ Pushed $LATEST_TAG"
 
+        # Backwards compatibility for ltsc2022
         if ($env:WINDOWS_TAG -eq "ltsc2022") {
           $LEGACY_TAG = "${LATEST_BASE}-windows"
           docker tag "$VERSION_TAG_WINDOWS" "$LEGACY_TAG"
