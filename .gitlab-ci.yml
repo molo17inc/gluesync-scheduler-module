@@ -36,8 +36,8 @@ deploy-windows-nanoserver:
   extends: .windows-deploy-template
   parallel:
     matrix:
-      # - WINDOWS_TAG: "ltsc2019"
-      #   WINDOWS_RUNNER_VERSION: "2019"
+      - WINDOWS_TAG: "ltsc2019"
+        WINDOWS_RUNNER_VERSION: "2019"
       - WINDOWS_TAG: "ltsc2022"
         WINDOWS_RUNNER_VERSION: "2022"
       # - WINDOWS_TAG: "ltsc2025"
