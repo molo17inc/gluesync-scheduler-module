@@ -174,10 +174,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add the SafeJSONMiddleware to prevent recursion errors
-app.add_middleware(SafeJSONMiddleware)
-
-# Middleware to catch any uncaught exceptions
+# Middleware to redirect old /api paths to new /chronos/api paths for backward compatibility
+class APIRedirectMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Check if the path starts with /api/
+        if request.url.path.startswith('/api/'):
+            # Replace /api/ with /chronos/api/ in the path
+            new_path = request.url.path.replace('/api/', '/chronos/api/', 1)
+            
+            # Construct the new URL with the updated path
+            new_url = str(request.url).replace(request.url.path, new_path)
+            
+            # Log the redirect for debugging
+            logger.info(f"Redirecting {request.url.path} to {new_path}")
+            
+            # Return a permanent redirect response
+            return RedirectResponse(url=new_url, status_code=301)
+        
+        # If not redirecting, continue with the request
+        return await call_next(request)
 async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
@@ -217,6 +232,9 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
         
         # If not redirecting, continue with the request
         return await call_next(request)
+
+# Add middleware for backward compatibility redirects from old /api paths to new /chronos/api paths
+app.add_middleware(APIRedirectMiddleware)
 
 # Add HTTPS redirect middleware if SSL is enabled
 if settings.SSL_ENABLED:
