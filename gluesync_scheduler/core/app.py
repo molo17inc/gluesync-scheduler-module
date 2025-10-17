@@ -177,13 +177,30 @@ app.add_middleware(
 # Middleware to redirect old /api paths to new /chronos/api paths for backward compatibility
 class APIRedirectMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # Debug logging to verify middleware execution
+        logger.debug(f"APIRedirectMiddleware: Processing request to {request.url.path}")
+        
         # Check if the path starts with /api/
         if request.url.path.startswith('/api/'):
             # Replace /api/ with /chronos/api/ in the path
             new_path = request.url.path.replace('/api/', '/chronos/api/', 1)
             
-            # Construct the new URL with the updated path
-            new_url = str(request.url).replace(request.url.path, new_path)
+            # Construct the new URL properly using URL components
+            # Preserve scheme, host, port, query params, and fragments
+            scheme = request.url.scheme
+            
+            # Build host:port string
+            if request.url.port and ((scheme == 'https' and request.url.port != 443) or (scheme == 'http' and request.url.port != 80)):
+                host = f"{request.url.host}:{request.url.port}"
+            else:
+                host = request.url.host
+            
+            # Build the new URL
+            new_url = f"{scheme}://{host}{new_path}"
+            if request.url.query:
+                new_url += f"?{request.url.query}"
+            if request.url.fragment:
+                new_url += f"#{request.url.fragment}"
             
             # Log the redirect for debugging
             logger.info(f"Redirecting {request.url.path} to {new_path}")
@@ -192,6 +209,7 @@ class APIRedirectMiddleware(BaseHTTPMiddleware):
             return RedirectResponse(url=new_url, status_code=301)
         
         # If not redirecting, continue with the request
+        logger.debug(f"APIRedirectMiddleware: No redirect needed for {request.url.path}")
         return await call_next(request)
 async def catch_exceptions_middleware(request: Request, call_next):
     try:
