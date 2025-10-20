@@ -1,14 +1,13 @@
 # escape=`
 
 # Use build argument to specify base tag for flexibility with default
-ARG WINDOWS_TAG=ltsc2022
-ARG BASE_IMAGE=mcr.microsoft.com/windows/servercore:${WINDOWS_TAG}
+ARG WINDOWS_TAG=ltsc2019
 
 # ------------------
 # Stage 1: Build exe (Server Core)
 # ------------------
 # Use the selected base image
-FROM ${BASE_IMAGE} AS builder
+FROM mcr.microsoft.com/dotnet/framework/sdk:4.8-windowsservercore-${WINDOWS_TAG} AS builder
 
 # Use PowerShell for subsequent RUN commands, stop on errors
 SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]
@@ -30,14 +29,12 @@ SHELL ["cmd", "/S", "/C"]
 
 RUN `
   # Download the Build Tools bootstrapper.
-  curl -SL --output vs_buildtools.exe https://aka.ms/vs/17/release/vs_buildtools.exe `
+  curl -SL --output vs_buildtools.exe https://aka.ms/vs/16/release/vs_buildtools.exe `
   `
   # Install Build Tools with the Microsoft.VisualStudio.Workload.AzureBuildTools workload, excluding workloads and components with known issues.
-  # https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2022
+  # https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2019
   && (start /w vs_buildtools.exe --quiet --wait --norestart --nocache `
-  --installPath "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools" `
-  # --add Microsoft.VisualStudio.Workload.VCTools `
-  --add Microsoft.Component.MSBuild `
+  --installPath "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\BuildTools" `
   --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
   --add Microsoft.VisualStudio.Component.Windows10SDK.19041 `
   || IF "%ERRORLEVEL%"=="3010" EXIT 0) `
@@ -64,7 +61,8 @@ RUN if not exist C:\opt\gluesync\data mkdir C:\opt\gluesync\data && `
 COPY requirements.txt .
 
 # Verify Python installation, upgrade pip, install Python dependencies and install PyInstaller
-RUN python -m pip install --upgrade pip setuptools wheel && `
+RUN call "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" && `
+  python -m pip install --upgrade pip setuptools wheel && `
   python -m pip install --no-cache-dir -r requirements.txt `
   --extra-index-url "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple" && `
   python -m pip install --no-cache-dir pyinstaller

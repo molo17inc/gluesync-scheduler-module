@@ -31,12 +31,10 @@
     # Build Windows Docker image (conditional on WINDOWS_TAG)
     - |
       if ($env:WINDOWS_TAG -eq "ltsc2019") {
-          $BASE_IMAGE = "mcr.microsoft.com/dotnet/framework/sdk:4.8-windowsservercore-ltsc2019"
-          Write-Host "Building Docker image for LTSC2019 using BASE_IMAGE='$BASE_IMAGE'..."
+          Write-Host "Building Docker image for LTSC2019..."
 
-          docker build --file Dockerfile.windows.nanoserver `
+          docker build --file Dockerfile.windows.nanoserver.2019 `
                       --build-arg WINDOWS_TAG="$env:WINDOWS_TAG" `
-                      --build-arg BASE_IMAGE="$BASE_IMAGE" `
                       --tag "$VERSION_TAG_WINDOWS" .
       }
       else {
