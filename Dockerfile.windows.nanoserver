@@ -125,12 +125,12 @@ RUN pyinstaller `
 # ------------------
 # Stage 2: Runtime (Nano Server)
 # ------------------
-FROM mcr.microsoft.com/windows/nanoserver:${WINDOWS_TAG}
+# FROM mcr.microsoft.com/windows/nanoserver:${WINDOWS_TAG}
 
-WORKDIR C:\app
+# WORKDIR C:\app
 
 # Copy only the generated exe
-COPY --from=builder C:\app\dist\GluesyncScheduler.exe .
+# COPY --from=builder C:\app\dist\GluesyncScheduler.exe .
 
 # If runtime static data is needed:
 # COPY --from=builder C:\app\data C:\app\data
