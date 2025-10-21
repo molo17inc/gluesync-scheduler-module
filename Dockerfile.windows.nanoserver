@@ -128,6 +128,8 @@ RUN pyinstaller `
 # ------------------
 FROM mcr.microsoft.com/windows/nanoserver:${WINDOWS_TAG}
 
+USER ContainerAdministrator
+
 WORKDIR C:\app
 
 # Copy only the generated exe
