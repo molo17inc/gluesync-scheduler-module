@@ -244,7 +244,7 @@ async def startup_event():
     # Initialize database
     try:
         logger.info("Verifying database schema...")
-        logger.info(f"🔍 DATABASE: Application DB_URL: {settings.DB_URL}")
+        logger.info(f"DATABASE: Application DB_URL: {settings.DB_URL}")
         
         # For SQLite, verify the database file
         if settings.DB_URL.startswith('sqlite:'):
@@ -254,14 +254,14 @@ async def startup_event():
                 db_path = db_path[1:]  # Remove leading slash for Windows paths
             
             db_path = os.path.abspath(db_path)
-            logger.info(f"🔍 DATABASE: Resolved database file path: {db_path}")
+            logger.info(f"DATABASE: Resolved database file path: {db_path}")
             
             # Check if database file exists
             if os.path.exists(db_path):
                 db_size = os.path.getsize(db_path)
-                logger.info(f"🔍 DATABASE: Database file exists, size: {db_size} bytes")
+                logger.info(f"DATABASE: Database file exists, size: {db_size} bytes")
             else:
-                logger.info("🔍 DATABASE: Database file does not exist, it will be created")
+                logger.info("DATABASE: Database file does not exist, it will be created")
         
         # Create all database tables if they don't exist
         from gluesync_scheduler.db.database import Base, engine

@@ -54,7 +54,7 @@ def add_snapshot_write_method_column(engine):
     from sqlalchemy import MetaData, Table, Column, String
     from sqlalchemy.sql.ddl import DDL
     
-    logger.info(f"🔍 MIGRATION: Running SQLAlchemy-based migration against database: {engine.url}")
+    logger.info(f"MIGRATION: Running SQLAlchemy-based migration against database: {engine.url}")
     
     # Create metadata and reflect existing schema
     metadata = MetaData()
@@ -62,19 +62,19 @@ def add_snapshot_write_method_column(engine):
     
     # Check if the scheduled_jobs table exists
     if 'scheduled_jobs' not in metadata.tables:
-        logger.info("🔍 MIGRATION: scheduled_jobs table does not exist, skipping migration")
+        logger.info("MIGRATION: scheduled_jobs table does not exist, skipping migration")
         return
     
     scheduled_jobs_table = metadata.tables['scheduled_jobs']
     existing_columns = [col.name for col in scheduled_jobs_table.columns]
-    logger.info(f"🔍 MIGRATION: Current columns in scheduled_jobs: {existing_columns}")
+    logger.info(f"MIGRATION: Current columns in scheduled_jobs: {existing_columns}")
     
     # Check if the snapshot_write_method column already exists
     if 'snapshot_write_method' in existing_columns:
-        logger.info("🔍 MIGRATION: snapshot_write_method column already exists, skipping migration")
+        logger.info("MIGRATION: snapshot_write_method column already exists, skipping migration")
         return
     
-    logger.info("🔍 MIGRATION: Adding snapshot_write_method column using SQLAlchemy DDL operations")
+    logger.info("MIGRATION: Adding snapshot_write_method column using SQLAlchemy DDL operations")
     
     try:
         # Use SQLAlchemy's DDL approach for adding columns
@@ -84,7 +84,7 @@ def add_snapshot_write_method_column(engine):
             connection.execute(add_column_ddl)
             connection.commit()
             
-            logger.info("🔍 MIGRATION: SQLAlchemy DDL operation completed")
+            logger.info("MIGRATION: SQLAlchemy DDL operation completed")
         
         # Verify the column was added by reflecting the schema again
         metadata_after = MetaData()
@@ -92,20 +92,20 @@ def add_snapshot_write_method_column(engine):
         updated_table = metadata_after.tables['scheduled_jobs']
         updated_columns = [col.name for col in updated_table.columns]
         
-        logger.info(f"🔍 MIGRATION: Columns after migration: {updated_columns}")
+        logger.info(f"MIGRATION: Columns after migration: {updated_columns}")
         
         if 'snapshot_write_method' in updated_columns:
-            logger.info("✅ MIGRATION: SQLAlchemy DDL migration verified: snapshot_write_method column exists")
+            logger.info("MIGRATION: SQLAlchemy DDL migration verified: snapshot_write_method column exists")
             
             # Test querying the new column
             with engine.connect() as connection:
                 try:
                     result = connection.execute(text("SELECT snapshot_write_method FROM scheduled_jobs LIMIT 1"))
-                    logger.info("🔍 MIGRATION: Successfully queried snapshot_write_method column")
+                    logger.info("MIGRATION: Successfully queried snapshot_write_method column")
                 except Exception as query_error:
-                    logger.error(f"🔍 MIGRATION: Failed to query snapshot_write_method column: {query_error}")
+                    logger.error(f"MIGRATION: Failed to query snapshot_write_method column: {query_error}")
         else:
-            logger.error("❌ MIGRATION: SQLAlchemy DDL migration failed: snapshot_write_method column not found after migration")
+            logger.error("MIGRATION: SQLAlchemy DDL migration failed: snapshot_write_method column not found after migration")
                 
     except Exception as e:
         logger.error(f"Error during SQLAlchemy DDL migration: {str(e)}")
