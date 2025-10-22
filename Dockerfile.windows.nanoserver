@@ -158,6 +158,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
 # Copy only the generated exe
 COPY --from=builder C:\app\dist\GluesyncScheduler.exe .
 
+# Copy migrations directory for runtime migration execution
+COPY --from=builder C:\app\migrations ./migrations
+
 # If runtime static data is needed:
 # COPY --from=builder C:\app\data C:\app\data
 
