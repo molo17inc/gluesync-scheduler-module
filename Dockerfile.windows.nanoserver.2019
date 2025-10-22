@@ -95,6 +95,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
 # Copy SDK
 COPY ./gluesync-sdk ./gluesync-sdk
 
+# Copy VERSION file explicitly (created by CI)
+COPY VERSION .
+
 # Copy application files
 COPY . .
 
