@@ -152,6 +152,8 @@ class GluesyncSDKClient:
             logger.warning(f"License file not found at {license_file_path}, will attempt to proceed without it")
         
         # Determine SSL settings
+        logger.info(f"Settings object ID: {id(settings)}")
+        logger.info(f"SSL_ENABLED value: {settings.SSL_ENABLED}, type: {type(settings.SSL_ENABLED)}")
         logger.info(f"SSL is {'enabled' if settings.SSL_ENABLED else 'disabled'} in settings")
         
         # Security configuration

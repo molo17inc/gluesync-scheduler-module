@@ -87,9 +87,9 @@ class Settings:
         if url:
             self.GLUESYNC_HOST = url
             
-    # Debug logging for timezone settings
     def __init__(self):
         # Log all environment variables
+        logger.info(f"Settings object ID: {id(self)}")
         logger.info(f"Raw SSL_ENABLED env var: '{os.getenv('SSL_ENABLED', 'NOT_SET')}'")
         logger.info(f"Raw SSL_SKIP_VERIFY env var: '{os.getenv('SSL_SKIP_VERIFY', 'NOT_SET')}'")
         logger.info(f"Configured TIMEZONE: {self.TIMEZONE}")
