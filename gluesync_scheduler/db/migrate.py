@@ -22,8 +22,27 @@ def run_migrations():
     the database schema is up to date.
     """
     try:
-        # Get the project root directory
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        # Get the project root directory - find it by looking for pyproject.toml
+        current_path = os.path.abspath(os.path.dirname(__file__))
+        project_root = None
+
+        # Walk up the directory tree looking for pyproject.toml
+        path_parts = current_path.split(os.sep)
+        for i in range(len(path_parts) - 1, -1, -1):
+            candidate_root = os.sep.join(path_parts[:i+1])
+            if os.path.exists(os.path.join(candidate_root, 'pyproject.toml')):
+                project_root = candidate_root
+                break
+
+        # Fallback to environment variable or relative path calculation
+        if not project_root:
+            # Try environment variable first
+            project_root = os.environ.get('PROJECT_ROOT')
+            if not project_root:
+                # Fallback to relative calculation
+                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+        logger.info(f"Using project root: {project_root}")
 
         # Get the migrations directory
         migrations_dir = os.path.join(project_root, "migrations")

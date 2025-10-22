@@ -135,6 +135,7 @@ WORKDIR C:\app
 ENV PYTHONDONTWRITEBYTECODE=1 `
   PYTHONUNBUFFERED=1 `
   PYTHONPATH=C:\app `
+  PROJECT_ROOT=C:\app `
   GLUESYNC_LICENSE_FILE=C:\opt\gluesync\data\gs-license.dat `
   GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\data\security-config.json `
   GLUESYNC_HOST= `
