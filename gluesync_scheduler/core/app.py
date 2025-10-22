@@ -300,7 +300,7 @@ async def startup_event():
         from sqlalchemy import inspect
         inspector = inspect(db.get_bind())
         
-        logger.info(f"SSL_ENABLED before settings service: {settings.SSL_ENABLED}")
+        logger.info(f"SSL_ENABLED before settings service: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
         
         if 'settings' in inspector.get_table_names():
             try:

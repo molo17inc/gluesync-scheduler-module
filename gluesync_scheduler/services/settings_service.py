@@ -185,11 +185,8 @@ class SettingsService:
             # Validate timezone
             pytz.timezone(timezone_value)
             
-            # Update global settings
-            # Note: This doesn't persist across application restarts,
-            # but will be reloaded from DB during startup
-            settings.TIMEZONE = timezone_value
-            logger.info(f"Updated global timezone setting to: {timezone_value}")
+            # Note: Global timezone setting is no longer used since we load from DB on startup
+            logger.info(f"Validated timezone setting: {timezone_value}")
             return True
         except pytz.exceptions.UnknownTimeZoneError:
             logger.error(f"Invalid timezone: {timezone_value}")

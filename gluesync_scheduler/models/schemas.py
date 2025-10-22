@@ -25,10 +25,10 @@ from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 import pytz
 import json
+import os
 from enum import Enum
 from pydantic import BaseModel, Field, validator, field_serializer, ConfigDict
 
-from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.models.models import TaskType
 
 
@@ -249,7 +249,7 @@ class Job(JobBase):
             from croniter import croniter
             
             # Get current time in the configured timezone
-            tz = pytz.timezone(settings.TIMEZONE)
+            tz = pytz.timezone(os.getenv('TIMEZONE', 'UTC'))
             now = datetime.now(tz)
             
             # Use croniter to calculate the next run time
@@ -337,7 +337,7 @@ class Job(JobBase):
         # Fallback to settings timezone if job doesn't have one
         if tz is None:
             try:
-                tz = pytz.timezone(settings.TIMEZONE)
+                tz = pytz.timezone(os.getenv('TIMEZONE', 'UTC'))
             except:
                 tz = pytz.UTC
         
@@ -379,7 +379,7 @@ class Job(JobBase):
             # Fallback to settings timezone
             if tz is None:
                 try:
-                    tz = pytz.timezone(settings.TIMEZONE)
+                    tz = pytz.timezone(os.getenv('TIMEZONE', 'UTC'))
                 except:
                     tz = pytz.UTC
             

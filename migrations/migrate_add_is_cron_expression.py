@@ -37,15 +37,9 @@ logger = logging.getLogger(__name__)
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-try:
-    # Try to import settings from the project
-    from gluesync_scheduler.config.settings import settings
-    DB_URL = settings.DB_URL
-    logger.info(f"Using DB_URL from settings: {DB_URL}")
-except ImportError:
-    # If importing fails, use the same path as the application
-    DB_URL = "sqlite:///./data/scheduler.db"
-    logger.warning(f"Could not import settings, using default DB_URL: {DB_URL}")
+# Get database URL from environment (settings system may not be fully available during migration)
+DB_URL = os.environ.get("DB_URL", "sqlite:///./data/scheduler.db")
+logger.info(f"Using DB_URL: {DB_URL}")
 
 
 def add_is_cron_expression_column(engine):

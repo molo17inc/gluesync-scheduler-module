@@ -38,15 +38,18 @@ os.environ['DATA_DIR'] = '/app/data'
 
 from gluesync_scheduler.db.database import get_db, engine, Base
 from gluesync_scheduler.models.models import ScheduledJob, TaskType
-from gluesync_scheduler.config.settings import settings
+# Removed settings import as it's deprecated
 
 # Ensure the database directory exists
-os.makedirs(os.path.dirname(settings.DB_URL.replace('sqlite:///', '')), exist_ok=True)
+db_url = os.getenv('DB_URL', 'sqlite:///./data/scheduler.db')
+if db_url.startswith('sqlite:///'):
+    db_path = db_url.replace('sqlite:///', '')
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
 # Initialize database schema if it doesn't exist
 try:
     Base.metadata.create_all(bind=engine)
-    print(f"Database schema initialized at {settings.DB_URL}")
+    print(f"Database schema initialized at {db_url}")
 except Exception as e:
     print(f"Error initializing database schema: {e}")
 
@@ -168,9 +171,12 @@ def execute_job(job: ScheduledJob) -> bool:
                 logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
         
         # Use HTTPS protocol when SSL is enabled
-        protocol = "https" if settings.SSL_ENABLED else "http"
-        base_url = f"{protocol}://{settings.HOST}:{settings.PORT}/api"
-        logger.info(f"Using API URL: {base_url} (SSL: {settings.SSL_ENABLED})")
+        ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+        protocol = "https" if ssl_enabled else "http"
+        host = os.getenv('HOST', '0.0.0.0')
+        port = int(os.getenv('PORT', '8000'))
+        base_url = f"{protocol}://{host}:{port}/api"
+        logger.info(f"Using API URL: {base_url} (SSL: {ssl_enabled})")
         
         # Determine the endpoint based on task type
         if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
@@ -205,7 +211,8 @@ def execute_job(job: ScheduledJob) -> bool:
         }
         
         # Skip SSL verification if SSL_SKIP_VERIFY is enabled
-        verify = not settings.SSL_SKIP_VERIFY if settings.SSL_ENABLED else True
+        ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
+        verify = not ssl_skip_verify if ssl_enabled else True
         logger.info(f"SSL verification: {verify}")
         
         # Add timeout to prevent hanging requests

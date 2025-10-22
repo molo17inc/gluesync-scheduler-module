@@ -26,8 +26,8 @@ from typing import List, Dict, Optional, Any
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import os
 
-from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
 
 logger = logging.getLogger(__name__)
@@ -37,8 +37,10 @@ class GroupService:
     """Service for managing groups within pipelines via CoreHub API"""
     
     def __init__(self):
-        self.GLUESYNC_HOST = settings.GLUESYNC_HOST
-        self.ssl_verify = not settings.SSL_SKIP_VERIFY if settings.SSL_ENABLED else True
+        ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+        ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
+        self.GLUESYNC_HOST = os.getenv('GLUESYNC_HOST', '')
+        self.ssl_verify = not ssl_skip_verify if ssl_enabled else True
         self._setup_session()
     
     def _setup_session(self):
