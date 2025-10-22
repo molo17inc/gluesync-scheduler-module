@@ -41,7 +41,11 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Get database URL from environment (settings system not yet available during migration)
-DB_URL = os.environ.get("DB_URL", "sqlite:///./data/scheduler.db")
+DB_URL = os.environ.get("DB_URL")
+if not DB_URL:
+    # Convert relative path to absolute path for consistency
+    abs_data_dir = os.path.abspath(os.getenv('DATA_DIR', './data'))
+    DB_URL = f'sqlite:///{abs_data_dir}/scheduler.db'
 logger.info(f"Using DB_URL: {DB_URL}")
 
 # Create a base class for declarative models

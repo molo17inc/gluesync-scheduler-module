@@ -47,11 +47,22 @@ def migrate_add_group_ids_field(db_path):
 
 def main():
     """Main function to run the migration"""
-    # Default database path
-    default_db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scheduler.db')
+    # Get database URL from environment (same logic as main app)
+    db_url = os.environ.get("DB_URL")
+    if not db_url:
+        # Convert relative path to absolute path for consistency
+        abs_data_dir = os.path.abspath(os.getenv('DATA_DIR', './data'))
+        db_url = f'sqlite:///{abs_data_dir}/scheduler.db'
     
-    # Use provided path or default
-    db_path = sys.argv[1] if len(sys.argv) > 1 else default_db_path
+    # Extract database path from URL
+    if db_url.startswith('sqlite:///'):
+        db_path = db_url.replace('sqlite:///', '')
+        # Handle Windows paths
+        if ':' in db_path and len(db_path) > 2 and db_path[1] == ':':
+            db_path = db_path[2:]  # Remove the leading / from /C:/path
+    else:
+        # Fallback to old logic for backward compatibility
+        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scheduler.db')
     
     print(f"Running migration on database: {db_path}")
     
