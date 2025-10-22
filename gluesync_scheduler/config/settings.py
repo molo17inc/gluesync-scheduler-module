@@ -41,11 +41,6 @@ class Settings:
     GLUESYNC_HOST = os.getenv('GLUESYNC_HOST', '')
     ENTITY_START_TIMEOUT = int(os.getenv('ENTITY_START_TIMEOUT', '2'))
     
-    def update_corehub_url(self, url: str):
-        """Update the CoreHub URL from the SDK"""
-        if url:
-            self.GLUESYNC_HOST = url
-    
     # Web server settings
     HOST = os.getenv('HOST', '0.0.0.0')
     PORT = int(os.getenv('PORT', '8000'))
@@ -65,18 +60,9 @@ class Settings:
     # Timezone settings
     TIMEZONE = os.getenv('TIMEZONE', 'Europe/Rome')
     
-    # Debug logging for timezone settings
-    def __init__(self):
-        # Log all environment variables
-        logger.info(f"Configured TIMEZONE: {self.TIMEZONE}")
-        logger.info(f"SSL_ENABLED: {self.SSL_ENABLED} (type: {type(self.SSL_ENABLED)})")
-        logger.info(f"SSL_SKIP_VERIFY: {self.SSL_SKIP_VERIFY} (type: {type(self.SSL_SKIP_VERIFY)})")
-        logger.info(f"GLUESYNC_SECURITY_CONFIG: {self.GLUESYNC_SECURITY_CONFIG}")
-        logger.info(f"GLUESYNC_LICENSE_FILE: {self.GLUESYNC_LICENSE_FILE}")
-        
     SSL_ENABLED = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
     SSL_SKIP_VERIFY = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
-    
+
     # Gluesync SDK settings
     GLUESYNC_LICENSE_FILE = os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')
     GLUESYNC_MODULE_TAG = os.getenv('GLUESYNC_MODULE_TAG', 'chronos')
@@ -95,6 +81,22 @@ class Settings:
     # Job execution settings
     # When FIRE_ONCE is True, jobs will be disabled after their first execution
     FIRE_ONCE = os.getenv('FIRE_ONCE', 'False').lower() in ('true', '1', 't')
+    
+    def update_corehub_url(self, url: str):
+        """Update the CoreHub URL from the SDK"""
+        if url:
+            self.GLUESYNC_HOST = url
+            
+    # Debug logging for timezone settings
+    def __init__(self):
+        # Log all environment variables
+        logger.info(f"Raw SSL_ENABLED env var: '{os.getenv('SSL_ENABLED', 'NOT_SET')}'")
+        logger.info(f"Raw SSL_SKIP_VERIFY env var: '{os.getenv('SSL_SKIP_VERIFY', 'NOT_SET')}'")
+        logger.info(f"Configured TIMEZONE: {self.TIMEZONE}")
+        logger.info(f"SSL_ENABLED: {self.SSL_ENABLED} (type: {type(self.SSL_ENABLED)})")
+        logger.info(f"SSL_SKIP_VERIFY: {self.SSL_SKIP_VERIFY} (type: {type(self.SSL_SKIP_VERIFY)})")
+        logger.info(f"GLUESYNC_SECURITY_CONFIG: {self.GLUESYNC_SECURITY_CONFIG}")
+        logger.info(f"GLUESYNC_LICENSE_FILE: {self.GLUESYNC_LICENSE_FILE}")
 
 settings = Settings()
 
