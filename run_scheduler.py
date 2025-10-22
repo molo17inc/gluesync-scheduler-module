@@ -28,7 +28,6 @@ import tempfile
 import subprocess
 import uvicorn
 from shutil import which
-from gluesync_scheduler.config.settings import settings
 
 # Extract certificates from PKCS12 file if available
 def extract_from_pkcs12():
@@ -39,9 +38,10 @@ def extract_from_pkcs12():
     key_password = os.getenv('SSL_KEY_PASSWORD')
     
     # Check security config if environment variables not set
-    if not p12_path and os.path.exists(settings.GLUESYNC_SECURITY_CONFIG):
+    gluesync_security_config = os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')
+    if not p12_path and os.path.exists(gluesync_security_config):
         try:
-            with open(settings.GLUESYNC_SECURITY_CONFIG, 'r') as config_file:
+            with open(gluesync_security_config, 'r') as config_file:
                 security_config = json.load(config_file)
                 if 'ssl' in security_config:
                     ssl_settings = security_config['ssl']
@@ -137,52 +137,59 @@ def main():
             os.environ['SSL_KEY_FILE'] = key_file
         else:
             # Fall back to HTTP if no certificates available
-            settings.SSL_ENABLED = False
+            os.environ['SSL_ENABLED'] = 'False'
     
-    if settings.SSL_ENABLED and cert_file and key_file and os.path.exists(cert_file) and os.path.exists(key_file):
+    ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+    if ssl_enabled and cert_file and key_file and os.path.exists(cert_file) and os.path.exists(key_file):
         # Check if certificate files exist and are readable
         cert_valid = os.path.isfile(cert_file) and os.access(cert_file, os.R_OK)
         key_valid = os.path.isfile(key_file) and os.access(key_file, os.R_OK)
         
         if not cert_valid:
             print(f"Certificate file not accessible: {cert_file}")
-            settings.SSL_ENABLED = False
+            os.environ['SSL_ENABLED'] = 'False'
             print("SSL not available - falling back to HTTP mode")
         elif not key_valid:
             print(f"Key file not accessible: {key_file}")
-            settings.SSL_ENABLED = False
+            os.environ['SSL_ENABLED'] = 'False'
             print("SSL not available - falling back to HTTP mode")
         else:
             # Run with SSL
             print(f"Starting with SSL using cert: {cert_file} and key: {key_file}")
             try:
+                host = os.getenv('HOST', '0.0.0.0')
+                port = int(os.getenv('PORT', '8000'))
+                debug_enabled = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
                 uvicorn.run(
                     "gluesync_scheduler.core.app:app", 
-                    host=settings.HOST, 
-                    port=settings.PORT,
+                    host=host, 
+                    port=port,
                     ssl_keyfile=key_file,
                     ssl_certfile=cert_file,
-                    log_level="debug" if settings.DEBUG else "info"
+                    log_level="debug" if debug_enabled else "info"
                 )
                 # If we get here, it's because Uvicorn exited normally
                 sys.exit(0)
             except Exception as e:
                 print(f"Error starting HTTPS server: {e}")
-                settings.SSL_ENABLED = False
+                os.environ['SSL_ENABLED'] = 'False'
                 print("SSL not available - falling back to HTTP mode")
     else:
         # Fall back to HTTP if certificate files are missing
-        if settings.SSL_ENABLED:
+        if ssl_enabled:
             print("Warning: SSL_ENABLED is True but certificate files not found. Falling back to HTTP.")
             # Set SSL_ENABLED to False in settings to ensure consistency
-            settings.SSL_ENABLED = False
+            os.environ['SSL_ENABLED'] = 'False'
         
-        print(f"Starting HTTP server at http://{settings.HOST}:{settings.PORT}")
+        host = os.getenv('HOST', '0.0.0.0')
+        port = int(os.getenv('PORT', '8000'))
+        debug_enabled = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
+        print(f"Starting HTTP server at http://{host}:{port}")
         uvicorn.run(
             "gluesync_scheduler.core.app:app", 
-            host=settings.HOST, 
-            port=settings.PORT,
-            log_level="debug" if settings.DEBUG else "info"
+            host=host, 
+            port=port,
+            log_level="debug" if debug_enabled else "info"
         )
 
 if __name__ == "__main__":
