@@ -120,6 +120,10 @@ class CoreHubClient:
         # Priority 1: Use the URL from settings
         if settings.GLUESYNC_HOST:
             self.base_url = settings.GLUESYNC_HOST
+            # Ensure the URL has the correct protocol based on SSL settings
+            if not self.base_url.startswith(('http://', 'https://')):
+                protocol = 'https' if settings.SSL_ENABLED else 'http'
+                self.base_url = f"{protocol}://{self.base_url}"
             # Store in class variable for future use
             CoreHubClient._discovered_url = self.base_url
             logger.info(f"Using CoreHub URL from settings: {self.base_url}")
@@ -135,6 +139,10 @@ class CoreHubClient:
         try:
             if gluesync_sdk_client and gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
                 self.base_url = gluesync_sdk_client.corehub_url
+                # Ensure the URL has the correct protocol based on SSL settings
+                if not self.base_url.startswith(('http://', 'https://')):
+                    protocol = 'https' if settings.SSL_ENABLED else 'http'
+                    self.base_url = f"{protocol}://{self.base_url}"
                 CoreHubClient._discovered_url = self.base_url
                 logger.info(f"Using CoreHub URL from SDK client: {self.base_url}")
                 return
@@ -148,6 +156,10 @@ class CoreHubClient:
         self.base_url = default_url
         CoreHubClient._discovered_url = self.base_url
         logger.info(f"Using default CoreHub URL: {self.base_url}")
+        
+        # Log SSL settings for debugging
+        logger.info(f"SSL is {'enabled' if settings.SSL_ENABLED else 'disabled'}")
+        logger.info(f"SSL_SKIP_VERIFY: {settings.SSL_SKIP_VERIFY}")
     
     def _initialize_token(self):
         """Initialize the token for API authentication"""

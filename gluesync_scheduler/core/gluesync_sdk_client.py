@@ -193,13 +193,17 @@ class GluesyncSDKClient:
             if settings.GLUESYNC_SECURITY_CONFIG and os.path.exists(settings.GLUESYNC_SECURITY_CONFIG):
                 logger.info(f"Security config found at {settings.GLUESYNC_SECURITY_CONFIG} but SSL is disabled - ignoring security config")
             
+        # Determine the protocol based on use_ssl
+        protocol = 'https' if use_ssl else 'http'
+        
         # Log final configuration before creating client
         logger.info(f"Creating GluesyncClient with:")
         logger.info(f"  - host: {host}")
         logger.info(f"  - port: {port if port is not None else 1717}")
+        logger.info(f"  - protocol: {protocol}")
         logger.info(f"  - use_ssl: {use_ssl}")
-        logger.info(f"  - security_config: {security_config}")
         logger.info(f"  - verify_ssl: {not settings.SSL_SKIP_VERIFY}")
+        logger.info(f"  - security_config: {security_config}")
         logger.info(f"  - module_tag: {settings.GLUESYNC_MODULE_TAG}")
         
         # Create the client
@@ -210,7 +214,9 @@ class GluesyncSDKClient:
             module_tag=settings.GLUESYNC_MODULE_TAG,
             use_ssl=use_ssl,
             security_config=security_config,
-            verify_ssl=not settings.SSL_SKIP_VERIFY,  # This setting is now properly defined
+            verify_ssl=not settings.SSL_SKIP_VERIFY,
+            base_url=f"{protocol}://{host}:{port}" if host and port else None,
+            license_file=license_file_path if os.path.exists(license_file_path) else None,
         )
         
         # Set up event handlers
@@ -228,7 +234,7 @@ class GluesyncSDKClient:
         while True:  # Retry indefinitely
             try:
                 if host and port:
-                    logger.info(f"Connecting to CoreHub at {self._build_corehub_url(host, port, use_ssl)}...")
+                    logger.info(f"Connecting to CoreHub at {protocol}://{host}:{port}...")
                     await self._client.connect()
                     break  # Connection successful
                 else:
