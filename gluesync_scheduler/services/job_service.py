@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any, Union
 
 # Validate the configured timezone
-configured_timezone = os.getenv('TIMEZONE', 'Europe/Rome')
+configured_timezone = os.getenv('TIMEZONE', 'UTC')
 try:
     pytz.timezone(configured_timezone)
     logger = logging.getLogger(__name__)

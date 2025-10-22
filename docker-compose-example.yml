@@ -26,5 +26,5 @@ services:
       - GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat
       - SSL_ENABLED=False
       - GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
-      - TIMEZONE=Europe/Rome
+      - TIMEZONE=UTC
       - FIRE_ONCE=False

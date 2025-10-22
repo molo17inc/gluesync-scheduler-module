@@ -208,7 +208,7 @@ class SettingsService:
             return timezone_setting.value
         
         # Fall back to global settings (from environment)
-        return os.getenv('TIMEZONE', 'Europe/Rome')
+        return os.getenv('TIMEZONE', 'UTC')
     
     def initialize_default_settings(self) -> Dict[str, str]:
         """
@@ -222,7 +222,7 @@ class SettingsService:
         # Define default settings
         defaults = {
             "timezone": {
-                "value": os.getenv('TIMEZONE', 'Europe/Rome'),
+                "value": os.getenv('TIMEZONE', 'UTC'),
                 "description": "Timezone used for scheduling jobs"
             }
         }

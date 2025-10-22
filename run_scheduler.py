@@ -63,10 +63,88 @@ def extract_from_pkcs12():
     
     # Extract PEM certificate and key from PKCS12 file
     try:
-        # Check if openssl is available
-        if which("openssl") is None:
-            print("OpenSSL command not found. Make sure openssl is installed.")
-            return None, None
+        # Check if openssl is available - try multiple methods
+        openssl_path = None
+        
+        # Method 1: Use which() function
+        if which("openssl"):
+            openssl_path = which("openssl")
+            print(f"Found OpenSSL via which(): {openssl_path}")
+        
+        # Method 2: Check common Windows paths
+        if not openssl_path:
+            common_paths = [
+                r"C:\Program Files\OpenSSL\bin\openssl.exe",
+                r"C:\Program Files (x86)\OpenSSL\bin\openssl.exe",
+                r"C:\Chocolatey\bin\openssl.exe",
+                r"C:\tools\openssl\bin\openssl.exe"
+            ]
+            for path in common_paths:
+                if os.path.exists(path):
+                    openssl_path = path
+                    print(f"Found OpenSSL at: {openssl_path}")
+                    break
+        
+        # Method 3: Check PATH environment variable
+        if not openssl_path:
+            import shutil
+            openssl_path = shutil.which("openssl")
+            if openssl_path:
+                print(f"Found OpenSSL via shutil.which(): {openssl_path}")
+        
+        if not openssl_path:
+            print("OpenSSL command not found in any expected location.")
+            print("Attempting to use Python's built-in SSL libraries instead...")
+            
+            # Try using Python's cryptography library instead
+            try:
+                from cryptography.hazmat.primitives import serialization
+                from cryptography.hazmat.primitives.serialization.pkcs12 import load_key_and_certificates
+                
+                print("Using Python cryptography library for PKCS12 extraction...")
+                
+                # Read the PKCS12 file
+                with open(p12_path, 'rb') as f:
+                    pkcs12_data = f.read()
+                
+                # Load the key and certificates
+                private_key, certificate, additional_certificates = load_key_and_certificates(
+                    pkcs12_data, 
+                    cert_password.encode() if cert_password else None
+                )
+                
+                if not private_key or not certificate:
+                    print("Failed to extract private key or certificate from PKCS12")
+                    return None, None
+                
+                # Convert to PEM format
+                cert_pem = certificate.public_bytes(serialization.Encoding.PEM).decode()
+                key_pem = private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                ).decode()
+                
+                # Create temporary directory for extraction
+                temp_dir = tempfile.mkdtemp()
+                temp_cert = os.path.join(temp_dir, "cert.pem")
+                temp_key = os.path.join(temp_dir, "key.pem")
+                
+                # Write PEM files
+                with open(temp_cert, 'w') as f:
+                    f.write(cert_pem)
+                with open(temp_key, 'w') as f:
+                    f.write(key_pem)
+                
+                print(f"Successfully extracted certificate and key from PKCS12 file using Python cryptography: {p12_path}")
+                return temp_cert, temp_key
+                
+            except ImportError:
+                print("Python cryptography library not available for PKCS12 extraction.")
+                return None, None
+            except Exception as crypto_error:
+                print(f"Failed to extract using Python cryptography: {crypto_error}")
+                return None, None
         
         # Create temporary directory for extraction
         temp_dir = tempfile.mkdtemp()
@@ -75,7 +153,7 @@ def extract_from_pkcs12():
         
         # Extract certificate
         cert_cmd = [
-            "openssl", "pkcs12", 
+            openssl_path, "pkcs12", 
             "-in", p12_path, 
             "-passin", f"pass:{cert_password}",
             "-nokeys", "-out", temp_cert
@@ -91,7 +169,7 @@ def extract_from_pkcs12():
         
         # Extract key without encryption (nodes = no DES encryption)
         key_cmd = [
-            "openssl", "pkcs12", 
+            openssl_path, "pkcs12", 
             "-in", p12_path, 
             "-passin", f"pass:{cert_password}",
             "-nocerts", "-out", temp_key,

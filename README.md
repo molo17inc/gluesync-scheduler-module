@@ -154,7 +154,7 @@ Configure the application using environment variables:
 | `ENTITY_START_TIMEOUT` | Timeout in seconds for entity start operations | `2` |
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
-| `TIMEZONE` | Default timezone for job scheduling (can be overridden via settings API) | `Europe/Rome` |
+| `TIMEZONE` | Default timezone for job scheduling (can be overridden via settings API) | `UTC` |
 
 ### Gluesync SDK Configuration
 

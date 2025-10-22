@@ -77,7 +77,7 @@ async def get_settings(
         {
           "id": 1,
           "key": "timezone",
-          "value": "Europe/Rome",
+          "value": "UTC",
           "description": "Timezone used for scheduling jobs",
           "created_at": "2025-05-09T10:00:00Z",
           "updated_at": "2025-05-09T10:00:00Z"
@@ -110,7 +110,7 @@ async def get_setting(key: str = Path(..., description="The key of the setting t
     {
       "id": 1,
       "key": "timezone",
-      "value": "Europe/Rome",
+      "value": "UTC",
       "description": "Timezone used for scheduling jobs",
       "created_at": "2025-05-09T10:00:00Z",
       "updated_at": "2025-05-09T10:00:00Z"

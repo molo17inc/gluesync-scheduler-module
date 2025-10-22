@@ -18,6 +18,9 @@ RUN choco upgrade chocolatey -y ; `
   choco install openssl.light -y ; `
   choco cache remove -y -f
 
+# Add OpenSSL to PATH if not already there
+RUN setx /M PATH "%PATH%;C:\Program Files\OpenSSL\bin;C:\Program Files (x86)\OpenSSL\bin;C:\Chocolatey\bin"
+
 # Restore the default Windows shell for correct batch processing.
 SHELL ["cmd", "/S", "/C"]
 
@@ -78,7 +81,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   LOG_DIR=C:\app\logs `
   CRON_LOG_DIR=C:\app\logs `
   DATA_DIR=C:\app\data `
-  SSL_ENABLED=false `
+  SSL_ENABLED=true `
   SSL_SKIP_VERIFY=true `
   TEMP=C:\temp `
   TMP=C:\temp `

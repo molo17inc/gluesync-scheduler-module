@@ -33,7 +33,6 @@ from apscheduler.jobstores.memory import MemoryJobStore
 from croniter import croniter
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.models.models import ScheduledJob
 
 logger = logging.getLogger(__name__)
@@ -57,7 +56,8 @@ class SchedulerService:
         
         try:
             # Create log directory if it doesn't exist
-            os.makedirs(settings.CRON_LOG_DIR, exist_ok=True)
+            cron_log_dir = os.getenv('CRON_LOG_DIR', './logs')
+            os.makedirs(cron_log_dir, exist_ok=True)
             
             # Initialize the scheduler
             self.scheduler = AsyncIOScheduler(
@@ -69,7 +69,7 @@ class SchedulerService:
                     'max_instances': 1,
                     'misfire_grace_time': 3600,
                 },
-                timezone=settings.TIMEZONE
+                timezone=os.getenv('TIMEZONE', 'UTC')
             )
             
             # Start the scheduler
@@ -106,9 +106,9 @@ class SchedulerService:
             
             # Create the job in the scheduler
             job_id = f"job_{job.id}"
-            
+
             # Get the job's timezone or fall back to the global timezone setting
-            job_timezone = job.timezone_name if hasattr(job, 'timezone_name') and job.timezone_name else settings.TIMEZONE
+            job_timezone = job.timezone_name if hasattr(job, 'timezone_name') and job.timezone_name else os.getenv('TIMEZONE', 'UTC')
             logger.info(f"Using timezone {job_timezone} for job {job_id}")
             
             # Map from day numbers (0-6) to day names for validation/logging
@@ -295,8 +295,9 @@ class SchedulerService:
             job_name: The name of the job (for logging)
         """
         try:
-            log_file = os.path.join(settings.CRON_LOG_DIR, f"job_{job_id}.log")
-            error_file = os.path.join(settings.CRON_LOG_DIR, f"job_{job_id}.error.log")
+            cron_log_dir = os.getenv('CRON_LOG_DIR', './logs')
+            log_file = os.path.join(cron_log_dir, f"job_{job_id}.log")
+            error_file = os.path.join(cron_log_dir, f"job_{job_id}.error.log")
             
             # Log the job execution
             with open(log_file, 'a') as f:
@@ -342,7 +343,8 @@ class SchedulerService:
                     logger.info(f"Successfully executed job {job_id}: {message}")
                     
                     # If FIRE_ONCE is enabled, disable the job after successful execution
-                    if settings.FIRE_ONCE:
+                    fire_once = os.getenv('FIRE_ONCE', 'False').lower() in ('true', '1', 't')
+                    if fire_once:
                         logger.info(f"FIRE_ONCE is enabled. Disabling job {job_id} after first execution")
                         
                         # Get the job from database
