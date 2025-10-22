@@ -93,15 +93,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ENTITY_START_TIMEOUT=2 \
     HOST=0.0.0.0 \
     PORT=1717 \
-    DEBUG=False \
+    DEBUG=false \
     LOG_LEVEL=INFO \
     DATA_DIR=/app/data \
     ALLOWED_ORIGINS=* \
     CRONTAB_USER=root \
-    SSL_ENABLED=False \
-    SSL_SKIP_VERIFY=True \
+    SSL_ENABLED=false \
+    SSL_SKIP_VERIFY=true \
     TIMEZONE=UTC \
-    FIRE_ONCE=False
+    FIRE_ONCE=false
 
 # (combined into single apt install above)
 

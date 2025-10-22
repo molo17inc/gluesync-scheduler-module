@@ -68,15 +68,30 @@ class Settings:
     # Debug logging for timezone settings
     def __init__(self):
         # Log all environment variables
-        logger.info("Environment variables related to timezone:")
-        for k, v in os.environ.items():
-            if 'TIME' in k.upper() or 'TZ' in k.upper():
-                logger.info(f"  {k}={v}")
         logger.info(f"Configured TIMEZONE: {self.TIMEZONE}")
+        logger.info(f"SSL_ENABLED: {self.SSL_ENABLED} (type: {type(self.SSL_ENABLED)})")
+        logger.info(f"SSL_SKIP_VERIFY: {self.SSL_SKIP_VERIFY} (type: {type(self.SSL_SKIP_VERIFY)})")
+        logger.info(f"GLUESYNC_SECURITY_CONFIG: {self.GLUESYNC_SECURITY_CONFIG}")
+        logger.info(f"GLUESYNC_LICENSE_FILE: {self.GLUESYNC_LICENSE_FILE}")
     
     # SSL settings
-    SSL_ENABLED = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
-    SSL_SKIP_VERIFY = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
+    def _get_bool_env(var_name: str, default: bool = False) -> bool:
+        """Helper function to get boolean from environment variables with case-insensitive comparison.
+        
+        Args:
+            var_name: Name of the environment variable
+            default: Default value if variable is not set
+            
+        Returns:
+            bool: The boolean value of the environment variable
+        """
+        val = os.getenv(var_name, '').strip().lower()
+        if not val:
+            return default
+        return val in ('true', '1', 't', 'yes', 'y')
+    
+    SSL_ENABLED = _get_bool_env('SSL_ENABLED', False)
+    SSL_SKIP_VERIFY = _get_bool_env('SSL_SKIP_VERIFY', False)
     
     # Gluesync SDK settings
     GLUESYNC_LICENSE_FILE = os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')
@@ -96,7 +111,6 @@ class Settings:
     # Job execution settings
     # When FIRE_ONCE is True, jobs will be disabled after their first execution
     FIRE_ONCE = os.getenv('FIRE_ONCE', 'False').lower() in ('true', '1', 't')
-
 
 settings = Settings()
 
