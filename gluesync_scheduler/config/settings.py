@@ -75,6 +75,7 @@ class Settings:
         logger.info(f"GLUESYNC_LICENSE_FILE: {self.GLUESYNC_LICENSE_FILE}")
     
     # SSL settings
+    @staticmethod
     def _get_bool_env(var_name: str, default: bool = False) -> bool:
         """Helper function to get boolean from environment variables with case-insensitive comparison.
         
