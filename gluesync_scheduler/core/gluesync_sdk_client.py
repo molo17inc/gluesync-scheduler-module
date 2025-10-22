@@ -206,18 +206,30 @@ class GluesyncSDKClient:
         logger.info(f"  - security_config: {security_config}")
         logger.info(f"  - module_tag: {settings.GLUESYNC_MODULE_TAG}")
         
+        # Prepare the client arguments
+        client_args = {
+            'host': host,  # None will trigger UDP discovery
+            'port': port if port is not None else 1717,  # Default port 1717 if None
+            'license_file_path': license_file_path,
+            'module_tag': settings.GLUESYNC_MODULE_TAG,
+            'use_ssl': use_ssl,
+            'security_config': security_config,
+            'verify_ssl': not settings.SSL_SKIP_VERIFY,
+            # Add other default parameters as needed
+            'ping_interval': 5.0,
+            'timeout': 10.0,
+            'discovery_start_port': 1717,
+            'discovery_port_range': 10
+        }
+        
+        # Log the arguments (without sensitive data)
+        safe_args = client_args.copy()
+        if 'security_config' in safe_args and safe_args['security_config']:
+            safe_args['security_config'] = '[REDACTED]'
+        logger.info(f"Initializing GluesyncClient with args: {safe_args}")
+        
         # Create the client
-        self._client = GluesyncClient(
-            host=host,  # None will trigger UDP discovery
-            port=port if port is not None else 1717,  # Use default port 1717 if None
-            license_file_path=license_file_path,
-            module_tag=settings.GLUESYNC_MODULE_TAG,
-            use_ssl=use_ssl,
-            security_config=security_config,
-            verify_ssl=not settings.SSL_SKIP_VERIFY,
-            base_url=f"{protocol}://{host}:{port}" if host and port else None,
-            license_file=license_file_path if os.path.exists(license_file_path) else None,
-        )
+        self._client = GluesyncClient(**client_args)
         
         # Set up event handlers
         self._client.on_connected = self._on_connected
