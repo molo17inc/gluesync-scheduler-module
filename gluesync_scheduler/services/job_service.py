@@ -309,14 +309,15 @@ class JobService:
                 try:
                     from croniter import croniter
                     # Validate and get the configured timezone
+                    current_timezone = configured_timezone  # Use the global value
                     try:
-                        tz = pytz.timezone(configured_timezone)
-                        logger.info(f"Using timezone for calculation: {configured_timezone}")
+                        tz = pytz.timezone(current_timezone)
+                        logger.info(f"Using timezone for calculation: {current_timezone}")
                     except Exception as e:
-                        logger.error(f"Invalid timezone: {configured_timezone}. Error: {str(e)}")
+                        logger.error(f"Invalid timezone: {current_timezone}. Error: {str(e)}")
                         logger.warning("Falling back to UTC timezone")
+                        current_timezone = 'UTC'  # Update local copy
                         tz = pytz.UTC
-                        configured_timezone = 'UTC'
                     
                     now = datetime.now(tz)
                     
@@ -334,7 +335,7 @@ class JobService:
                     # Format the start_time in the required format with explicit timezone info
                     next_run_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
                     # Store the timezone name as well for reference
-                    next_run_tz = configured_timezone
+                    next_run_tz = current_timezone
                     logger.info(f"Calculated next run time: {next_run_time} in timezone {next_run_tz}")
                 except Exception as e:
                     logger.error(f"Error calculating next run time: {e}")
@@ -596,14 +597,15 @@ class JobService:
                 try:
                     from croniter import croniter
                     # Validate and get the configured timezone
+                    current_timezone = configured_timezone  # Use the global value
                     try:
-                        tz = pytz.timezone(configured_timezone)
-                        logger.info(f"Using timezone for calculation: {configured_timezone}")
+                        tz = pytz.timezone(current_timezone)
+                        logger.info(f"Using timezone for calculation: {current_timezone}")
                     except Exception as e:
-                        logger.error(f"Invalid timezone: {configured_timezone}. Error: {str(e)}")
+                        logger.error(f"Invalid timezone: {current_timezone}. Error: {str(e)}")
                         logger.warning("Falling back to UTC timezone")
+                        current_timezone = 'UTC'  # Update local copy
                         tz = pytz.UTC
-                        configured_timezone = 'UTC'
                     
                     now = datetime.now(tz)
                     
@@ -651,7 +653,7 @@ class JobService:
                     # Format the start_time in the required format with explicit timezone info
                     db_job.start_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
                     # Store the timezone name as well
-                    db_job.timezone_name = configured_timezone
+                    db_job.timezone_name = current_timezone
                     logger.info(f"Recalculated next run time for job {job_id}: {db_job.start_time} in timezone {db_job.timezone_name}")
                 except Exception as e:
                     logger.error(f"Error recalculating next run time: {e}")
