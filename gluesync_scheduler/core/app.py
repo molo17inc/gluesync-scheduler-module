@@ -278,15 +278,9 @@ async def startup_event():
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables verified/created successfully")
         
-        # Run any pending migrations
-        try:
-            from gluesync_scheduler.db.migrate import run_migrations
-            logger.info("Checking for pending migrations...")
-            run_migrations()
-            logger.info("Database migrations completed successfully")
-        except Exception as mig_error:
-            logger.warning(f"Skipping migrations (may not be critical): {mig_error}")
-            
+        # Run any pending migrations automatically during app startup
+        from gluesync_scheduler.db.migrate import run_migrations
+        run_migrations()
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
         # Continue startup even if there's an error, as the schema might be partially functional
