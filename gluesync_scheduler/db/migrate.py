@@ -8,8 +8,9 @@ to run all pending database migrations.
 
 import logging
 import os
-import subprocess
 import sys
+import importlib.util
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,8 @@ def run_migrations():
     """
     Run all pending database migrations in the correct order.
 
-    This function executes the migration scripts in sequence to ensure
-    the database schema is up to date.
+    This function executes the migration functions directly (not as subprocess)
+    to ensure the database schema is up to date.
     """
     try:
         # Get the project root directory - find it by looking for pyproject.toml
@@ -53,43 +54,58 @@ def run_migrations():
 
         logger.info("Starting database migrations...")
 
-        # Define the migration scripts in the order they should be run
-        migration_scripts = [
-            "migrate_add_settings_table.py",
-            "migrate_add_snapshot_write_method.py",
-            "migrate_add_is_cron_expression.py",
-            "migrate_add_group_ids_field.py"
+        # Define the migration functions in the order they should be run
+        migration_functions = [
+            ("migrate_add_settings_table", "create_settings_table"),
+            ("migrate_add_snapshot_write_method", "add_snapshot_write_method_column"),
+            ("migrate_add_is_cron_expression", "add_is_cron_expression_column"),
+            ("migrate_add_group_ids_field", "migrate_add_group_ids_field")
         ]
 
-        # Run each migration script
-        for script_name in migration_scripts:
-            script_path = os.path.join(migrations_dir, script_name)
+        # Import the database engine from the main app
+        try:
+            sys.path.insert(0, os.path.join(project_root, "gluesync_scheduler"))
+            from gluesync_scheduler.db.database import engine
+            logger.info("Database engine imported successfully")
+        except ImportError as e:
+            logger.error(f"Failed to import database engine: {e}")
+            return
+
+        # Run each migration function
+        for module_name, function_name in migration_functions:
+            script_path = os.path.join(migrations_dir, f"{module_name}.py")
 
             if not os.path.exists(script_path):
-                logger.warning(f"Migration script not found: {script_name}")
+                logger.warning(f"Migration script not found: {module_name}.py")
                 continue
 
-            logger.info(f"Running migration: {script_name}")
+            logger.info(f"Running migration: {module_name}")
 
             try:
-                # Run the migration script as a subprocess
-                result = subprocess.run([
-                    sys.executable, script_path
-                ], capture_output=True, text=True, cwd=project_root)
+                # Load the migration module directly
+                spec = importlib.util.spec_from_file_location(module_name, script_path)
+                if spec is None or spec.loader is None:
+                    logger.error(f"Could not load migration module: {module_name}")
+                    continue
 
-                if result.returncode == 0:
-                    logger.info(f"Migration {script_name} completed successfully")
-                    if result.stdout:
-                        logger.debug(f"Migration output: {result.stdout}")
-                else:
-                    logger.error(f"Migration {script_name} failed with return code {result.returncode}")
-                    if result.stderr:
-                        logger.error(f"Migration error: {result.stderr}")
-                    # Continue with other migrations even if one fails
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+
+                # Get the migration function
+                if not hasattr(module, function_name):
+                    logger.error(f"Migration function {function_name} not found in {module_name}")
+                    continue
+
+                migration_func = getattr(module, function_name)
+
+                # Call the migration function with the engine
+                migration_func(engine)
+
+                logger.info(f"Migration {module_name} completed successfully")
 
             except Exception as e:
-                logger.error(f"Error running migration {script_name}: {e}")
-                # Continue with other migrations
+                logger.error(f"Error running migration {module_name}: {e}")
+                # Continue with other migrations even if one fails
 
         logger.info("Database migrations completed")
 

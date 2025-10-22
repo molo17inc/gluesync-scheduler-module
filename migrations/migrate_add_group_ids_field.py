@@ -4,46 +4,65 @@ Database migration to add group_ids field to scheduled_jobs table
 for supporting group-level scheduling functionality.
 """
 
-import sqlite3
-import sys
 import os
+import sys
+from pathlib import Path
 
-def migrate_add_group_ids_field(db_path):
+def migrate_add_group_ids_field(engine):
     """
     Add group_ids field to the scheduled_jobs table to support group-level scheduling.
     
     Args:
-        db_path (str): Path to the SQLite database file
+        engine: SQLAlchemy database engine
     """
     try:
-        # Connect to the database
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
+        from sqlalchemy import MetaData, Table, Column, String, text
         
-        # Check if the group_ids column already exists
-        cursor.execute("PRAGMA table_info(scheduled_jobs)")
-        columns = [column[1] for column in cursor.fetchall()]
+        # Create metadata and reflect existing schema
+        metadata = MetaData()
+        metadata.reflect(bind=engine)
         
-        if 'group_ids' not in columns:
+        # Check if the scheduled_jobs table exists
+        if 'scheduled_jobs' not in metadata.tables:
+            print("scheduled_jobs table does not exist, skipping migration")
+            return False
+        
+        scheduled_jobs_table = metadata.tables['scheduled_jobs']
+        existing_columns = [col.name for col in scheduled_jobs_table.columns]
+        
+        if 'group_ids' not in existing_columns:
             print("Adding group_ids column to scheduled_jobs table...")
             
-            # Add the group_ids column
-            cursor.execute("""
-                ALTER TABLE scheduled_jobs 
-                ADD COLUMN group_ids TEXT
-            """)
-            
-            conn.commit()
-            print("Successfully added group_ids column to scheduled_jobs table.")
+            try:
+                # Use SQLAlchemy DDL approach for adding columns
+                from sqlalchemy.sql.ddl import DDL
+                with engine.connect() as connection:
+                    # Create DDL statement for adding the column
+                    add_column_ddl = DDL("ALTER TABLE scheduled_jobs ADD COLUMN group_ids TEXT")
+                    connection.execute(add_column_ddl)
+                    connection.commit()
+                    
+                    print("Successfully added group_ids column to scheduled_jobs table.")
+            except Exception as ddl_error:
+                print(f"DDL approach failed: {ddl_error}")
+                # Fallback to raw SQL execution
+                try:
+                    with engine.connect() as connection:
+                        connection.execute(text("ALTER TABLE scheduled_jobs ADD COLUMN group_ids TEXT"))
+                        connection.commit()
+                        print("Successfully added group_ids column using raw SQL.")
+                except Exception as raw_error:
+                    print(f"Raw SQL approach also failed: {raw_error}")
+                    raise
         else:
             print("group_ids column already exists in scheduled_jobs table.")
         
-        conn.close()
         return True
         
     except Exception as e:
         print(f"Error during migration: {str(e)}")
         return False
+
 
 def main():
     """Main function to run the migration"""
@@ -70,7 +89,11 @@ def main():
         print(f"Database file does not exist: {db_path}")
         sys.exit(1)
     
-    success = migrate_add_group_ids_field(db_path)
+    # Import SQLAlchemy and create engine
+    from sqlalchemy import create_engine
+    engine = create_engine(db_url)
+    
+    success = migrate_add_group_ids_field(engine)
     
     if success:
         print("Migration completed successfully!")
@@ -78,6 +101,7 @@ def main():
     else:
         print("Migration failed!")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
