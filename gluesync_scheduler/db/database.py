@@ -27,15 +27,13 @@ from pathlib import Path
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from gluesync_scheduler.config.settings import settings
-
-def ensure_sqlite_db_path():
+def ensure_sqlite_db_path(db_url):
     """Ensure the SQLite database directory exists and return the path."""
-    if not settings.DB_URL.startswith('sqlite:'):
+    if not db_url.startswith('sqlite:'):
         return
         
     # Extract the database path
-    db_path = settings.DB_URL.replace('sqlite:///', '')
+    db_path = db_url.replace('sqlite:///', '')
     
     # Handle Windows paths (C:/path/db.sqlite)
     if ':' in db_path and len(db_path) > 2 and db_path[1] == ':':
@@ -54,11 +52,18 @@ def ensure_sqlite_db_path():
     
     return str(db_path)
 
+# Get database URL from environment
+db_url = os.getenv('DB_URL')
+if not db_url:
+    # Convert relative path to absolute path for consistency
+    abs_data_dir = os.path.abspath(os.getenv('DATA_DIR', './data'))
+    db_url = f'sqlite:///{abs_data_dir}/scheduler.db'
+
 # Ensure SQLite database directory exists
-db_path = ensure_sqlite_db_path() if settings.DB_URL.startswith('sqlite:') else None
+db_path = ensure_sqlite_db_path(db_url) if db_url.startswith('sqlite:') else None
 
 # Create SQLAlchemy engine with appropriate connection args
-if settings.DB_URL.startswith('sqlite:'):
+if db_url.startswith('sqlite:'):
     # Use URI format that works on both Windows and Unix
     db_uri = f'sqlite:///{db_path}'
     engine = create_engine(
@@ -75,7 +80,7 @@ if settings.DB_URL.startswith('sqlite:'):
         cursor.close()
 else:
     # For other database types
-    engine = create_engine(settings.DB_URL, pool_pre_ping=True)
+    engine = create_engine(db_url, pool_pre_ping=True)
 
 # Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

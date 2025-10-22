@@ -29,28 +29,34 @@ from gluesync_scheduler.core.app import app
 if __name__ == "__main__":
     # Import and run the app from the reorganized package
     import uvicorn
-    from gluesync_scheduler.config.settings import settings
+    import os
     
     # Check if SSL is enabled
-    if settings.SSL_ENABLED:
-        import os
+    ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+    if ssl_enabled:
         # Get SSL certificate paths from environment
         cert_file = os.getenv('SSL_CERT_FILE')
         key_file = os.getenv('SSL_KEY_FILE')
         
         if cert_file and key_file and os.path.exists(cert_file) and os.path.exists(key_file):
             # Run with SSL
+            host = os.getenv('HOST', '0.0.0.0')
+            port = int(os.getenv('PORT', '8000'))
             uvicorn.run(
                 "gluesync_scheduler.core.app:app", 
-                host=settings.HOST, 
-                port=settings.PORT,
+                host=host, 
+                port=port,
                 ssl_keyfile=key_file,
                 ssl_certfile=cert_file
             )
         else:
             # Fall back to HTTP if certificate files are missing
             print("Warning: SSL_ENABLED is True but certificate files not found. Falling back to HTTP.")
-            uvicorn.run("gluesync_scheduler.core.app:app", host=settings.HOST, port=settings.PORT)
+            host = os.getenv('HOST', '0.0.0.0')
+            port = int(os.getenv('PORT', '8000'))
+            uvicorn.run("gluesync_scheduler.core.app:app", host=host, port=port)
     else:
         # Run without SSL
-        uvicorn.run("gluesync_scheduler.core.app:app", host=settings.HOST, port=settings.PORT)
+        host = os.getenv('HOST', '0.0.0.0')
+        port = int(os.getenv('PORT', '8000'))
+        uvicorn.run("gluesync_scheduler.core.app:app", host=host, port=port)

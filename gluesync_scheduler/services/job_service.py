@@ -30,18 +30,17 @@ import pytz
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any, Union
 
-from gluesync_scheduler.config.settings import settings
-
 # Validate the configured timezone
+configured_timezone = os.getenv('TIMEZONE', 'Europe/Rome')
 try:
-    pytz.timezone(settings.TIMEZONE)
+    pytz.timezone(configured_timezone)
     logger = logging.getLogger(__name__)
-    logger.info(f"Using timezone: {settings.TIMEZONE}")
+    logger.info(f"Using timezone: {configured_timezone}")
 except Exception as e:
     logger = logging.getLogger(__name__)
-    logger.error(f"Invalid timezone configured: {settings.TIMEZONE}. Error: {str(e)}")
+    logger.error(f"Invalid timezone configured: {configured_timezone}. Error: {str(e)}")
     logger.warning("Falling back to UTC timezone")
-    settings.TIMEZONE = 'UTC'
+    configured_timezone = 'UTC'
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, or_
@@ -311,13 +310,13 @@ class JobService:
                     from croniter import croniter
                     # Validate and get the configured timezone
                     try:
-                        tz = pytz.timezone(settings.TIMEZONE)
-                        logger.info(f"Using timezone for calculation: {settings.TIMEZONE}")
+                        tz = pytz.timezone(configured_timezone)
+                        logger.info(f"Using timezone for calculation: {configured_timezone}")
                     except Exception as e:
-                        logger.error(f"Invalid timezone: {settings.TIMEZONE}. Error: {str(e)}")
+                        logger.error(f"Invalid timezone: {configured_timezone}. Error: {str(e)}")
                         logger.warning("Falling back to UTC timezone")
                         tz = pytz.UTC
-                        settings.TIMEZONE = 'UTC'
+                        configured_timezone = 'UTC'
                     
                     now = datetime.now(tz)
                     
@@ -335,7 +334,7 @@ class JobService:
                     # Format the start_time in the required format with explicit timezone info
                     next_run_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
                     # Store the timezone name as well for reference
-                    next_run_tz = settings.TIMEZONE
+                    next_run_tz = configured_timezone
                     logger.info(f"Calculated next run time: {next_run_time} in timezone {next_run_tz}")
                 except Exception as e:
                     logger.error(f"Error calculating next run time: {e}")
@@ -372,7 +371,7 @@ class JobService:
                 # Set start_time to the calculated next run time
                 start_time=next_run_time,
                 # Always store the configured timezone name
-                timezone_name=settings.TIMEZONE,
+                timezone_name=configured_timezone,
                 # Set the flag to track if job was created with cron expression
                 is_cron_expression=is_cron_expression
             )
@@ -598,13 +597,13 @@ class JobService:
                     from croniter import croniter
                     # Validate and get the configured timezone
                     try:
-                        tz = pytz.timezone(settings.TIMEZONE)
-                        logger.info(f"Using timezone for calculation: {settings.TIMEZONE}")
+                        tz = pytz.timezone(configured_timezone)
+                        logger.info(f"Using timezone for calculation: {configured_timezone}")
                     except Exception as e:
-                        logger.error(f"Invalid timezone: {settings.TIMEZONE}. Error: {str(e)}")
+                        logger.error(f"Invalid timezone: {configured_timezone}. Error: {str(e)}")
                         logger.warning("Falling back to UTC timezone")
                         tz = pytz.UTC
-                        settings.TIMEZONE = 'UTC'
+                        configured_timezone = 'UTC'
                     
                     now = datetime.now(tz)
                     
@@ -652,7 +651,7 @@ class JobService:
                     # Format the start_time in the required format with explicit timezone info
                     db_job.start_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
                     # Store the timezone name as well
-                    db_job.timezone_name = settings.TIMEZONE
+                    db_job.timezone_name = configured_timezone
                     logger.info(f"Recalculated next run time for job {job_id}: {db_job.start_time} in timezone {db_job.timezone_name}")
                 except Exception as e:
                     logger.error(f"Error recalculating next run time: {e}")
@@ -898,11 +897,13 @@ class JobService:
             
             # Use localhost for internal API calls, not the binding address (0.0.0.0)
             # Use HTTPS protocol when SSL is enabled
-            protocol = "https" if settings.SSL_ENABLED else "http"
-            base_url = f"{protocol}://localhost:{settings.PORT}/api"
+            ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+            protocol = "https" if ssl_enabled else "http"
+            port = int(os.getenv('PORT', '8000'))
+            base_url = f"{protocol}://localhost:{port}/api"
             
             # Clean log output to remove any potential hidden characters
-            logger.info(f"Using internal API URL: {protocol}://localhost:{settings.PORT}/api (SSL: {settings.SSL_ENABLED})")
+            logger.info(f"Using internal API URL: {protocol}://localhost:{port}/api (SSL: {ssl_enabled})")
             
             # Determine the endpoint based on task type and set the HTTP method
             method = "POST"  # All our endpoints use POST method
@@ -950,7 +951,7 @@ class JobService:
             # Log the request details
             logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
             # Use a clean format to avoid any hidden characters
-            logger.info(f"Endpoint: {method} {protocol}://localhost:{settings.PORT}/api/pipelines/{job.pipeline_id}/{action}")
+            logger.info(f"Endpoint: {method} {protocol}://localhost:{port}/api/pipelines/{job.pipeline_id}/{action}")
             logger.info(f"JSON Payload: {json_data}")
             
             try:
@@ -958,7 +959,8 @@ class JobService:
                 # For HTTPS, we may need to skip verification if using self-signed certs
                 if protocol == "https":
                     # Skip verification if SSL_SKIP_VERIFY is enabled
-                    verify = not settings.SSL_SKIP_VERIFY
+                    ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
+                    verify = not ssl_skip_verify
                     logger.info(f"Using HTTPS with SSL verification: {verify}")
                 else:
                     # For HTTP, verification is not applicable
