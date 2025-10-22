@@ -92,18 +92,16 @@ class GluesyncSDKClient:
         # Get the host and port from the client
         host = self._client.host
         port = self._client.port
-        use_ssl = self._client.use_ssl
         
         # Use the helper method to build the URL
-        return self._build_corehub_url(host, port, use_ssl)
+        return self._build_corehub_url(host, port)
         
-    def _build_corehub_url(self, host, port, use_ssl=False):
+    def _build_corehub_url(self, host, port):
         """Build a proper CoreHub URL with the given host, port and SSL setting
         
         Args:
             host (str): The host name or IP address
             port (int): The port number
-            use_ssl (bool): Whether to use HTTPS or HTTP
             
         Returns:
             str: The formatted CoreHub URL
@@ -115,7 +113,7 @@ class GluesyncSDKClient:
         if port is None:
             port = 1717
             
-        scheme = "https" if use_ssl else "http"
+        scheme = "https" if settings.SSL_ENABLED else "http"
         return f"{scheme}://{host}:{port}"
     
     async def initialize(self):
@@ -134,7 +132,6 @@ class GluesyncSDKClient:
         # Parse host and port from GLUESYNC_HOST if provided
         host = None
         port = None
-        use_discovery = True
         parsed_url = None
         
         if settings.GLUESYNC_HOST:
@@ -142,7 +139,6 @@ class GluesyncSDKClient:
             parsed_url = urlparse(settings.GLUESYNC_HOST)
             host = parsed_url.hostname
             port = parsed_url.port
-            use_discovery = False
             logger.info(f"Parsed URL - scheme: {parsed_url.scheme}, host: {host}, port: {port}")
             if not port:
                 port = 1717
@@ -156,12 +152,13 @@ class GluesyncSDKClient:
             logger.warning(f"License file not found at {license_file_path}, will attempt to proceed without it")
         
         # Determine SSL settings
-        use_ssl = settings.SSL_ENABLED
-        logger.info(f"SSL is {'enabled' if use_ssl else 'disabled'} in settings")
+        ssl_env_value = os.getenv('SSL_ENABLED', 'NOT_SET')
+        logger.info(f"SSL_ENABLED environment variable: '{ssl_env_value}'")
+        logger.info(f"SSL is {'enabled' if settings.SSL_ENABLED else 'disabled'} in settings (settings.SSL_ENABLED = {settings.SSL_ENABLED})")
         
         # Security configuration
         security_config = None
-        if use_ssl:  # Only process security config if SSL is enabled
+        if settings.SSL_ENABLED:  # Only process security config if SSL is enabled
             config_path = settings.GLUESYNC_SECURITY_CONFIG
             if config_path and os.path.exists(config_path):
                 logger.info(f"Using security config from: {config_path}")
@@ -174,14 +171,14 @@ class GluesyncSDKClient:
                 logger.info(f"Security config found at {settings.GLUESYNC_SECURITY_CONFIG} but SSL is disabled - ignoring security config")
             
         # Determine the protocol based on use_ssl
-        protocol = 'https' if use_ssl else 'http'
+        protocol = 'https' if settings.SSL_ENABLED else 'http'
         
         # Log final configuration before creating client
         logger.info(f"Creating GluesyncClient with:")
         logger.info(f"  - host: {host}")
         logger.info(f"  - port: {port if port is not None else 1717}")
         logger.info(f"  - protocol: {protocol}")
-        logger.info(f"  - use_ssl: {use_ssl}")
+        logger.info(f"  - use_ssl: {settings.SSL_ENABLED}")
         logger.info(f"  - verify_ssl: {not settings.SSL_SKIP_VERIFY}")
         logger.info(f"  - security_config: {security_config}")
         logger.info(f"  - module_tag: {settings.GLUESYNC_MODULE_TAG}")
@@ -192,7 +189,7 @@ class GluesyncSDKClient:
             'port': port if port is not None else 1717,  # Default port 1717 if None
             'license_file_path': license_file_path,
             'module_tag': settings.GLUESYNC_MODULE_TAG,
-            'use_ssl': use_ssl,
+            'use_ssl': settings.SSL_ENABLED,
             'security_config': security_config,
             'verify_ssl': not settings.SSL_SKIP_VERIFY,
             # Add other default parameters as needed
@@ -245,7 +242,7 @@ class GluesyncSDKClient:
                         host = self._client.host
                         port = self._client.port
                         # Update the CoreHub URL in settings
-                        corehub_url = self._build_corehub_url(host, port, use_ssl)
+                        corehub_url = self._build_corehub_url(host, port, settings.SSL_ENABLED)
                         if corehub_url:
                             settings.update_corehub_url(corehub_url)
                             logger.info(f"Updated CoreHub URL to {corehub_url}")
@@ -257,7 +254,7 @@ class GluesyncSDKClient:
             except GluesyncConnectionError as e:
                 if host and port:
                     # If we have a specific host/port and can't connect, don't retry
-                    logger.error(f"Failed to connect to CoreHub at {self._build_corehub_url(host, port, use_ssl)}: {e}")
+                    logger.error(f"Failed to connect to CoreHub at {self._build_corehub_url(host, port, settings.SSL_ENABLED)}: {e}")
                     raise
                 else:
                     # For UDP discovery, retry with exponential backoff
