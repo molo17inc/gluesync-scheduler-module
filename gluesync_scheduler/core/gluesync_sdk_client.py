@@ -155,33 +155,13 @@ class GluesyncSDKClient:
         if not os.path.exists(license_file_path):
             logger.warning(f"License file not found at {license_file_path}, will attempt to proceed without it")
         
-        # Check if SSL is explicitly disabled in settings
-        ssl_explicitly_disabled = settings.SSL_ENABLED == False
-        
-        if ssl_explicitly_disabled:
-            # If SSL is explicitly disabled, force it off regardless of other settings
-            use_ssl = False
-            logger.info("SSL is explicitly disabled in settings")
-        else:
-            # SSL configuration - sync with web server settings
-            use_ssl = settings.SSL_ENABLED
-            logger.info(f"SSL is {'enabled' if use_ssl else 'disabled'} in settings")
-            
-            # If GLUESYNC_HOST is https://, consider using SSL
-            if settings.GLUESYNC_HOST and parsed_url and parsed_url.scheme == "https":
-                use_ssl = True
-                logger.info("Enforcing SSL because CoreHub URL uses HTTPS scheme")
-            
-            # If certificate files exist, consider using SSL
-            cert_file = os.getenv('SSL_CERT_FILE')
-            key_file = os.getenv('SSL_KEY_FILE')
-            if cert_file and os.path.exists(cert_file) and key_file and os.path.exists(key_file):
-                use_ssl = True
-                logger.info(f"Enforcing SSL because certificate files exist: {cert_file} and {key_file}")
+        # Determine SSL settings
+        use_ssl = settings.SSL_ENABLED
+        logger.info(f"SSL is {'enabled' if use_ssl else 'disabled'} in settings")
         
         # Security configuration
         security_config = None
-        if settings.SSL_ENABLED or use_ssl:  # Only process security config if SSL is enabled
+        if use_ssl:  # Only process security config if SSL is enabled
             config_path = settings.GLUESYNC_SECURITY_CONFIG
             if config_path and os.path.exists(config_path):
                 logger.info(f"Using security config from: {config_path}")
