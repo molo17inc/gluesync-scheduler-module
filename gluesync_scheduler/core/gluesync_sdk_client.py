@@ -152,8 +152,6 @@ class GluesyncSDKClient:
             logger.warning(f"License file not found at {license_file_path}, will attempt to proceed without it")
         
         # Determine SSL settings
-        logger.info(f"Settings object ID: {id(settings)}")
-        logger.info(f"SSL_ENABLED value: {settings.SSL_ENABLED}, type: {type(settings.SSL_ENABLED)}")
         logger.info(f"SSL is {'enabled' if settings.SSL_ENABLED else 'disabled'} in settings")
         
         # Security configuration
@@ -242,7 +240,7 @@ class GluesyncSDKClient:
                         host = self._client.host
                         port = self._client.port
                         # Update the CoreHub URL in settings
-                        corehub_url = self._build_corehub_url(host, port, settings.SSL_ENABLED)
+                        corehub_url = self._build_corehub_url(host, port)
                         if corehub_url:
                             settings.update_corehub_url(corehub_url)
                             logger.info(f"Updated CoreHub URL to {corehub_url}")
@@ -254,7 +252,7 @@ class GluesyncSDKClient:
             except GluesyncConnectionError as e:
                 if host and port:
                     # If we have a specific host/port and can't connect, don't retry
-                    logger.error(f"Failed to connect to CoreHub at {self._build_corehub_url(host, port, settings.SSL_ENABLED)}: {e}")
+                    logger.error(f"Failed to connect to CoreHub at {self._build_corehub_url(host, port)}: {e}")
                     raise
                 else:
                     # For UDP discovery, retry with exponential backoff

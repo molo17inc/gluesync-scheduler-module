@@ -89,14 +89,15 @@ class Settings:
             
     def __init__(self):
         # Log all environment variables
-        logger.info(f"Settings object ID: {id(self)}")
         logger.info(f"Raw SSL_ENABLED env var: '{os.getenv('SSL_ENABLED', 'NOT_SET')}'")
         logger.info(f"Raw SSL_SKIP_VERIFY env var: '{os.getenv('SSL_SKIP_VERIFY', 'NOT_SET')}'")
         logger.info(f"Configured TIMEZONE: {self.TIMEZONE}")
-        logger.info(f"SSL_ENABLED: {self.SSL_ENABLED} (type: {type(self.SSL_ENABLED)})")
-        logger.info(f"SSL_SKIP_VERIFY: {self.SSL_SKIP_VERIFY} (type: {type(self.SSL_SKIP_VERIFY)})")
+        logger.info(f"SSL_ENABLED before: {self.SSL_ENABLED} (type: {type(self.SSL_ENABLED)})")
+        logger.info(f"SSL_SKIP_VERIFY before: {self.SSL_SKIP_VERIFY} (type: {type(self.SSL_SKIP_VERIFY)})")
         logger.info(f"GLUESYNC_SECURITY_CONFIG: {self.GLUESYNC_SECURITY_CONFIG}")
         logger.info(f"GLUESYNC_LICENSE_FILE: {self.GLUESYNC_LICENSE_FILE}")
+        logger.info(f"SSL_ENABLED after: {self.SSL_ENABLED} (type: {type(self.SSL_ENABLED)})")
+        logger.info(f"SSL_SKIP_VERIFY after: {self.SSL_SKIP_VERIFY} (type: {type(self.SSL_SKIP_VERIFY)})")
 
 settings = Settings()
 
