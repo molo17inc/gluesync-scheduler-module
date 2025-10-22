@@ -23,13 +23,13 @@
 
 import logging
 import pytz
+import os
 from typing import List, Optional, Dict, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from gluesync_scheduler.models.models import Setting
 from gluesync_scheduler.models.schemas import SettingCreate, SettingUpdate
-from gluesync_scheduler.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ class SettingsService:
             return timezone_setting.value
         
         # Fall back to global settings (from environment)
-        return settings.TIMEZONE
+        return os.getenv('TIMEZONE', 'Europe/Rome')
     
     def initialize_default_settings(self) -> Dict[str, str]:
         """
@@ -222,7 +222,7 @@ class SettingsService:
         # Define default settings
         defaults = {
             "timezone": {
-                "value": settings.TIMEZONE,
+                "value": os.getenv('TIMEZONE', 'Europe/Rome'),
                 "description": "Timezone used for scheduling jobs"
             }
         }

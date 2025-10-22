@@ -41,7 +41,6 @@ from typing import Any, Dict, List, Set
 from gluesync_scheduler.api.router import router
 from gluesync_scheduler.api.pipeline_router import router as pipeline_router
 from gluesync_scheduler.api.settings_router import router as settings_router
-from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
 from gluesync_scheduler.services.job_service import JobService
 from gluesync_scheduler.services.scheduler_service import scheduler_service
@@ -51,11 +50,11 @@ from sqlalchemy.orm import sessionmaker, Session
 
 # Configure logging
 logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
+    level=getattr(logging, os.getenv('LOG_LEVEL', 'INFO'), logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join(settings.LOG_DIR, "app.log"))
+        logging.FileHandler(os.path.join(os.getenv('LOG_DIR', './logs'), "app.log"))
     ]
 )
 logger = logging.getLogger(__name__)
@@ -193,7 +192,8 @@ async def catch_exceptions_middleware(request: Request, call_next):
 class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Only redirect if SSL is enabled and the request is not using HTTPS
-        if settings.SSL_ENABLED and request.url.scheme != "https":
+        ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+        if ssl_enabled and request.url.scheme != "https":
             # Get the host from the request
             host = request.headers.get("host", "")
             
@@ -219,7 +219,8 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 # Add HTTPS redirect middleware if SSL is enabled
-if settings.SSL_ENABLED:
+ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+if ssl_enabled:
     app.add_middleware(HTTPSRedirectMiddleware)
 
 # Add exception handling middleware
@@ -236,19 +237,27 @@ async def startup_event():
     logger.info("Starting Gluesync Chronos module...")
     
     # Create necessary directories
-    os.makedirs(settings.DATA_DIR, exist_ok=True)
-    os.makedirs(settings.LOG_DIR, exist_ok=True)
-    os.makedirs(settings.CRON_LOG_DIR, exist_ok=True)
-    os.makedirs(os.path.dirname(settings.DB_URL.replace('sqlite:///', '')), exist_ok=True)
+    os.makedirs(os.getenv('DATA_DIR', './data'), exist_ok=True)
+    os.makedirs(os.getenv('LOG_DIR', './logs'), exist_ok=True)
+    os.makedirs(os.getenv('CRON_LOG_DIR', './logs'), exist_ok=True)
+    db_url = os.getenv('DB_URL')
+    if db_url:
+        # Use provided DB_URL
+        pass
+    else:
+        # Convert relative path to absolute path for consistency
+        abs_data_dir = os.path.abspath(os.getenv('DATA_DIR', './data'))
+        db_url = f'sqlite:///{abs_data_dir}/scheduler.db'
+        logger.info(f"Using absolute database path: {abs_data_dir}/scheduler.db")
     
     # Initialize database
     try:
         logger.info("Verifying database schema...")
-        logger.info(f"DATABASE: Application DB_URL: {settings.DB_URL}")
+        logger.info(f"DATABASE: Application DB_URL: {db_url}")
         
         # For SQLite, verify the database file
-        if settings.DB_URL.startswith('sqlite:'):
-            db_path = settings.DB_URL.replace('sqlite:///', '')
+        if db_url.startswith('sqlite:'):
+            db_path = db_url.replace('sqlite:///', '')
             # Handle Windows paths
             if ':' in db_path and len(db_path) > 2 and db_path[1] == ':':
                 db_path = db_path[1:]  # Remove leading slash for Windows paths
@@ -291,6 +300,8 @@ async def startup_event():
         from sqlalchemy import inspect
         inspector = inspect(db.get_bind())
         
+        logger.info(f"SSL_ENABLED before settings service: {settings.SSL_ENABLED}")
+        
         if 'settings' in inspector.get_table_names():
             try:
                 from gluesync_scheduler.services.settings_service import SettingsService
@@ -306,8 +317,11 @@ async def startup_event():
                 # Load settings from database
                 timezone_setting = settings_service.get_setting_by_key("timezone")
                 if timezone_setting and timezone_setting.value:
-                    settings.TIMEZONE = timezone_setting.value
-                    logger.info(f"Loaded timezone from database: {settings.TIMEZONE}")
+                    logger.info(f"SSL_ENABLED before timezone update: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
+                    timezone_value = timezone_setting.value
+                    logger.info(f"Updated TIMEZONE to: {timezone_value}")
+                    logger.info(f"SSL_ENABLED after timezone update: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
+                    logger.info(f"Loaded timezone from database: {timezone_value}")
                     
             except Exception as e:
                 logger.warning(f"Could not initialize settings (table may be empty): {e}")
@@ -337,12 +351,13 @@ async def startup_event():
             logger.info(f"Extracted CoreHub URL from SDK client: {corehub_url}")
             
             # Update settings with the discovered URL
-            settings.update_corehub_url(corehub_url)
-            logger.info(f"Updated CoreHub URL in settings: {settings.GLUESYNC_HOST}")
+            # Note: Since we removed the settings system, we can't update it anymore
+            logger.info(f"CoreHub URL from SDK client: {corehub_url}")
         
         # If we have a CoreHub URL in settings, log it
-        if settings.GLUESYNC_HOST:
-            logger.info(f"CoreHub URL is set to: {settings.GLUESYNC_HOST}")
+        gluesync_host = os.getenv('GLUESYNC_HOST', '')
+        if gluesync_host:
+            logger.info(f"CoreHub URL is set to: {gluesync_host}")
         else:
             logger.warning("CoreHub URL is not set yet. Will attempt to extract it from the SDK client.")
             
@@ -357,7 +372,6 @@ async def startup_event():
                         scheme = "https" if use_ssl else "http"
                         corehub_url = f"{scheme}://{host}:{port}"
                         logger.info(f"Extracted CoreHub URL from discovery result: {corehub_url}")
-                        settings.update_corehub_url(corehub_url)
             
         # Create a CoreHubClient instance to initialize the singleton with the URL
         from gluesync_scheduler.core.play_pause import CoreHubClient
@@ -415,14 +429,14 @@ async def startup_event():
         logger.warning("The scheduler will continue, but existing jobs may not be loaded")
     
     # Log configuration
-    logger.info(f"Host: {settings.HOST}")
-    logger.info(f"Port: {settings.PORT}")
-    logger.info(f"Database URL: {settings.DB_URL}")
-    logger.info(f"SSL Enabled: {settings.SSL_ENABLED}")
-    logger.info(f"CoreHub URL: {settings.GLUESYNC_HOST}")
-    logger.info(f"Gluesync Module Tag: {settings.GLUESYNC_MODULE_TAG}")
-    logger.info(f"Gluesync License File: {settings.GLUESYNC_LICENSE_FILE}")
-    logger.info(f"Gluesync Security Config: {settings.GLUESYNC_SECURITY_CONFIG}")
+    logger.info(f"Host: {os.getenv('HOST', '0.0.0.0')}")
+    logger.info(f"Port: {int(os.getenv('PORT', '8000'))}")
+    logger.info(f"Database URL: {db_url}")
+    logger.info(f"SSL Enabled: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
+    logger.info(f"CoreHub URL: {os.getenv('GLUESYNC_HOST', '')}")
+    logger.info(f"Gluesync Module Tag: {os.getenv('GLUESYNC_MODULE_TAG', 'chronos')}")
+    logger.info(f"Gluesync License File: {os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')}")
+    logger.info(f"Gluesync Security Config: {os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')}")
     
     logger.info("Gluesync Scheduler Module started successfully")
 
@@ -491,13 +505,14 @@ def create_ssl_context():
 def extract_from_pkcs12():
     """Extract certificate and key from PKCS12 file if available"""
     # Check if we have a security config file
-    if not os.path.exists(settings.GLUESYNC_SECURITY_CONFIG):
-        logger.warning(f"Security config file not found: {settings.GLUESYNC_SECURITY_CONFIG}")
+    gluesync_security_config = os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')
+    if not os.path.exists(gluesync_security_config):
+        logger.warning(f"Security config file not found: {gluesync_security_config}")
         return None, None
     
     try:
         # Load the security config
-        with open(settings.GLUESYNC_SECURITY_CONFIG, 'r') as f:
+        with open(gluesync_security_config, 'r') as f:
             security_config = json.load(f)
         
         # Check if SSL is configured

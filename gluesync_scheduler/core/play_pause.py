@@ -35,19 +35,19 @@ import requests
 from urllib.parse import quote_plus, urlparse, urljoin
 import uuid
 
-from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
 from gluesync_scheduler.services.group_service import group_service
 
 # Configure logging
 # Ensure timestamps are always included in logs, even when run as a standalone script
+log_level = getattr(logging, os.getenv('LOG_LEVEL', 'INFO'), logging.INFO)
+log_dir = os.getenv('LOG_DIR', './logs')
 logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL, "INFO"),
+    level=log_level,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join(settings.LOG_DIR if hasattr(settings, 'LOG_DIR') else './logs', 
-                                        "play_pause.log"))
+        logging.FileHandler(os.path.join(log_dir, "play_pause.log"))
     ],
     force=True  # Apply even if the root logger is already configured
 )
@@ -91,7 +91,7 @@ class CoreHubClient:
         # Initialize core properties
         self.base_url = provided_url  # Use provided URL if available
         self.token = None
-        self.entity_start_timeout = settings.ENTITY_START_TIMEOUT
+        self.entity_start_timeout = int(os.getenv('ENTITY_START_TIMEOUT', '2'))
         
         # If no URL was explicitly provided, try discovery options
         if self.base_url is None:
@@ -118,11 +118,13 @@ class CoreHubClient:
         4. Default URL (localhost:1717)
         """
         # Priority 1: Use the URL from settings
-        if settings.GLUESYNC_HOST:
-            self.base_url = settings.GLUESYNC_HOST
+        gluesync_host = os.getenv('GLUESYNC_HOST', '')
+        if gluesync_host:
+            self.base_url = gluesync_host
             # Ensure the URL has the correct protocol based on SSL settings
+            ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
             if not self.base_url.startswith(('http://', 'https://')):
-                protocol = 'https' if settings.SSL_ENABLED else 'http'
+                protocol = 'https' if ssl_enabled else 'http'
                 self.base_url = f"{protocol}://{self.base_url}"
             # Store in class variable for future use
             CoreHubClient._discovered_url = self.base_url
@@ -140,8 +142,9 @@ class CoreHubClient:
             if gluesync_sdk_client and gluesync_sdk_client.is_initialized and gluesync_sdk_client.corehub_url:
                 self.base_url = gluesync_sdk_client.corehub_url
                 # Ensure the URL has the correct protocol based on SSL settings
+                ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
                 if not self.base_url.startswith(('http://', 'https://')):
-                    protocol = 'https' if settings.SSL_ENABLED else 'http'
+                    protocol = 'https' if ssl_enabled else 'http'
                     self.base_url = f"{protocol}://{self.base_url}"
                 CoreHubClient._discovered_url = self.base_url
                 logger.info(f"Using CoreHub URL from SDK client: {self.base_url}")
@@ -151,15 +154,16 @@ class CoreHubClient:
         
         # Priority 4: Use default URL for localhost
         # This is a fallback to ensure requests can still work within the same container
-        protocol = "https" if settings.SSL_ENABLED else "http"
+        ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+        protocol = "https" if ssl_enabled else "http"
         default_url = f"{protocol}://localhost:1717"
         self.base_url = default_url
         CoreHubClient._discovered_url = self.base_url
         logger.info(f"Using default CoreHub URL: {self.base_url}")
         
         # Log SSL settings for debugging
-        logger.info(f"SSL is {'enabled' if settings.SSL_ENABLED else 'disabled'}")
-        logger.info(f"SSL_SKIP_VERIFY: {settings.SSL_SKIP_VERIFY}")
+        logger.info(f"SSL is {'enabled' if ssl_enabled else 'disabled'}")
+        logger.info(f"SSL_SKIP_VERIFY: {os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')}")
     
     def _initialize_token(self):
         """Initialize the token for API authentication"""
@@ -295,7 +299,8 @@ class CoreHubClient:
         }
 
         # Log request details if in debug mode
-        if settings.DEBUG:
+        debug_enabled = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
+        if debug_enabled:
             logger.debug(f"Sending request to: {url}")
             logger.debug(f"Method: {method}")
             logger.debug(f"Headers: {headers}")
@@ -303,7 +308,8 @@ class CoreHubClient:
             logger.debug(f"Params: {params}")
         
         # Determine SSL verification settings based on SSL_SKIP_VERIFY
-        verify = not settings.SSL_SKIP_VERIFY if url.startswith('https://') else True
+        ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
+        verify = not ssl_skip_verify if url.startswith('https://') else True
         if url.startswith('https://') and not verify:
             logger.info(f"SSL verification disabled for request to {url}")
             # Suppress insecure request warnings
