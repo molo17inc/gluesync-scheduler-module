@@ -156,7 +156,7 @@ class GluesyncSDKClient:
             logger.warning(f"License file not found at {license_file_path}, will attempt to proceed without it")
         
         # Check if SSL is explicitly disabled in settings
-        ssl_explicitly_disabled = settings.SSL_ENABLED is False
+        ssl_explicitly_disabled = settings.SSL_ENABLED == False
         
         if ssl_explicitly_disabled:
             # If SSL is explicitly disabled, force it off regardless of other settings
@@ -165,6 +165,7 @@ class GluesyncSDKClient:
         else:
             # SSL configuration - sync with web server settings
             use_ssl = settings.SSL_ENABLED
+            logger.info(f"SSL is {'enabled' if use_ssl else 'disabled'} in settings")
             
             # If GLUESYNC_HOST is https://, consider using SSL
             if settings.GLUESYNC_HOST and parsed_url and parsed_url.scheme == "https":
