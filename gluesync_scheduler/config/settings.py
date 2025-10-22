@@ -73,26 +73,9 @@ class Settings:
         logger.info(f"SSL_SKIP_VERIFY: {self.SSL_SKIP_VERIFY} (type: {type(self.SSL_SKIP_VERIFY)})")
         logger.info(f"GLUESYNC_SECURITY_CONFIG: {self.GLUESYNC_SECURITY_CONFIG}")
         logger.info(f"GLUESYNC_LICENSE_FILE: {self.GLUESYNC_LICENSE_FILE}")
-    
-    # SSL settings
-    @staticmethod
-    def _get_bool_env(var_name: str, default: bool = False) -> bool:
-        """Helper function to get boolean from environment variables with case-insensitive comparison.
         
-        Args:
-            var_name: Name of the environment variable
-            default: Default value if variable is not set
-            
-        Returns:
-            bool: The boolean value of the environment variable
-        """
-        val = os.getenv(var_name, '').strip().lower()
-        if not val:
-            return default
-        return val in ('true', '1', 't', 'yes', 'y')
-    
-    SSL_ENABLED = _get_bool_env('SSL_ENABLED', False)
-    SSL_SKIP_VERIFY = _get_bool_env('SSL_SKIP_VERIFY', False)
+    SSL_ENABLED = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+    SSL_SKIP_VERIFY = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
     
     # Gluesync SDK settings
     GLUESYNC_LICENSE_FILE = os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')
