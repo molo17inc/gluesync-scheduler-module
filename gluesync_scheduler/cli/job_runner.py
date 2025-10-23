@@ -76,7 +76,11 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join(log_dir, "job_runner.log"))
+        logging.handlers.RotatingFileHandler(
+            filename=os.path.join(log_dir, "job_runner.log"),
+            maxBytes=100 * 1024 * 1024,  # 100MB per file
+            backupCount=9  # 9 backup files + current = 10 files total (1GB max)
+        )
     ]
 )
 logger = logging.getLogger(__name__)
@@ -86,8 +90,12 @@ def setup_logging(job_identifier: str) -> str:
     # Create a job-specific log file
     log_file = os.path.join(log_dir, f"job_{job_identifier}.log")
     
-    # Add a file handler for this job
-    file_handler = logging.FileHandler(log_file)
+    # Add a rotating file handler for this job
+    file_handler = logging.handlers.RotatingFileHandler(
+        filename=log_file,
+        maxBytes=100 * 1024 * 1024,  # 100MB per file
+        backupCount=9  # 9 backup files + current = 10 files total (1GB max)
+    )
     file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
     logger.addHandler(file_handler)
     
@@ -319,7 +327,11 @@ def main():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(os.path.join(log_dir, "job_runner.log"))
+            logging.handlers.RotatingFileHandler(
+                filename=os.path.join(log_dir, "job_runner.log"),
+                maxBytes=100 * 1024 * 1024,  # 100MB per file
+                backupCount=9  # 9 backup files + current = 10 files total (1GB max)
+            )
         ]
     )
     

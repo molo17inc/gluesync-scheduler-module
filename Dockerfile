@@ -95,6 +95,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=1717 \
     DEBUG=false \
     LOG_LEVEL=INFO \
+    LOG_DIR=/app/logs \
     DATA_DIR=/app/data \
     ALLOWED_ORIGINS=* \
     CRONTAB_USER=root \

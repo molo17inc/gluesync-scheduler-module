@@ -48,13 +48,17 @@ from gluesync_scheduler.models.models import ScheduledJob
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
-# Configure logging
+# Configure logging with rotation
 logging.basicConfig(
     level=getattr(logging, os.getenv('LOG_LEVEL', 'INFO'), logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join(os.getenv('LOG_DIR', './logs'), "app.log"))
+        logging.handlers.RotatingFileHandler(
+            filename=os.path.join(os.getenv('LOG_DIR', './logs'), "chronos.log"),
+            maxBytes=100 * 1024 * 1024,  # 100MB per file
+            backupCount=9  # 9 backup files + current = 10 files total (1GB max)
+        )
     ]
 )
 logger = logging.getLogger(__name__)

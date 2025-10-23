@@ -46,7 +46,11 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join(log_dir, "sdk_client.log"))
+        logging.handlers.RotatingFileHandler(
+            filename=os.path.join(log_dir, "sdk_client.log"),
+            maxBytes=100 * 1024 * 1024,  # 100MB per file
+            backupCount=9  # 9 backup files + current = 10 files total (1GB max)
+        )
     ],
     force=True  # Apply even if the root logger is already configured
 )
