@@ -219,20 +219,19 @@ class GluesyncSDKClient:
         self._client.on_error = self._on_error
         # Note: on_reconnecting, on_reconnected, and on_token_updated are not supported by the current SDK
         
-        # Connect to CoreHub with retry logic
+        # Connect to CoreHub with indefinite retry logic for both GLUESYNC_HOST and UDP discovery
         retry_count = 0
         backoff_delay = 1  # Start with 1 second delay
         max_backoff = 30  # Maximum backoff of 30 seconds
         cycle_count = 0   # Count full cycles of backoff
-        max_initial_retries = int(os.getenv('GLUESYNC_MAX_INITIAL_RETRIES', '10'))  # Allow configurable retries for initial connection when GLUESYNC_HOST is set
 
-        while True:  # Retry indefinitely for UDP discovery, or up to max_initial_retries for GLUESYNC_HOST
+        while True:  # Retry indefinitely for both GLUESYNC_HOST and UDP discovery
             try:
                 if host and port:
                     if retry_count == 0:
                         logger.info(f"Connecting to CoreHub at {protocol}://{host}:{port}...")
                     else:
-                        logger.info(f"Retry {retry_count}/{max_initial_retries} connecting to CoreHub at {protocol}://{host}:{port}...")
+                        logger.info(f"Retry {retry_count} (cycle {cycle_count}) connecting to CoreHub at {protocol}://{host}:{port}...")
                     await self._client.connect()
                     break  # Connection successful
                 else:
@@ -258,36 +257,21 @@ class GluesyncSDKClient:
                         raise GluesyncConnectionError("UDP discovery did not find a CoreHub")
 
             except GluesyncConnectionError as e:
-                if host and port:
-                    # For GLUESYNC_HOST, allow limited retries in case CoreHub starts later
-                    retry_count += 1
-                    if retry_count >= max_initial_retries:
-                        logger.error(f"Failed to connect to CoreHub at {self._build_corehub_url(host, port)} after {max_initial_retries} attempts: {e}")
-                        raise
+                retry_count += 1
+                logger.warning(f"Connection attempt {retry_count} failed: {e}")
 
-                    logger.warning(f"Connection attempt {retry_count}/{max_initial_retries} failed: {e}")
-                    logger.info(f"Waiting {backoff_delay} seconds before retrying...")
-                    await asyncio.sleep(backoff_delay)
+                # Calculate backoff with exponential increase
+                logger.info(f"Waiting {backoff_delay} seconds before next retry...")
+                await asyncio.sleep(backoff_delay)
 
-                    # Double the backoff for next time, up to the maximum
-                    backoff_delay = min(backoff_delay * 2, max_backoff)
-                else:
-                    # For UDP discovery, retry with exponential backoff indefinitely
-                    retry_count += 1
-                    logger.warning(f"UDP discovery attempt {retry_count} failed: {e}")
+                # Double the backoff for next time, up to the maximum
+                backoff_delay = min(backoff_delay * 2, max_backoff)
 
-                    # Calculate backoff with exponential increase
-                    logger.info(f"Waiting {backoff_delay} seconds before next retry...")
-                    await asyncio.sleep(backoff_delay)
-
-                    # Double the backoff for next time, up to the maximum
-                    backoff_delay = min(backoff_delay * 2, max_backoff)
-
-                    # If we've reached max backoff, reset on the next failure
-                    if backoff_delay >= max_backoff:
-                        backoff_delay = 1  # Reset to 1 second
-                        cycle_count += 1   # Increment cycle count
-                        logger.info(f"Completed backoff cycle {cycle_count}, resetting delay to 1 second")
+                # If we've reached max backoff, reset on the next failure
+                if backoff_delay >= max_backoff:
+                    backoff_delay = 1  # Reset to 1 second
+                    cycle_count += 1   # Increment cycle count
+                    logger.info(f"Completed backoff cycle {cycle_count}, resetting delay to 1 second")
 
             except (GluesyncLicenseError, GluesyncAuthenticationError) as e:
                 # Don't retry for these errors

@@ -196,13 +196,12 @@ To run the Gluesync Chronos module (aka Chronos) locally and test the API with P
    DB_URL=sqlite:///./data/test_scheduler.db
    DEBUG=True
    GLUESYNC_HOST=http://localhost:8080
-   GLUESYNC_MAX_INITIAL_RETRIES=10
    CRONTAB_USER=$USER
    HOST=0.0.0.0
    FIRE_ONCE=False
    ```
 
-   **Note**: Set `FIRE_ONCE=True` to have jobs automatically disabled after their first execution. Set `GLUESYNC_MAX_INITIAL_RETRIES` to control how many times the scheduler retries connecting to CoreHub during startup (default: 10).
+   **Note**: Set `FIRE_ONCE=True` to have jobs automatically disabled after their first execution. The scheduler will retry connecting to CoreHub indefinitely with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s max) until successful.
 
 ### Running the Application
 
@@ -595,6 +594,8 @@ This module now integrates directly with the Gluesync CoreHub using the official
 The integration uses only the SDK-provided authentication token for all CoreHub API calls. Manual authentication with username/password is completely removed, making the module more secure and streamlined.
 
 The module automatically retrieves the CoreHub URL from the SDK after discovery, ensuring that the correct URL is used even when the CoreHub is discovered dynamically through UDP broadcast.
+
+**Connection Behavior**: Whether using `GLUESYNC_HOST` for direct connection or UDP discovery, the scheduler will retry connecting to CoreHub indefinitely with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s max) until successful. This ensures reliable operation in containerized environments where services may start in different orders.
 
 ## Testing
 
