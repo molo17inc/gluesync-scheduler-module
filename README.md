@@ -196,12 +196,13 @@ To run the Gluesync Chronos module (aka Chronos) locally and test the API with P
    DB_URL=sqlite:///./data/test_scheduler.db
    DEBUG=True
    GLUESYNC_HOST=http://localhost:8080
+   GLUESYNC_MAX_INITIAL_RETRIES=10
    CRONTAB_USER=$USER
    HOST=0.0.0.0
    FIRE_ONCE=False
    ```
 
-   **Note**: Set `FIRE_ONCE=True` to have jobs automatically disabled after their first execution.
+   **Note**: Set `FIRE_ONCE=True` to have jobs automatically disabled after their first execution. Set `GLUESYNC_MAX_INITIAL_RETRIES` to control how many times the scheduler retries connecting to CoreHub during startup (default: 10).
 
 ### Running the Application
 
