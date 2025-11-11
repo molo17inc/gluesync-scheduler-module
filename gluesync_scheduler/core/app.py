@@ -42,11 +42,16 @@ from gluesync_scheduler.api.router import router
 from gluesync_scheduler.api.pipeline_router import router as pipeline_router
 from gluesync_scheduler.api.settings_router import router as settings_router
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+from gluesync_scheduler.core.path_resolver import resolve_gluesync_file
 from gluesync_scheduler.services.job_service import JobService
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.models.models import ScheduledJob
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
+
+# Ensure Gluesync file paths resolve to supported locations
+resolve_gluesync_file('GLUESYNC_LICENSE_FILE', 'gs-license.dat')
+resolve_gluesync_file('GLUESYNC_SECURITY_CONFIG', 'security-config.json')
 
 # Configure logging with rotation
 logging.basicConfig(
@@ -438,8 +443,8 @@ async def startup_event():
     logger.info(f"SSL Enabled: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
     logger.info(f"CoreHub URL: {os.getenv('GLUESYNC_HOST', '')}")
     logger.info(f"Gluesync Module Tag: {os.getenv('GLUESYNC_MODULE_TAG', 'chronos')}")
-    logger.info(f"Gluesync License File: {os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')}")
-    logger.info(f"Gluesync Security Config: {os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')}")
+    logger.info(f"Gluesync License File: {os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/shared/gs-license.dat')}")
+    logger.info(f"Gluesync Security Config: {os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/shared/security-config.json')}")
     
     logger.info("Gluesync Scheduler Module started successfully")
 
@@ -507,9 +512,11 @@ def create_ssl_context():
 
 def extract_from_pkcs12():
     """Extract certificate and key from PKCS12 file if available"""
-    # Check if we have a security config file
-    gluesync_security_config = os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')
-    if not os.path.exists(gluesync_security_config):
+    # Resolve security config file with fallbacks
+    gluesync_security_config, config_exists = resolve_gluesync_file(
+        'GLUESYNC_SECURITY_CONFIG', 'security-config.json'
+    )
+    if not config_exists:
         logger.warning(f"Security config file not found: {gluesync_security_config}")
         return None, None
     

@@ -69,6 +69,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Create Gluesync default directories and app data directory
 RUN mkdir -p /opt/gluesync/data && \
+    mkdir -p /opt/gluesync/shared && \
     mkdir -p /app/data && \
     mkdir -p /app/logs && \
     chmod -R 777 /app/data && \
@@ -86,8 +87,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_INDEX=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
-    GLUESYNC_LICENSE_FILE=/opt/gluesync/data/gs-license.dat \
-    GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json \
+    GLUESYNC_LICENSE_FILE=/opt/gluesync/shared/gs-license.dat \
+    GLUESYNC_SECURITY_CONFIG=/opt/gluesync/shared/security-config.json \
     GLUESYNC_HOST= \
     DB_URL=sqlite:///./data/scheduler.db \
     ENTITY_START_TIMEOUT=2 \

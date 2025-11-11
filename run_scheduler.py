@@ -29,6 +29,8 @@ import subprocess
 import uvicorn
 from shutil import which
 
+from gluesync_scheduler.core.path_resolver import resolve_gluesync_file
+
 # Extract certificates from PKCS12 file if available
 def extract_from_pkcs12():
     """Extract certificate and key from PKCS12 file if available"""
@@ -38,8 +40,10 @@ def extract_from_pkcs12():
     key_password = os.getenv('SSL_KEY_PASSWORD')
     
     # Check security config if environment variables not set
-    gluesync_security_config = os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')
-    if not p12_path and os.path.exists(gluesync_security_config):
+    gluesync_security_config, config_exists = resolve_gluesync_file(
+        'GLUESYNC_SECURITY_CONFIG', 'security-config.json'
+    )
+    if not p12_path and config_exists:
         try:
             with open(gluesync_security_config, 'r') as config_file:
                 security_config = json.load(config_file)

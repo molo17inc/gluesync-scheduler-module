@@ -54,6 +54,7 @@ WORKDIR C:\app
 
 # Ensure directories exist
 RUN if not exist C:\opt\gluesync\data mkdir C:\opt\gluesync\data && `
+  if not exist C:\opt\gluesync\shared mkdir C:\opt\gluesync\shared && `
   if not exist C:\app\data mkdir C:\app\data && `
   if not exist C:\app\logs mkdir C:\app\logs
 
@@ -73,8 +74,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   PIP_DISABLE_PIP_VERSION_CHECK=1 `
   PYTHONUTF8=1 `
   PYTHONPATH=C:\app `
-  GLUESYNC_LICENSE_FILE=C:\opt\gluesync\data\gs-license.dat `
-  GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\data\security-config.json `
+  GLUESYNC_LICENSE_FILE=C:\opt\gluesync\shared\gs-license.dat `
+  GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\shared\security-config.json `
   GLUESYNC_HOST= `
   DB_URL=sqlite:///C:/app/data/scheduler.db `
   ENTITY_START_TIMEOUT=2 `
@@ -137,8 +138,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   PYTHONUNBUFFERED=1 `
   PYTHONPATH=C:\app `
   PROJECT_ROOT=C:\app `
-  GLUESYNC_LICENSE_FILE=C:\opt\gluesync\data\gs-license.dat `
-  GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\data\security-config.json `
+  GLUESYNC_LICENSE_FILE=C:\opt\gluesync\shared\gs-license.dat `
+  GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\shared\security-config.json `
   GLUESYNC_HOST= `
   DB_URL=sqlite:///C:/app/data/scheduler.db `
   ENTITY_START_TIMEOUT=2 `

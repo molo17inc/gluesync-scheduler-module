@@ -25,7 +25,6 @@ import asyncio
 import logging
 import os
 import ssl
-from pathlib import Path
 from urllib.parse import urlparse
 from typing import Optional
 
@@ -36,6 +35,8 @@ from gluesync_sdk import (
     GluesyncAuthenticationError,
     GluesyncLicenseError
 )
+
+from .path_resolver import resolve_gluesync_file
 
 # Configure logging
 # Ensure timestamps are always included in logs, even when run as a standalone script
@@ -150,30 +151,41 @@ class GluesyncSDKClient:
         else:
             logger.info("No CoreHub URL provided, will use UDP discovery instead")
         
-        # Get license file path from settings
-        license_file_path = os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/data/gs-license.dat')
-        if not os.path.exists(license_file_path):
-            logger.warning(f"License file not found at {license_file_path}, will attempt to proceed without it")
-        
+        # Get license file path with fallback resolution
+        license_file_path, license_exists = resolve_gluesync_file(
+            'GLUESYNC_LICENSE_FILE', 'gs-license.dat'
+        )
+        if not license_exists:
+            logger.warning(
+                "License file not found at %s (including legacy fallbacks), will attempt to proceed without it",
+                license_file_path,
+            )
+
         # Determine SSL settings
         ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
         ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
         logger.info(f"SSL is {'enabled' if ssl_enabled else 'disabled'}")
-        
+
         # Security configuration
         security_config = None
+        config_path, config_exists = resolve_gluesync_file(
+            'GLUESYNC_SECURITY_CONFIG', 'security-config.json'
+        )
         if ssl_enabled:  # Only process security config if SSL is enabled
-            config_path = os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')
-            if config_path and os.path.exists(config_path):
+            if config_exists:
                 logger.info(f"Using security config from: {config_path}")
                 security_config = config_path
-            elif config_path:
-                logger.warning(f"Security config file not found at {config_path}, will use default settings")
-        else:
+            else:
+                logger.warning(
+                    "Security config file not found at %s (including legacy fallbacks), will use default settings",
+                    config_path,
+                )
+        elif config_exists:
             # SSL is disabled, so don't use security config even if it exists
-            config_path = os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/data/security-config.json')
-            if config_path and os.path.exists(config_path):
-                logger.info(f"Security config found at {config_path} but SSL is disabled - ignoring security config")
+            logger.info(
+                "Security config found at %s but SSL is disabled - ignoring security config",
+                config_path,
+            )
             
         # Determine the protocol based on ssl_enabled
         protocol = 'https' if ssl_enabled else 'http'
