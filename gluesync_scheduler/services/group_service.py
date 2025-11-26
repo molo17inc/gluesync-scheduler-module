@@ -29,6 +29,7 @@ from urllib3.util.retry import Retry
 import os
 
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+from gluesync_scheduler.core.url_utils import normalize_corehub_host, DEFAULT_COREHUB_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,26 @@ class GroupService:
     def __init__(self):
         ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
         ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
-        self.GLUESYNC_HOST = os.getenv('GLUESYNC_HOST', '')
+        raw_host = os.getenv('GLUESYNC_HOST', '')
+
+        host = None
+        port = None
+        base_url = None
+
+        if raw_host:
+            host, port, base_url = normalize_corehub_host(raw_host, ssl_enabled, DEFAULT_COREHUB_PORT)
+            if base_url and base_url != raw_host:
+                os.environ['GLUESYNC_HOST'] = base_url
+                logger.info(f"Normalized GLUESYNC_HOST to: {base_url}")
+
+        if not base_url:
+            protocol = 'https' if ssl_enabled else 'http'
+            host = host or 'localhost'
+            port = port or DEFAULT_COREHUB_PORT
+            base_url = f"{protocol}://{host}:{port}"
+            logger.info(f"Defaulting CoreHub base URL to: {base_url}")
+
+        self.GLUESYNC_HOST = base_url
         self.ssl_verify = not ssl_skip_verify if ssl_enabled else True
         self._setup_session()
     

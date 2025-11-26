@@ -25,7 +25,6 @@ import asyncio
 import logging
 import os
 import ssl
-from urllib.parse import urlparse
 from typing import Optional
 
 from gluesync_sdk import (
@@ -37,6 +36,7 @@ from gluesync_sdk import (
 )
 
 from .path_resolver import resolve_gluesync_file
+from .url_utils import normalize_corehub_host, DEFAULT_COREHUB_PORT
 
 # Configure logging
 # Ensure timestamps are always included in logs, even when run as a standalone script
@@ -133,24 +133,34 @@ class GluesyncSDKClient:
             logger.warning("SDK client marked as initialized but no token available - reinitializing")
             self._is_initialized = False
         
+        # Determine SSL settings early for URL normalization
+        ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+        ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
+        logger.info(f"SSL is {'enabled' if ssl_enabled else 'disabled'}")
+
         # Parse host and port from GLUESYNC_HOST if provided
         host = None
         port = None
-        parsed_url = None
-        
         gluesync_host = os.getenv('GLUESYNC_HOST', '')
         if gluesync_host:
             logger.info(f"GLUESYNC_HOST environment variable set to: {gluesync_host}")
-            parsed_url = urlparse(gluesync_host)
-            host = parsed_url.hostname
-            port = parsed_url.port
-            logger.info(f"Parsed URL - scheme: {parsed_url.scheme}, host: {host}, port: {port}")
-            if not port:
-                port = 1717
-                logger.info(f"No port specified in URL, using default: {port}")
+            normalized_host, normalized_port, normalized_url = normalize_corehub_host(
+                gluesync_host,
+                ssl_enabled,
+                DEFAULT_COREHUB_PORT,
+            )
+
+            if normalized_host:
+                host = normalized_host
+                port = normalized_port
+                if normalized_url and normalized_url != gluesync_host:
+                    os.environ['GLUESYNC_HOST'] = normalized_url
+                    logger.info(f"Normalized GLUESYNC_HOST to: {normalized_url}")
+            else:
+                logger.warning("Unable to parse GLUESYNC_HOST value, falling back to discovery")
         else:
             logger.info("No CoreHub URL provided, will use UDP discovery instead")
-        
+
         # Get license file path with fallback resolution
         license_file_path, license_exists = resolve_gluesync_file(
             'GLUESYNC_LICENSE_FILE', 'gs-license.dat'
@@ -160,11 +170,6 @@ class GluesyncSDKClient:
                 "License file not found at %s (including legacy fallbacks), will attempt to proceed without it",
                 license_file_path,
             )
-
-        # Determine SSL settings
-        ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
-        ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
-        logger.info(f"SSL is {'enabled' if ssl_enabled else 'disabled'}")
 
         # Security configuration
         security_config = None
@@ -193,7 +198,7 @@ class GluesyncSDKClient:
         # Log final configuration before creating client
         logger.info(f"Creating GluesyncClient with:")
         logger.info(f"  - host: {host}")
-        logger.info(f"  - port: {port if port is not None else 1717}")
+        logger.info(f"  - port: {port if port is not None else DEFAULT_COREHUB_PORT}")
         logger.info(f"  - protocol: {protocol}")
         logger.info(f"  - use_ssl: {ssl_enabled}")
         logger.info(f"  - verify_ssl: {not ssl_skip_verify}")
