@@ -30,18 +30,6 @@ import pytz
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any, Union
 
-# Validate the configured timezone
-configured_timezone = os.getenv('TIMEZONE', 'UTC')
-try:
-    pytz.timezone(configured_timezone)
-    logger = logging.getLogger(__name__)
-    logger.info(f"Using timezone: {configured_timezone}")
-except Exception as e:
-    logger = logging.getLogger(__name__)
-    logger.error(f"Invalid timezone configured: {configured_timezone}. Error: {str(e)}")
-    logger.warning("Falling back to UTC timezone")
-    configured_timezone = 'UTC'
-
 from fastapi import HTTPException, status
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -49,8 +37,19 @@ from sqlalchemy.orm import Session
 from gluesync_scheduler.models.models import ScheduledJob, TaskType
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig
 from gluesync_scheduler.services.scheduler_service import scheduler_service
+from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 logger = logging.getLogger(__name__)
+
+# Validate the configured timezone
+configured_timezone = get_env_timezone('UTC')
+try:
+    pytz.timezone(configured_timezone)
+    logger.info(f"Using timezone: {configured_timezone}")
+except Exception as e:
+    logger.error(f"Invalid timezone configured: {configured_timezone}. Error: {str(e)}")
+    logger.warning("Falling back to UTC timezone")
+    configured_timezone = 'UTC'
 
 class JobService:
     """Service for managing scheduled jobs"""

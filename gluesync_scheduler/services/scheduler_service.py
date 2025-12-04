@@ -34,6 +34,7 @@ from croniter import croniter
 from sqlalchemy.orm import Session
 
 from gluesync_scheduler.models.models import ScheduledJob
+from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ class SchedulerService:
                     'max_instances': 1,
                     'misfire_grace_time': 3600,
                 },
-                timezone=os.getenv('TIMEZONE', 'UTC')
+                timezone=get_env_timezone('UTC')
             )
             
             # Start the scheduler
@@ -108,7 +109,7 @@ class SchedulerService:
             job_id = f"job_{job.id}"
 
             # Get the job's timezone or fall back to the global timezone setting
-            job_timezone = job.timezone_name if hasattr(job, 'timezone_name') and job.timezone_name else os.getenv('TIMEZONE', 'UTC')
+            job_timezone = job.timezone_name if hasattr(job, 'timezone_name') and job.timezone_name else get_env_timezone('UTC')
             logger.info(f"Using timezone {job_timezone} for job {job_id}")
             
             # Map from day numbers (0-6) to day names for validation/logging

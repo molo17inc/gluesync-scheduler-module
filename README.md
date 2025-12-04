@@ -154,7 +154,8 @@ Configure the application using environment variables:
 | `ENTITY_START_TIMEOUT` | Timeout in seconds for entity start operations | `2` |
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
-| `TIMEZONE` | Default timezone for job scheduling (can be overridden via settings API) | `UTC` |
+| `TZ` | Preferred timezone environment variable for job scheduling. If set, it takes precedence over `TIMEZONE`. | `UTC` |
+| `TIMEZONE` | Deprecated timezone environment variable for job scheduling. Used only as fallback when `TZ` is not set. | `UTC` |
 
 ### Gluesync SDK Configuration
 
@@ -267,7 +268,7 @@ The module includes a settings management system that allows you to configure ap
 
 | Setting Key | Description | Default |
 |-------------|-------------|----------|
-| `timezone`  | Timezone used for scheduling jobs | Value from `TIMEZONE` env var |
+| `timezone`  | Timezone used for scheduling jobs | Value from `TZ` env var, or `TIMEZONE` if `TZ` is not set |
 
 ### Settings API Endpoints
 
@@ -324,7 +325,7 @@ Create a new custom setting.
 
 ### Environment Variable Override
 
-If both the database setting and environment variable are present for a setting (e.g., timezone), the environment variable will take precedence on application restart. This allows for consistent configuration in containerized environments while still providing flexibility for runtime changes.
+If no `timezone` setting exists in the database, the initial value is taken from environment variables (with `TZ` preferred and `TIMEZONE` used only as a deprecated fallback). Subsequent changes to the `timezone` setting via the API are persisted in the database and are not automatically overridden by environment variables on restart.
 
 By following these steps, you should be able to run the project locally and test the API using Postman. If you encounter any issues, feel free to ask for further assistance!
 

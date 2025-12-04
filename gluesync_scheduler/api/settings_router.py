@@ -177,7 +177,7 @@ async def update_setting(
     
     ## Notes
     - When updating the "timezone" setting, the value must be a valid timezone identifier
-    - If the TIMEZONE environment variable is set, it will override any value set through the API on restart
+    - On first startup, if no "timezone" setting exists in the database, its initial value is taken from environment variables in this order: `TZ` (preferred) then `TIMEZONE` (deprecated fallback)
     
     ## Errors
     - **400**: Invalid setting value

@@ -30,6 +30,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gluesync_scheduler.models.models import Setting
 from gluesync_scheduler.models.schemas import SettingCreate, SettingUpdate
+from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ class SettingsService:
             return timezone_setting.value
         
         # Fall back to global settings (from environment)
-        return os.getenv('TIMEZONE', 'UTC')
+        return get_env_timezone('UTC')
     
     def initialize_default_settings(self) -> Dict[str, str]:
         """
@@ -219,7 +220,7 @@ class SettingsService:
         # Define default settings
         defaults = {
             "timezone": {
-                "value": os.getenv('TIMEZONE', 'UTC'),
+                "value": get_env_timezone('UTC'),
                 "description": "Timezone used for scheduling jobs"
             }
         }

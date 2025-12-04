@@ -30,6 +30,7 @@ from enum import Enum
 from pydantic import BaseModel, Field, validator, field_serializer, ConfigDict
 
 from gluesync_scheduler.models.models import TaskType
+from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 
 class DayOfWeek(str, Enum):
@@ -249,7 +250,7 @@ class Job(JobBase):
             from croniter import croniter
             
             # Get current time in the configured timezone
-            tz = pytz.timezone(os.getenv('TIMEZONE', 'UTC'))
+            tz = pytz.timezone(get_env_timezone('UTC'))
             now = datetime.now(tz)
             
             # Use croniter to calculate the next run time
@@ -337,7 +338,7 @@ class Job(JobBase):
         # Fallback to settings timezone if job doesn't have one
         if tz is None:
             try:
-                tz = pytz.timezone(os.getenv('TIMEZONE', 'UTC'))
+                tz = pytz.timezone(get_env_timezone('UTC'))
             except:
                 tz = pytz.UTC
         
@@ -379,7 +380,7 @@ class Job(JobBase):
             # Fallback to settings timezone
             if tz is None:
                 try:
-                    tz = pytz.timezone(os.getenv('TIMEZONE', 'UTC'))
+                    tz = pytz.timezone(get_env_timezone('UTC'))
                 except:
                     tz = pytz.UTC
             
