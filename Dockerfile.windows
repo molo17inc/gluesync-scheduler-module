@@ -42,6 +42,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   PIP_DISABLE_PIP_VERSION_CHECK=1 `
   PYTHONUTF8=1 `
   PYTHONPATH=C:\app `
+  PROJECT_ROOT=C:\app `
   GLUESYNC_LICENSE_FILE=C:\opt\gluesync\shared\gs-license.dat `
   GLUESYNC_SECURITY_CONFIG=C:\opt\gluesync\shared\security-config.json `
   GLUESYNC_HOST= `
@@ -54,7 +55,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   LOG_DIR=C:\app\logs `
   CRON_LOG_DIR=C:\app\logs `
   DATA_DIR=C:\app\data `
-  SSL_ENABLED=false `
+  SSL_ENABLED=true `
   SSL_SKIP_VERIFY=true `
   TEMP=C:\temp `
   TMP=C:\temp `
@@ -82,16 +83,6 @@ RUN pyinstaller `
   --add-data "data;data" `
   run_scheduler.py
 
-# EXPOSE 1717
-# # Create entrypoint script
-# RUN echo @echo off > entrypoint.bat && `
-#   echo echo Starting Gluesync Chronos Module... >> entrypoint.bat && `
-#   echo python run_scheduler.py >> entrypoint.bat
-
-# ENTRYPOINT ["entrypoint.bat"]
-# # Alternative: keep container running for debugging
-# # CMD ["powershell", "-Command", "while ($true) { Start-Sleep -Seconds 3600 }"]
-
 # ------------------
 # Stage 2: Runtime (Nano Server)
 # ------------------
@@ -118,7 +109,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   LOG_DIR=C:\app\logs `
   CRON_LOG_DIR=C:\app\logs `
   DATA_DIR=C:\app\data `
-  SSL_ENABLED=false `
+  SSL_ENABLED=true `
   SSL_SKIP_VERIFY=true `
   TEMP=C:\temp `
   TMP=C:\temp `
