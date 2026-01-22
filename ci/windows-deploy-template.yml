@@ -32,18 +32,14 @@
     - |
       if ($env:WINDOWS_TAG -eq "ltsc2019") {
           Write-Host "Building Docker image for LTSC2019..."
-
-          docker build --file Dockerfile.windows.nanoserver.2019 `
-                      --build-arg WINDOWS_TAG="$env:WINDOWS_TAG" `
-                      --tag "$VERSION_TAG_WINDOWS" .
       }
       else {
           Write-Host "Building Docker image for $env:WINDOWS_TAG using default Server Core..."
-
-          docker build --file Dockerfile.windows.nanoserver `
-                      --build-arg WINDOWS_TAG="$env:WINDOWS_TAG" `
-                      --tag "$VERSION_TAG_WINDOWS" .
       }
+
+    - docker build --file Dockerfile.windows `
+      --build-arg WINDOWS_TAG="$env:WINDOWS_TAG" `
+      --tag "$VERSION_TAG_WINDOWS" .
 
       if ($LASTEXITCODE -ne 0) { throw "❌ Docker build failed" }
       Write-Host "✅ Docker build completed successfully for $env:WINDOWS_TAG"
