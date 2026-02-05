@@ -64,6 +64,10 @@ RUN python -m pip wheel --wheel-dir=/wheels .
 # Final stage
 FROM python:3.13-slim
 
+ARG USERNAME=gluesync
+ARG USER_UID=1017
+ARG USER_GID=$USER_UID
+
 WORKDIR /app
 
 # Install required system packages in a single layer (minimal)
@@ -74,6 +78,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# Create the user in final stage
+RUN groupadd --gid $USER_GID $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME
 
 # Create Gluesync default directories and app data directory
 RUN mkdir -p /opt/gluesync/data && \
@@ -141,6 +149,9 @@ COPY --chown=$USER_UID:$USER_GID . .
 # Make scripts executable
 RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh
 
+# Set ownership of /app to gluesync user
+RUN chown -R $USER_UID:$USER_GID /app /opt/gluesync
+
 # Python dependencies installed from requirements.txt above
 
 # (build-essential and libssl-dev installed above)
@@ -148,6 +159,9 @@ RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_mi
 # SDK installed from wheels; no manual site-packages copy needed
 
 # (Python dependencies were installed earlier for better caching)
+
+# Switch to non-root user
+USER $USERNAME
 
 # Expose the port the app runs on
 EXPOSE 1717
