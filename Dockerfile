@@ -35,7 +35,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Build dependencies already installed above
 
 # Copy requirements and prebuild wheels for all Python deps
-COPY ./requirements.txt ./requirements.txt
+COPY --chown=$USER_UID:$USER_GID ./requirements.txt ./requirements.txt
 
 # Create wheels directory
 RUN mkdir -p /wheels
