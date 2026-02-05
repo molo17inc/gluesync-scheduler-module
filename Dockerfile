@@ -1,7 +1,15 @@
 # Build stage for SDK installation
 FROM python:3.13-slim AS builder
 
+ARG USERNAME=gluesync
+ARG USER_UID=1017
+ARG USER_GID=$USER_UID
+
 WORKDIR /build
+
+# Create the user
+RUN groupadd --gid $USER_GID $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME
 
 # Install build dependencies (single RUN)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -46,11 +54,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # SDK will be installed from GitLab PyPI registry via requirements.txt
 
 # Copy project files and build the application wheel (prepackaged for offline install)
-COPY --chmod=644 ./setup.py ./
-COPY --chmod=644 ./pyproject.toml ./
-COPY --chmod=644 ./VERSION ./
-COPY ./README.md ./
-COPY ./gluesync_scheduler ./gluesync_scheduler
+COPY --chown=$USER_UID:$USER_GID ./setup.py ./
+COPY --chown=$USER_UID:$USER_GID ./pyproject.toml ./
+COPY --chown=$USER_UID:$USER_GID ./VERSION ./
+COPY --chown=$USER_UID:$USER_GID ./README.md ./
+COPY --chown=$USER_UID:$USER_GID ./gluesync_scheduler ./gluesync_scheduler
 RUN python -m pip wheel --wheel-dir=/wheels .
 
 # Final stage
@@ -108,27 +116,27 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # (combined into single apt install above)
 
 # Copy built wheels from builder stage
-COPY --from=builder /wheels /wheels
+COPY --chown=$USER_UID:$USER_GID --from=builder /wheels /wheels
 
 # Copy VERSION file to the final image
-COPY --from=builder /build/VERSION /app/
-COPY ./requirements.txt .
+COPY --chown=$USER_UID:$USER_GID --from=builder /build/VERSION /app/
+COPY --chown=$USER_UID:$USER_GID ./requirements.txt .
 # Install Python dependencies from prebuilt wheels (no compiler/runtime build deps needed)
 RUN python -m pip install --no-index --find-links=/wheels -r requirements.txt && \
     python -m pip install --no-index --find-links=/wheels gluesync-scheduler-module && \
     rm -rf /wheels
-COPY ./setup.py .
-COPY ./entrypoint.sh .
-COPY ./README.md .
+COPY --chown=$USER_UID:$USER_GID ./setup.py .
+COPY --chown=$USER_UID:$USER_GID ./entrypoint.sh .
+COPY --chown=$USER_UID:$USER_GID ./README.md .
 
 # Copy the restructured package
-COPY ./gluesync_scheduler ./gluesync_scheduler
+COPY --chown=$USER_UID:$USER_GID ./gluesync_scheduler ./gluesync_scheduler
 
 # Copy migrations directory
-COPY ./migrations ./migrations
+COPY --chown=$USER_UID:$USER_GID ./migrations ./migrations
 
 # Copy app code
-COPY . .
+COPY --chown=$USER_UID:$USER_GID . .
 
 # Make scripts executable
 RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh
