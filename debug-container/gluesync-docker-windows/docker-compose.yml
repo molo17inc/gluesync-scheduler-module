@@ -1,0 +1,222 @@
+#
+#                   Welcome to the Gluesync trial kit!
+#
+#   This kit contains the necessary minimum set of services to run your trial
+#   a license file valid for 30 days has been included within the present kit for you
+#   to evaluate our product.
+#
+#   Here are some helpful links you might like to checkout first:
+#
+#   Official product documentation available at: https://docs.molo17.com/gluesync/
+#   Product support: https://support.molo17.com
+#   Sales representative: sales@molo17.com
+#
+#   Our product support team is available anytime to support you throughout the product evaluation at no cost.
+#
+#   We wish you a great journey while evaluating our product :-)
+#
+#   Steps to run this kit are the following:
+#     1. Move inside the folder containing the kit (from your terminal: "cd xyz")
+#     2. Hit "docker-compose up -d" with your terminal command line (PowerShell as Administrator)
+#     3. Go to https://localhost using your favourite web browser
+#     4. Default control plane credentials are:
+#           username: admin
+#           password: admin
+#
+#   TIP: We've also included monitoring tools for you to manage and observe the Gluesync cluster:
+#
+#   Portainer - Docker management UI
+#   URL: https://localhost:9443
+#   Username: admin
+#   Password: passwordpassword
+#
+#   Grafana - Metrics and monitoring dashboards
+#   URL: https://localhost/grafana
+#   Username: admin
+#   Password: password
+#
+#   Prometheus - Metrics collection and querying
+#   URL: https://localhost/prometheus
+#
+#   To learn more about the Docker compose kit and how to get the most out of it,
+#   we suggest you check out the following link from our online documentation:
+#   https://docs.molo17.com/gluesync/v2.1/deploy-and-run/docker-compose.html.
+#
+#   Enjoy!
+
+name: gluesync-windows
+
+services:
+  gluesync-core-hub:
+    image: molo17/gluesync-core-hub:latest-win-nanoserver-ltsc2022
+    restart: unless-stopped
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: 3.0
+    #       memory: 3.0G
+    # environment:
+    #   # Time zone: defaults to UTC, you can change it to match yours (https://docs.diladele.com/docker/timezones.html)
+    #   TZ: Etc/UTC
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.corehub.entrypoints=websecure
+      - traefik.http.routers.corehub.rule=PathPrefix(`/`)
+      - traefik.http.routers.corehub.tls=true
+      - traefik.http.services.corehub.loadbalancer.server.port=1717
+      - traefik.http.services.corehub.loadbalancer.server.scheme=https
+      - traefik.http.routers.corehub.service=corehub
+      - traefik.http.services.corehub.loadbalancer.passhostheader=true
+      - com.molo17.conductor.type=core-hub
+    environment:
+      - SSL_ENABLED=true
+      - LOG_CONFIG_FILE=C:\\opt\\gluesync\\shared\\logback.xml
+      - GRAFANA_REMOTE_ADDRESS=/grafana/d/fecxnzptcq8zkd/core-hub-metrics
+    volumes:
+      - ./shared:C:\opt\gluesync\shared
+      - ./data/core-hub:C:\opt\gluesync\data
+      - ./logs/core-hub:C:\opt\gluesync\logs
+    networks:
+      - gluesync-windows-net
+
+  gluesync-chronos:
+    # image: molo17/gluesync-chronos:0.1.36-win-nanoserver-ltsc2022
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: Dockerfile.windows
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.chronos.rule=PathPrefix(`/chronos/`) || PathPrefix(`/api/`) || PathPrefix(`/chronos/api/`)
+      - traefik.http.routers.chronos.entrypoints=websecure
+      - traefik.http.routers.chronos.tls=true
+      - traefik.http.services.chronos.loadbalancer.server.port=1717
+      - traefik.http.services.chronos.loadbalancer.server.scheme=https
+      - traefik.http.routers.chronos.middlewares=chronos@docker
+      - traefik.http.routers.chronos.service=chronos
+      - traefik.http.middlewares.chronos.replacepathregex.regex=^/chronos/api/(.*)
+      - traefik.http.middlewares.chronos.replacepathregex.replacement=/api/$$1
+      - traefik.http.services.chronos.loadbalancer.passhostheader=true
+      - com.molo17.conductor.type=module
+    environment:
+      - GLUESYNC_HOST=https://gluesync-core-hub:1717
+      - SSL_ENABLED=true
+      - SSL_SKIP_VERIFY=true
+      - TIMEZONE=UTC # optionally hardcode timezone value in IANA format (es. Europe/Rome, from IANA database)
+    volumes:
+      - ./shared:C:\opt\gluesync\shared
+      - ./data/chronos:C:\app\data
+      - ./logs/chronos:C:\app\logs
+    networks:
+      - gluesync-windows-net
+
+  gluesync-conductor:
+    image: molo17/gluesync-conductor:0.6.2-win-nanoserver-ltsc2022
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.conductor.rule=PathPrefix(`/conductor/api/`)
+      - traefik.http.routers.conductor.entrypoints=websecure
+      - traefik.http.routers.conductor.tls=true
+      - traefik.http.services.conductor.loadbalancer.server.port=1717
+      - traefik.http.services.conductor.loadbalancer.server.scheme=https
+      - traefik.http.routers.conductor.middlewares=conductor@docker
+      - traefik.http.routers.conductor.service=conductor
+      - traefik.http.middlewares.conductor.replacepathregex.regex=^/conductor/api/(.*)
+      - traefik.http.middlewares.conductor.replacepathregex.replacement=/$$1
+      - traefik.http.services.conductor.loadbalancer.passhostheader=true
+      - com.molo17.conductor.type=module
+    environment:
+      - BASE_PATH=${BASE_PATH:-.}
+      - GLUESYNC_HOST=gluesync-core-hub
+      - WINDOWS_VERSION=2022
+    volumes:
+      - \\.\pipe\docker_engine:\\.\pipe\docker_engine
+      - ./shared:C:\opt\gluesync\data
+      - ./:C:\opt\gluesync-conductor\root-folder
+      - ./logs:C:\opt\gluesync-conductor\logs
+    networks:
+      - gluesync-windows-net
+
+  reverse-proxy:
+    image: molo17/traefik:3.6.2-win-nanoserver-ltsc2022
+    restart: unless-stopped
+    user: ContainerAdministrator
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - \\.\pipe\docker_engine:\\.\pipe\docker_engine
+      - ./proxy:C:\etc\traefik:ro
+    labels:
+      - com.molo17.conductor.type=third-party
+    networks:
+      - gluesync-windows-net
+
+  prometheus:
+    image: molo17/prometheus:3.5.0-win-nanoserver-ltsc2022
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.prometheus.entrypoints=websecure
+      - traefik.http.routers.prometheus.rule=PathPrefix(`/prometheus`)
+      - traefik.http.routers.prometheus.tls=true
+      - traefik.http.services.prometheus.loadbalancer.server.port=9090
+      - traefik.http.routers.prometheus.service=prometheus
+      - com.molo17.conductor.type=third-party
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.size=5GB
+      - --storage.tsdb.retention.time=5d
+      - --web.external-url=/prometheus/
+      - --web.route-prefix=/prometheus
+    volumes:
+      - ./prometheus:C:\etc\prometheus:ro
+        # - ./prometheus_data:C:\prometheus
+    networks:
+      - gluesync-windows-net
+
+  grafana:
+    # Grafana default credentials: admin | password
+    image: molo17/grafana:12.1.0-win-nanoserver-ltsc2022
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)
+      - traefik.http.routers.grafana.tls=true
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
+      - traefik.http.routers.grafana.service=grafana
+      - com.molo17.conductor.type=third-party
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=password
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ./grafana:C:\grafana\conf\provisioning
+        # - ./grafana:/var/lib/grafana
+    networks:
+      - gluesync-windows-net
+
+  portainer:
+    # Portainer default credentials: admin | passwordpassword
+    image: molo17/portainer:2.37.0-win-nanoserver-ltsc2022
+    restart: unless-stopped
+    ports:
+      - 9443:9443
+    volumes:
+      - \\.\pipe\docker_engine:\\.\pipe\docker_engine
+    command:
+      [
+        "--admin-password",
+        "$$2y$$05$$wxahdaIgY6yjxyPjvSqyr.NeLhCOY/pWLXSJykVsfUGaRXnjq3etK",
+      ]
+    labels:
+      - com.molo17.conductor.type=third-party
+    networks:
+      - gluesync-windows-net
+
+networks:
+  gluesync-windows-net:
+    driver: nat
