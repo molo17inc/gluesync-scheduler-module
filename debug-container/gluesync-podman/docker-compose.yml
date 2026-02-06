@@ -110,7 +110,6 @@ services:
       - ./shared:/opt/gluesync/shared:ro
       - ./data/chronos:/app/data
       - ./logs/chronos:/app/logs
-      - ./:/opt/gluesync-conductor/root-folder
     env_file:
       - path: .env
         required: false
