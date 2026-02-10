@@ -34,22 +34,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ScheduledJob, TaskType
+from gluesync_scheduler.models.models import ScheduledJob, TaskType, Setting
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 logger = logging.getLogger(__name__)
-
-# Validate the configured timezone
-configured_timezone = get_env_timezone('UTC')
-try:
-    pytz.timezone(configured_timezone)
-    logger.info(f"Using timezone: {configured_timezone}")
-except Exception as e:
-    logger.error(f"Invalid timezone configured: {configured_timezone}. Error: {str(e)}")
-    logger.warning("Falling back to UTC timezone")
-    configured_timezone = 'UTC'
 
 class JobService:
     """Service for managing scheduled jobs"""
@@ -58,6 +48,31 @@ class JobService:
         self.db = db
         # Use the singleton scheduler service instance
         self.scheduler_service = scheduler_service
+    
+    def _get_configured_timezone(self) -> str:
+        """Get the current configured timezone from database or environment.
+        
+        Returns:
+            The timezone string (e.g., 'Asia/Taipei', 'UTC')
+        """
+        # First try to get from database
+        timezone_setting = self.db.query(Setting).filter(Setting.key == "timezone").first()
+        if timezone_setting and timezone_setting.value:
+            timezone_name = timezone_setting.value
+            logger.info(f"Retrieved timezone from database: {timezone_name}")
+        else:
+            # Fall back to environment variable
+            timezone_name = get_env_timezone('UTC')
+            logger.info(f"Retrieved timezone from environment: {timezone_name}")
+        
+        # Validate the timezone
+        try:
+            pytz.timezone(timezone_name)
+            return timezone_name
+        except Exception as e:
+            logger.error(f"Invalid timezone configured: {timezone_name}. Error: {str(e)}")
+            logger.warning("Falling back to UTC timezone")
+            return 'UTC'
         
     def _extract_days_from_cron(self, cron_expression: str) -> List[str]:
         """Extract days of week from cron expression and convert to day names
@@ -307,16 +322,10 @@ class JobService:
             if job_data.cron_expression:
                 try:
                     from croniter import croniter
-                    # Validate and get the configured timezone
-                    current_timezone = configured_timezone  # Use the global value
-                    try:
-                        tz = pytz.timezone(current_timezone)
-                        logger.info(f"Using timezone for calculation: {current_timezone}")
-                    except Exception as e:
-                        logger.error(f"Invalid timezone: {current_timezone}. Error: {str(e)}")
-                        logger.warning("Falling back to UTC timezone")
-                        current_timezone = 'UTC'  # Update local copy
-                        tz = pytz.UTC
+                    # Get the current configured timezone from database
+                    current_timezone = self._get_configured_timezone()
+                    tz = pytz.timezone(current_timezone)
+                    logger.info(f"Using timezone for calculation: {current_timezone}")
                     
                     now = datetime.now(tz)
                     
@@ -371,7 +380,7 @@ class JobService:
                 # Set start_time to the calculated next run time
                 start_time=next_run_time,
                 # Always store the configured timezone name
-                timezone_name=configured_timezone,
+                timezone_name=self._get_configured_timezone(),
                 # Set the flag to track if job was created with cron expression
                 is_cron_expression=is_cron_expression
             )
@@ -595,16 +604,10 @@ class JobService:
             if cron_updated and db_job.cron_expression:
                 try:
                     from croniter import croniter
-                    # Validate and get the configured timezone
-                    current_timezone = configured_timezone  # Use the global value
-                    try:
-                        tz = pytz.timezone(current_timezone)
-                        logger.info(f"Using timezone for calculation: {current_timezone}")
-                    except Exception as e:
-                        logger.error(f"Invalid timezone: {current_timezone}. Error: {str(e)}")
-                        logger.warning("Falling back to UTC timezone")
-                        current_timezone = 'UTC'  # Update local copy
-                        tz = pytz.UTC
+                    # Get the current configured timezone from database
+                    current_timezone = self._get_configured_timezone()
+                    tz = pytz.timezone(current_timezone)
+                    logger.info(f"Using timezone for calculation: {current_timezone}")
                     
                     now = datetime.now(tz)
                     
