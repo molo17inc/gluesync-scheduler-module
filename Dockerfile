@@ -88,8 +88,10 @@ RUN mkdir -p /opt/gluesync/data && \
     mkdir -p /opt/gluesync/shared && \
     mkdir -p /app/data && \
     mkdir -p /app/logs && \
-    chmod -R 777 /app/data && \
-    chmod -R 777 /app/logs
+    chown -R $USER_UID:$USER_GID /opt/gluesync /app && \
+    chmod -R 755 /opt/gluesync && \
+    chmod -R 750 /app/data && \
+    chmod -R 750 /app/logs
 
 # Set environment variables
 # Core Hub settings
