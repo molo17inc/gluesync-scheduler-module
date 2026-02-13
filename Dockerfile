@@ -83,15 +83,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd --gid $USER_GID $USERNAME \
     && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME
 
-# Create Gluesync default directories and app data directory
-RUN mkdir -p /opt/gluesync/data && \
-    mkdir -p /opt/gluesync/shared && \
-    mkdir -p /app/data && \
-    mkdir -p /app/logs && \
-    chown -R $USER_UID:$USER_GID /opt/gluesync /app && \
-    chmod -R 755 /opt/gluesync && \
-    chmod -R 750 /app/data && \
-    chmod -R 750 /app/logs
+# Create Gluesync default directories and app data/log folders with proper ownership
+RUN install -d -m 755 -o $USER_UID -g $USER_GID /opt/gluesync && \
+    install -d -m 750 -o $USER_UID -g $USER_GID /opt/gluesync/data && \
+    install -d -m 750 -o $USER_UID -g $USER_GID /opt/gluesync/data/chronos && \
+    install -d -m 750 -o $USER_UID -g $USER_GID /opt/gluesync/shared && \
+    install -d -m 750 -o $USER_UID -g $USER_GID /app/data && \
+    install -d -m 750 -o $USER_UID -g $USER_GID /app/data/database && \
+    install -d -m 750 -o $USER_UID -g $USER_GID /app/logs && \
+    install -d -m 750 -o $USER_UID -g $USER_GID /app/logs/sdk && \
+    install -d -m 750 -o $USER_UID -g $USER_GID /app/logs/cron
 
 # Set environment variables
 # Core Hub settings
