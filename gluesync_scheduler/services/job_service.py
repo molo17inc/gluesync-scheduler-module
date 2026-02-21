@@ -353,7 +353,7 @@ class JobService:
             is_cron_expression = bool(job_data.cron_expression and not job_data.schedule)
             
             # Validate group jobs have group_ids
-            if job_data.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+            if job_data.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
                 if not job_data.group_ids or len(job_data.group_ids) == 0:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -448,7 +448,7 @@ class JobService:
             
             # Validate group jobs have group_ids (check both new task_type and existing)
             final_task_type = update_data.get("task_type", db_job.task_type)
-            if final_task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+            if final_task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
                 final_group_ids = update_data.get("group_ids", db_job.group_ids)
                 # Parse group_ids if it's a JSON string
                 if isinstance(final_group_ids, str) and final_group_ids:
@@ -921,40 +921,15 @@ class JobService:
                 action = "one-time-snapshot"
             elif job.task_type in [TaskType.GROUP_SNAPSHOT]:
                 action = "one-time-snapshot-group"
+            elif job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
+                action = "redo"
+            elif job.task_type == TaskType.GROUP_REDO:
+                action = "redo-group"
             else:
                 error_msg = f"Unknown task type: {job.task_type}"
                 logger.error(error_msg)
                 return False, error_msg, {}
-                
-            # For group operations, use CoreHub client directly instead of API endpoints
-            if job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
-                return self._execute_group_operation(job, group_ids, action)
-            else:
-                endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
-            
-            # Prepare the JSON payload
-            json_data = {}
-            
-            # Add entity_ids to the payload if present (for entity and pipeline operations)
-            if entity_ids and job.task_type not in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
-                json_data["entity_ids"] = entity_ids
-            
-            # Add group_ids to the payload if present (for group operations)
-            if group_ids and job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
-                json_data["group_ids"] = group_ids
-            
-            # Add with_snapshot for start operations if needed
-            if job.with_snapshot and job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.GROUP_START]:
-                json_data["with_snapshot"] = True
-            
-            # Add snapshotWriteMethod parameter for all operations that support it
-            snapshot_write_method = getattr(job, 'snapshot_write_method', 'UPSERT')
-            if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
-                json_data["snapshot_write_method"] = snapshot_write_method
-            
-            # Log the request details
-            logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
-            # Use a clean format to avoid any hidden characters
+
             logger.info(f"Endpoint: {method} {protocol}://localhost:{port}/api/pipelines/{job.pipeline_id}/{action}")
             logger.info(f"JSON Payload: {json_data}")
             

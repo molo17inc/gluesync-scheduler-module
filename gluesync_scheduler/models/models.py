@@ -41,6 +41,9 @@ class TaskType(enum.Enum):
     GROUP_START = "group_start"
     GROUP_STOP = "group_stop"
     GROUP_SNAPSHOT = "group_snapshot"
+    ENTITY_REDO = "entity_redo"
+    PIPELINE_REDO = "pipeline_redo"
+    GROUP_REDO = "group_redo"
 
 
 class ScheduledJob(Base):

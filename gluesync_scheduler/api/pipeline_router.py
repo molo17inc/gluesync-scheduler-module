@@ -227,6 +227,181 @@ async def play_pipeline(
             detail=f"Error starting pipeline: {str(e)}"
         )
 
+@router.post("/{pipeline_id}/redo", response_model=OperationResponse, summary="Trigger redo (snapshot + CDC restart) for a pipeline or specific entities")
+async def redo_pipeline(
+    request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline to redo"),
+    entity_ids: Optional[List[str]] = Query(None, description="Optional list of entity IDs to redo. If not provided, all entities in the pipeline will be included."),
+    with_snapshot: bool = Query(False, description="Whether to run snapshot before restarting CDC"),
+    snapshot_write_method: str = Query("UPSERT", description="Write method for snapshot: UPSERT or INSERT."),
+    body: dict = Body(default=None)
+):
+    """Trigger CoreHub redo command, optionally scoped to specific entities."""
+    cron_job_identifier = getattr(request.state, 'cron_job_identifier', None)
+
+    if body and 'entity_ids' in body and body['entity_ids']:
+        entity_ids = body['entity_ids']
+    if body and 'with_snapshot' in body:
+        with_snapshot = body['with_snapshot']
+    if body and 'snapshot_write_method' in body:
+        snapshot_write_method = body['snapshot_write_method']
+
+    logger.info(f"Received redo request for pipeline {pipeline_id}")
+    if entity_ids:
+        logger.info(f"Entity IDs: {entity_ids}")
+    logger.info(f"With snapshot: {with_snapshot} | snapshot_write_method={snapshot_write_method}")
+    if cron_job_identifier:
+        logger.info(f"Cron job identifier: {cron_job_identifier}")
+
+    try:
+        pipeline_manager = PipelineManager()
+
+        if entity_ids:
+            result = await pipeline_manager.redo_entities(pipeline_id, entity_ids, with_snapshot, snapshot_write_method)
+            message = f"Redo triggered successfully for entities in pipeline {pipeline_id}" if result else f"Failed to redo entities in pipeline {pipeline_id}"
+            details = {
+                "pipeline_id": pipeline_id,
+                "entities": entity_ids,
+                "with_snapshot": with_snapshot,
+                "snapshot_write_method": snapshot_write_method
+            }
+        else:
+            result = await pipeline_manager.redo_pipeline(pipeline_id, with_snapshot, snapshot_write_method)
+            message = f"Redo triggered successfully for pipeline {pipeline_id}" if result else f"Failed to redo pipeline {pipeline_id}"
+            details = {
+                "pipeline_id": pipeline_id,
+                "with_snapshot": with_snapshot,
+                "snapshot_write_method": snapshot_write_method
+            }
+
+        if not result:
+            if cron_job_identifier:
+                from gluesync_scheduler.db.database import SessionLocal
+                from gluesync_scheduler.cli.job_runner import update_job_status
+                try:
+                    update_job_status(cron_job_identifier, False, message)
+                    logger.info(f"Updated job status to failed for {cron_job_identifier}")
+                except Exception as update_error:
+                    logger.error(f"Error updating job status to failed: {str(update_error)}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
+
+        if cron_job_identifier:
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            try:
+                update_job_status(cron_job_identifier, True)
+                logger.info(f"Updated job status for {cron_job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Error updating job status: {str(update_error)}")
+
+        return {
+            "success": True,
+            "message": message,
+            "data": details
+        }
+    except Exception as e:
+        logger.error(f"Error triggering redo: {str(e)}")
+        if cron_job_identifier:
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            try:
+                update_job_status(cron_job_identifier, False, str(e))
+                logger.info(f"Updated job status to failed for {cron_job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Error updating job status to failed: {str(update_error)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error triggering redo: {str(e)}")
+
+
+@router.post(
+    "/{pipeline_id}/redo-group",
+    response_model=OperationResponse,
+    summary="Trigger redo (snapshot + CDC restart) for specific groups"
+)
+async def redo_groups(
+    request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline containing the groups"),
+    group_ids: Optional[List[str]] = Query(None, description="List of group IDs to redo"),
+    with_snapshot: bool = Query(False, description="Whether to perform a snapshot before restarting CDC"),
+    snapshot_write_method: str = Query("UPSERT", description="Write method for snapshot: UPSERT or INSERT."),
+    body: dict = Body(default=None)
+):
+    """Trigger redo for specific groups within a pipeline."""
+    cron_job_identifier = getattr(request.state, 'cron_job_identifier', None)
+
+    if body and 'group_ids' in body and body['group_ids']:
+        group_ids = body['group_ids']
+    if body and 'with_snapshot' in body:
+        with_snapshot = body['with_snapshot']
+    if body and 'snapshot_write_method' in body:
+        snapshot_write_method = body['snapshot_write_method']
+
+    if not group_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="group_ids must be provided for group redo operations"
+        )
+
+    logger.info(f"Received group redo request for pipeline {pipeline_id} | groups={group_ids}")
+    logger.info(f"With snapshot: {with_snapshot} | snapshot_write_method={snapshot_write_method}")
+    if cron_job_identifier:
+        logger.info(f"Cron job identifier: {cron_job_identifier}")
+
+    try:
+        pipeline_manager = PipelineManager()
+
+        if len(group_ids) == 1:
+            result = await pipeline_manager.redo_group(pipeline_id, group_ids[0], with_snapshot, snapshot_write_method)
+        else:
+            result = await pipeline_manager.redo_groups(pipeline_id, group_ids, with_snapshot, snapshot_write_method)
+
+        message = (
+            f"Redo triggered successfully for groups in pipeline {pipeline_id}"
+            if result else f"Failed to redo groups in pipeline {pipeline_id}"
+        )
+        details = {
+            "pipeline_id": pipeline_id,
+            "groups": group_ids,
+            "with_snapshot": with_snapshot,
+            "snapshot_write_method": snapshot_write_method
+        }
+
+        if not result:
+            if cron_job_identifier:
+                from gluesync_scheduler.db.database import SessionLocal
+                from gluesync_scheduler.cli.job_runner import update_job_status
+                try:
+                    update_job_status(cron_job_identifier, False, message)
+                    logger.info(f"Updated job status to failed for {cron_job_identifier}")
+                except Exception as update_error:
+                    logger.error(f"Error updating job status to failed: {str(update_error)}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
+
+        if cron_job_identifier:
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            try:
+                update_job_status(cron_job_identifier, True)
+                logger.info(f"Updated job status for {cron_job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Error updating job status: {str(update_error)}")
+
+        return {
+            "success": True,
+            "message": message,
+            "data": details
+        }
+    except Exception as e:
+        logger.error(f"Error triggering group redo: {str(e)}")
+        if cron_job_identifier:
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            try:
+                update_job_status(cron_job_identifier, False, str(e))
+                logger.info(f"Updated job status to failed for {cron_job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Error updating job status to failed: {str(update_error)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error triggering group redo: {str(e)}")
+
 @router.post("/{pipeline_id}/pause", response_model=OperationResponse, summary="Stop a pipeline or entities")
 async def pause_pipeline(
     request: Request,
