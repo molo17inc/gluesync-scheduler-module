@@ -903,11 +903,12 @@ class JobService:
             # Use HTTPS protocol when SSL is enabled
             ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
             protocol = "https" if ssl_enabled else "http"
-            port = int(os.getenv('PORT', '8000'))
-            base_url = f"{protocol}://localhost:{port}/api"
+            internal_host = os.getenv('SCHEDULER_INTERNAL_HOST', 'localhost')
+            internal_port = int(os.getenv('SCHEDULER_INTERNAL_PORT', '8000'))
+            base_url = f"{protocol}://{internal_host}:{internal_port}/api"
             
             # Clean log output to remove any potential hidden characters
-            logger.info(f"Using internal API URL: {protocol}://localhost:{port}/api (SSL: {ssl_enabled})")
+            logger.info(f"Using internal API URL: {base_url} (SSL: {ssl_enabled})")
             
             # Determine the endpoint based on task type and set the HTTP method
             method = "POST"  # All our endpoints use POST method
