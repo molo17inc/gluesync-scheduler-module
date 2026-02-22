@@ -383,7 +383,12 @@ class SchedulerService:
                         if job and job.last_error_message:
                             # Check if this is a recurring error
                             if job.last_run_error_time:
-                                time_since_last_error = datetime.now(timezone.utc) - job.last_run_error_time
+                                last_error_time = job.last_run_error_time
+                                if last_error_time.tzinfo is None:
+                                    last_error_time = last_error_time.replace(tzinfo=timezone.utc)
+
+                                current_time = datetime.now(timezone.utc)
+                                time_since_last_error = current_time - last_error_time
                                 if time_since_last_error < timedelta(hours=1):
                                     # If errors are happening frequently, log but don't raise to prevent scheduler crash
                                     logger.warning(f"Job {job_id} experiencing recurring errors - skipping exception raise to prevent scheduler crash")

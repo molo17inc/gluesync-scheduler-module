@@ -930,7 +930,36 @@ class JobService:
                 logger.error(error_msg)
                 return False, error_msg, {}
 
-            logger.info(f"Endpoint: {method} {protocol}://localhost:{port}/api/pipelines/{job.pipeline_id}/{action}")
+            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
+
+            # Prepare the JSON payload similar to CLI job runner
+            json_data = {}
+
+            if entity_ids:
+                json_data["entity_ids"] = entity_ids
+
+            if group_ids and job.task_type == TaskType.GROUP_REDO:
+                json_data["group_ids"] = group_ids
+
+            if job.with_snapshot and job.task_type in [
+                TaskType.PIPELINE_START,
+                TaskType.ENTITY_START,
+                TaskType.PIPELINE_REDO,
+                TaskType.ENTITY_REDO,
+                TaskType.GROUP_REDO,
+            ]:
+                json_data["with_snapshot"] = True
+
+            if job.snapshot_write_method and job.task_type in [
+                TaskType.PIPELINE_SNAPSHOT,
+                TaskType.ENTITY_SNAPSHOT,
+                TaskType.PIPELINE_REDO,
+                TaskType.ENTITY_REDO,
+                TaskType.GROUP_REDO,
+            ]:
+                json_data["snapshot_write_method"] = job.snapshot_write_method
+
+            logger.info(f"Endpoint: {method} {endpoint}")
             logger.info(f"JSON Payload: {json_data}")
             
             try:
