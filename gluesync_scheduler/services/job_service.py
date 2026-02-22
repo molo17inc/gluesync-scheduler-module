@@ -904,7 +904,10 @@ class JobService:
             ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
             protocol = "https" if ssl_enabled else "http"
             internal_host = os.getenv('SCHEDULER_INTERNAL_HOST', 'localhost')
-            internal_port = int(os.getenv('SCHEDULER_INTERNAL_PORT', '8000'))
+            default_internal_port = os.getenv('SCHEDULER_INTERNAL_PORT')
+            if default_internal_port is None:
+                default_internal_port = os.getenv('PORT', '8000')
+            internal_port = int(default_internal_port)
             base_url = f"{protocol}://{internal_host}:{internal_port}/api"
             
             # Clean log output to remove any potential hidden characters
@@ -930,6 +933,10 @@ class JobService:
                 error_msg = f"Unknown task type: {job.task_type}"
                 logger.error(error_msg)
                 return False, error_msg, {}
+
+            # For group-level operations we directly invoke CoreHub client, preserving legacy behavior
+            if job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
+                return self._execute_group_operation(job, group_ids, action)
 
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
 
