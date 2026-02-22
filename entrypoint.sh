@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 # Only auto-detect timezone if TIMEZONE isn't already set
