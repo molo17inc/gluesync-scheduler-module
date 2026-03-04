@@ -450,6 +450,23 @@ class CoreHubClient:
             
         return response is not None
     
+    def redo_entity(self, pipeline_id: str, entity_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
+        """Restart CDC for a specific entity after snapshot using redo command"""
+        path = f'/pipelines/{pipeline_id}/commands/sync/redo'
+        params = {
+            'entity': entity_id,
+            'withSnapshot': 'true' if with_snapshot else 'false',
+            'snapshotWriteMethod': snapshot_write_method
+        }
+
+        response = self.fetch_core_hub(path, method='POST', params=params)
+
+        if response and isinstance(response, dict) and response.get('status') == 'error':
+            logger.error(f"Error redoing entity {entity_id}: {response.get('message')}")
+            return False
+
+        return response is not None
+
     def stop_entity(self, pipeline_id: str, entity_id: str) -> bool:
         """Stop a specific entity in a pipeline"""
         path = f'/pipelines/{pipeline_id}/commands/sync/stop'
@@ -510,25 +527,40 @@ class CoreHubClient:
             'snapshotWriteMethod': snapshot_write_method
         }
             
+        response = self.fetch_core_hub(path, method='POST', params=params)
+        
+        # Check for auth errors specifically
+        if response and isinstance(response, dict) and response.get('status') == 'error':
+            logger.error(f"Error starting pipeline {pipeline_id}: {response.get('message')}")
+            return False
+            
+        return response is not None
+    
+    def redo_pipeline(self, pipeline_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
+        """Trigger redo command to run snapshot then restart CDC for entire pipeline"""
+        path = f'/pipelines/{pipeline_id}/commands/sync/redo'
+        params = {
+            'withSnapshot': 'true' if with_snapshot else 'false',
+            'snapshotWriteMethod': snapshot_write_method
+        }
+
         try:
             response = self.fetch_core_hub(path, method='POST', params=params)
-            
-            # Check for auth errors specifically
+
             if response and isinstance(response, dict) and response.get('status') == 'error':
-                logger.error(f"Error starting pipeline {pipeline_id}: {response.get('message')}")
+                logger.error(f"Error redoing pipeline {pipeline_id}: {response.get('message')}")
                 return False
-                
+
             success = response is not None
             if success:
-                logger.info(f"Successfully started pipeline {pipeline_id}")
+                logger.info(f"Successfully triggered redo for pipeline {pipeline_id}")
             else:
-                logger.error(f"Failed to start pipeline {pipeline_id}")
+                logger.error(f"Failed to trigger redo for pipeline {pipeline_id}")
             return success
         except Exception as e:
-            logger.error(f"Error starting pipeline {pipeline_id}: {str(e)}")
-            # Don't hide errors anymore
+            logger.error(f"Error redoing pipeline {pipeline_id}: {str(e)}")
             return False
-    
+
     def stop_pipeline(self, pipeline_id: str) -> bool:
         """Stop all entities in a pipeline"""
         path = f'/pipelines/{pipeline_id}/commands/sync/stop'
@@ -680,6 +712,33 @@ class CoreHubClient:
             logger.error(f"Error resyncing group {group_id} in pipeline {pipeline_id}: {str(e)}")
             return False
 
+    def redo_group(self, pipeline_id: str, group_id: str, with_snapshot: bool = False,
+                   snapshot_write_method: str = 'UPSERT') -> bool:
+        """Trigger redo command for all entities within a group"""
+        path = f'/pipelines/{pipeline_id}/commands/sync/redo-group'
+        params = {
+            'groupId': group_id,
+            'withSnapshot': 'true' if with_snapshot else 'false',
+            'snapshotWriteMethod': snapshot_write_method
+        }
+
+        try:
+            response = self.fetch_core_hub(path, method='POST', params=params)
+
+            if response and isinstance(response, dict) and response.get('status') == 'error':
+                logger.error(f"Error redoing group {group_id} in pipeline {pipeline_id}: {response.get('message')}")
+                return False
+
+            success = response is not None
+            if success:
+                logger.info(f"Successfully triggered redo for group {group_id} in pipeline {pipeline_id}")
+            else:
+                logger.error(f"Failed to trigger redo for group {group_id} in pipeline {pipeline_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error redoing group {group_id} in pipeline {pipeline_id}: {str(e)}")
+            return False
+
 
 class PipelineManager:
     """Manager for pipeline operations"""
@@ -771,6 +830,56 @@ class PipelineManager:
             # Wait a short time between entity operations to avoid overwhelming the Core Hub
             time.sleep(self.client.entity_start_timeout)
         
+        return success
+
+    async def redo_group(self, pipeline_id: str, group_id: str, with_snapshot: bool = False,
+                         snapshot_write_method: str = 'UPSERT') -> bool:
+        """Trigger redo for all entities in a specific group"""
+        logger.info(
+            f"Redo group {group_id} in pipeline {pipeline_id} (with_snapshot={with_snapshot}, snapshot_write_method={snapshot_write_method})"
+        )
+        return self.client.redo_group(pipeline_id, group_id, with_snapshot, snapshot_write_method)
+
+    async def redo_groups(self, pipeline_id: str, group_ids: List[str], with_snapshot: bool = False,
+                          snapshot_write_method: str = 'UPSERT') -> bool:
+        """Trigger redo for multiple groups in a pipeline"""
+        success = True
+
+        for group_id in group_ids:
+            logger.info(f"Redoing group {group_id}")
+            result = await self.redo_group(pipeline_id, group_id, with_snapshot, snapshot_write_method)
+            if not result:
+                logger.error(f"Failed to redo group {group_id}")
+                success = False
+
+            time.sleep(self.client.entity_start_timeout)
+
+        return success
+
+    async def redo_pipeline(self, pipeline_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
+        """Trigger redo for all entities in a pipeline"""
+        logger.info(
+            f"Redo pipeline {pipeline_id} (with_snapshot={with_snapshot}, snapshot_write_method={snapshot_write_method})"
+        )
+        return self.client.redo_pipeline(pipeline_id, with_snapshot, snapshot_write_method)
+
+    async def redo_entities(self, pipeline_id: str, entity_ids: List[str], with_snapshot: bool = False,
+                            snapshot_write_method: str = 'UPSERT') -> bool:
+        """Trigger redo for specific entities in a pipeline"""
+        logger.info(
+            f"Redo entities {entity_ids} in pipeline {pipeline_id} (with_snapshot={with_snapshot}, snapshot_write_method={snapshot_write_method})"
+        )
+        success = True
+
+        for entity_id in entity_ids:
+            logger.info(f"Redoing entity {entity_id}")
+            result = self.client.redo_entity(pipeline_id, entity_id, with_snapshot, snapshot_write_method)
+            if not result:
+                logger.error(f"Failed to redo entity {entity_id}")
+                success = False
+
+            time.sleep(self.client.entity_start_timeout)
+
         return success
     
     async def pause_pipeline(self, pipeline_id: str) -> bool:

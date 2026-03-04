@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 5s
+scrape_configs:
+  - job_name: prometheus
+    metrics_path: "/prometheus/metrics"
+    static_configs:
+      - targets:
+          - prometheus:9090
+  - job_name: gluesync-core-hub
+    # decomment in case you're using HTTPS
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true # use it in case you're adopting self-signed certs
+    static_configs:
+      - targets:
+          - gluesync-core-hub:1717

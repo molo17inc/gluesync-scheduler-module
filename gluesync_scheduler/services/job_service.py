@@ -34,22 +34,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ScheduledJob, TaskType
+from gluesync_scheduler.models.models import ScheduledJob, TaskType, Setting
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 logger = logging.getLogger(__name__)
-
-# Validate the configured timezone
-configured_timezone = get_env_timezone('UTC')
-try:
-    pytz.timezone(configured_timezone)
-    logger.info(f"Using timezone: {configured_timezone}")
-except Exception as e:
-    logger.error(f"Invalid timezone configured: {configured_timezone}. Error: {str(e)}")
-    logger.warning("Falling back to UTC timezone")
-    configured_timezone = 'UTC'
 
 class JobService:
     """Service for managing scheduled jobs"""
@@ -58,6 +48,31 @@ class JobService:
         self.db = db
         # Use the singleton scheduler service instance
         self.scheduler_service = scheduler_service
+    
+    def _get_configured_timezone(self) -> str:
+        """Get the current configured timezone from database or environment.
+        
+        Returns:
+            The timezone string (e.g., 'Asia/Taipei', 'UTC')
+        """
+        # First try to get from database
+        timezone_setting = self.db.query(Setting).filter(Setting.key == "timezone").first()
+        if timezone_setting and timezone_setting.value:
+            timezone_name = timezone_setting.value
+            logger.info(f"Retrieved timezone from database: {timezone_name}")
+        else:
+            # Fall back to environment variable
+            timezone_name = get_env_timezone('UTC')
+            logger.info(f"Retrieved timezone from environment: {timezone_name}")
+        
+        # Validate the timezone
+        try:
+            pytz.timezone(timezone_name)
+            return timezone_name
+        except Exception as e:
+            logger.error(f"Invalid timezone configured: {timezone_name}. Error: {str(e)}")
+            logger.warning("Falling back to UTC timezone")
+            return 'UTC'
         
     def _extract_days_from_cron(self, cron_expression: str) -> List[str]:
         """Extract days of week from cron expression and convert to day names
@@ -307,16 +322,10 @@ class JobService:
             if job_data.cron_expression:
                 try:
                     from croniter import croniter
-                    # Validate and get the configured timezone
-                    current_timezone = configured_timezone  # Use the global value
-                    try:
-                        tz = pytz.timezone(current_timezone)
-                        logger.info(f"Using timezone for calculation: {current_timezone}")
-                    except Exception as e:
-                        logger.error(f"Invalid timezone: {current_timezone}. Error: {str(e)}")
-                        logger.warning("Falling back to UTC timezone")
-                        current_timezone = 'UTC'  # Update local copy
-                        tz = pytz.UTC
+                    # Get the current configured timezone from database
+                    current_timezone = self._get_configured_timezone()
+                    tz = pytz.timezone(current_timezone)
+                    logger.info(f"Using timezone for calculation: {current_timezone}")
                     
                     now = datetime.now(tz)
                     
@@ -344,7 +353,7 @@ class JobService:
             is_cron_expression = bool(job_data.cron_expression and not job_data.schedule)
             
             # Validate group jobs have group_ids
-            if job_data.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+            if job_data.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
                 if not job_data.group_ids or len(job_data.group_ids) == 0:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -371,7 +380,7 @@ class JobService:
                 # Set start_time to the calculated next run time
                 start_time=next_run_time,
                 # Always store the configured timezone name
-                timezone_name=configured_timezone,
+                timezone_name=self._get_configured_timezone(),
                 # Set the flag to track if job was created with cron expression
                 is_cron_expression=is_cron_expression
             )
@@ -439,7 +448,7 @@ class JobService:
             
             # Validate group jobs have group_ids (check both new task_type and existing)
             final_task_type = update_data.get("task_type", db_job.task_type)
-            if final_task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+            if final_task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
                 final_group_ids = update_data.get("group_ids", db_job.group_ids)
                 # Parse group_ids if it's a JSON string
                 if isinstance(final_group_ids, str) and final_group_ids:
@@ -595,16 +604,10 @@ class JobService:
             if cron_updated and db_job.cron_expression:
                 try:
                     from croniter import croniter
-                    # Validate and get the configured timezone
-                    current_timezone = configured_timezone  # Use the global value
-                    try:
-                        tz = pytz.timezone(current_timezone)
-                        logger.info(f"Using timezone for calculation: {current_timezone}")
-                    except Exception as e:
-                        logger.error(f"Invalid timezone: {current_timezone}. Error: {str(e)}")
-                        logger.warning("Falling back to UTC timezone")
-                        current_timezone = 'UTC'  # Update local copy
-                        tz = pytz.UTC
+                    # Get the current configured timezone from database
+                    current_timezone = self._get_configured_timezone()
+                    tz = pytz.timezone(current_timezone)
+                    logger.info(f"Using timezone for calculation: {current_timezone}")
                     
                     now = datetime.now(tz)
                     
@@ -900,11 +903,15 @@ class JobService:
             # Use HTTPS protocol when SSL is enabled
             ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
             protocol = "https" if ssl_enabled else "http"
-            port = int(os.getenv('PORT', '8000'))
-            base_url = f"{protocol}://localhost:{port}/api"
+            internal_host = os.getenv('SCHEDULER_INTERNAL_HOST', 'localhost')
+            default_internal_port = os.getenv('SCHEDULER_INTERNAL_PORT')
+            if default_internal_port is None:
+                default_internal_port = os.getenv('PORT', '8000')
+            internal_port = int(default_internal_port)
+            base_url = f"{protocol}://{internal_host}:{internal_port}/api"
             
             # Clean log output to remove any potential hidden characters
-            logger.info(f"Using internal API URL: {protocol}://localhost:{port}/api (SSL: {ssl_enabled})")
+            logger.info(f"Using internal API URL: {base_url} (SSL: {ssl_enabled})")
             
             # Determine the endpoint based on task type and set the HTTP method
             method = "POST"  # All our endpoints use POST method
@@ -918,41 +925,49 @@ class JobService:
                 action = "one-time-snapshot"
             elif job.task_type in [TaskType.GROUP_SNAPSHOT]:
                 action = "one-time-snapshot-group"
+            elif job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
+                action = "redo"
+            elif job.task_type == TaskType.GROUP_REDO:
+                action = "redo-group"
             else:
                 error_msg = f"Unknown task type: {job.task_type}"
                 logger.error(error_msg)
                 return False, error_msg, {}
-                
-            # For group operations, use CoreHub client directly instead of API endpoints
-            if job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+
+            # For group-level operations we directly invoke CoreHub client, preserving legacy behavior
+            if job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
                 return self._execute_group_operation(job, group_ids, action)
-            else:
-                endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
-            
-            # Prepare the JSON payload
+
+            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
+
+            # Prepare the JSON payload similar to CLI job runner
             json_data = {}
-            
-            # Add entity_ids to the payload if present (for entity and pipeline operations)
-            if entity_ids and job.task_type not in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+
+            if entity_ids:
                 json_data["entity_ids"] = entity_ids
-            
-            # Add group_ids to the payload if present (for group operations)
-            if group_ids and job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT]:
+
+            if group_ids and job.task_type == TaskType.GROUP_REDO:
                 json_data["group_ids"] = group_ids
-            
-            # Add with_snapshot for start operations if needed
-            if job.with_snapshot and job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.GROUP_START]:
+
+            if job.with_snapshot and job.task_type in [
+                TaskType.PIPELINE_START,
+                TaskType.ENTITY_START,
+                TaskType.PIPELINE_REDO,
+                TaskType.ENTITY_REDO,
+                TaskType.GROUP_REDO,
+            ]:
                 json_data["with_snapshot"] = True
-            
-            # Add snapshotWriteMethod parameter for all operations that support it
-            snapshot_write_method = getattr(job, 'snapshot_write_method', 'UPSERT')
-            if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
-                json_data["snapshot_write_method"] = snapshot_write_method
-            
-            # Log the request details
-            logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
-            # Use a clean format to avoid any hidden characters
-            logger.info(f"Endpoint: {method} {protocol}://localhost:{port}/api/pipelines/{job.pipeline_id}/{action}")
+
+            if job.snapshot_write_method and job.task_type in [
+                TaskType.PIPELINE_SNAPSHOT,
+                TaskType.ENTITY_SNAPSHOT,
+                TaskType.PIPELINE_REDO,
+                TaskType.ENTITY_REDO,
+                TaskType.GROUP_REDO,
+            ]:
+                json_data["snapshot_write_method"] = job.snapshot_write_method
+
+            logger.info(f"Endpoint: {method} {endpoint}")
             logger.info(f"JSON Payload: {json_data}")
             
             try:

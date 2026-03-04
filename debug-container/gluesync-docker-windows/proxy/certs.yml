@@ -1,0 +1,6 @@
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: C:\etc\traefik\gluesync-cert.pem
+        keyFile: C:\etc\traefik\gluesync-key.pem

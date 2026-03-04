@@ -59,3 +59,11 @@ site/
 # Project specific
 scheduler.db
 gs-license.dat
+*.jks
+debug-container/**/data
+!debug-container/**/data/**/
+!debug-container/**/data/**/.gitkeep
+debug-container/**/logs
+!debug-container/**/logs/**/
+!debug-container/**/logs/**/.gitkeep
+VERSION

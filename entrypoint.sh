@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 # Only auto-detect timezone if TIMEZONE isn't already set
@@ -29,12 +29,6 @@ else
 fi
 
 echo "Detected TIMEZONE: $TIMEZONE"
-
-# Create necessary directories
-mkdir -p /app/data
-mkdir -p /app/logs
-chmod -R 777 /app/data
-chmod -R 777 /app/logs
 
 # Make sure run_job.sh and run_scheduler.py are executable
 if [ -f "/app/run_job.sh" ]; then

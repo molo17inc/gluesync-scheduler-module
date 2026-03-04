@@ -177,6 +177,14 @@ def execute_job(job: ScheduledJob) -> bool:
                 entity_ids = json.loads(job.entity_ids)
             except json.JSONDecodeError:
                 logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
+
+        # Parse group_ids if present
+        group_ids = []
+        if job.group_ids:
+            try:
+                group_ids = json.loads(job.group_ids)
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse group_ids JSON: {job.group_ids}")
         
         # Use HTTPS protocol when SSL is enabled
         ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
@@ -193,6 +201,10 @@ def execute_job(job: ScheduledJob) -> bool:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/pause"
         elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/one-time-snapshot"
+        elif job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
+            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo"
+        elif job.task_type == TaskType.GROUP_REDO:
+            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo-group"
         else:
             logger.error(f"Unknown task type: {job.task_type}")
             return False
@@ -203,10 +215,31 @@ def execute_job(job: ScheduledJob) -> bool:
         # Add entity_ids to the payload if present
         if entity_ids:
             json_data["entity_ids"] = entity_ids
-        
-        # Add with_snapshot for start operations if needed
-        if job.with_snapshot and job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
+
+        # Add group_ids for group redo operations
+        if group_ids and job.task_type == TaskType.GROUP_REDO:
+            json_data["group_ids"] = group_ids
+
+        # Add with_snapshot for operations that support snapshot flag
+        if job.with_snapshot and job.task_type in [
+            TaskType.PIPELINE_START,
+            TaskType.ENTITY_START,
+            TaskType.PIPELINE_REDO,
+            TaskType.ENTITY_REDO,
+            TaskType.GROUP_REDO,
+        ]:
             json_data["with_snapshot"] = True
+
+        # Include snapshot_write_method where applicable (snapshot, redo)
+        if job.snapshot_write_method:
+            if job.task_type in [
+                TaskType.PIPELINE_SNAPSHOT,
+                TaskType.ENTITY_SNAPSHOT,
+                TaskType.PIPELINE_REDO,
+                TaskType.ENTITY_REDO,
+                TaskType.GROUP_REDO,
+            ]:
+                json_data["snapshot_write_method"] = job.snapshot_write_method
         
         # Log the request details
         logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")

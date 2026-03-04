@@ -1,0 +1,223 @@
+#
+#                   Welcome to the Gluesync trial kit!
+#
+#   This kit contains the necessary minimum set of services to run your trial
+#   a license file valid for 30 days has been included within the present kit for you
+#   to evaluate our product.
+#
+#   Here are some helpful links you might like to checkout first:
+#
+#   Official product documentation available at: https://docs.molo17.com/gluesync/
+#   Product support: https://support.molo17.com
+#   Sales representative: sales@molo17.com
+#
+#   Our product support team is available anytime to support you throughout the product evaluation at no cost.
+#
+#   We wish you a great journey while evaluating our product :-)
+#
+#   Steps to run this kit are the following:
+#     1. Move inside the folder containing the kit (from your terminal: "cd xyz")
+#     2. Hit "docker compose up -d" with your terminal command line
+#     3. Go to https://localhost using your favourite web browser
+#     4. Default control plane credentials are:
+#           username: admin
+#           password: admin
+#
+#   TIP: We've also included monitoring tools for you to manage and observe the Gluesync cluster:
+#
+#   Portainer - Docker management UI
+#   URL: https://localhost:9443
+#   Username: admin
+#   Password: passwordpassword
+#
+#   Grafana - Metrics and monitoring dashboards
+#   URL: https://localhost/grafana
+#   Username: admin
+#   Password: password
+#
+#   Prometheus - Metrics collection and querying
+#   URL: https://localhost/prometheus
+#
+#   To learn more about the Docker compose kit and how to get the most out of it,
+#   we suggest you check out the following link from our online documentation:
+#   https://docs.molo17.com/gluesync/v2.1/deploy-and-run/docker-compose.html.
+#
+#   Enjoy!
+
+name: gluesync
+
+services:
+  gluesync-core-hub:
+    restart: unless-stopped
+    image: molo17/gluesync-core-hub:latest
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: 3.0
+    #       memory: 3.0G
+    #environment:
+    # Time zone: defaults to UTC, you can change it to match yours (https://docs.diladele.com/docker/timezones.html)
+    # - TZ: Etc/UTC
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.corehub.entrypoints=websecure
+      - traefik.http.routers.corehub.rule=PathPrefix(`/`)
+      - traefik.http.routers.corehub.tls=true
+      - traefik.http.services.corehub.loadbalancer.server.port=1717
+      - traefik.http.services.corehub.loadbalancer.server.scheme=https
+      - traefik.http.routers.corehub.service=corehub
+      - traefik.http.services.corehub.loadbalancer.passhostheader=true
+      - com.molo17.conductor.type=core-hub
+    environment:
+      - SSL_ENABLED=true
+      - LOG_CONFIG_FILE=/opt/gluesync/shared/logback.xml
+      - GRAFANA_REMOTE_ADDRESS=/grafana/d/fecxnzptcq8zkd/core-hub-metrics
+    volumes:
+      - ./shared:/opt/gluesync/shared
+      - ./bootstrap-core-hub.json:/opt/gluesync/data/bootstrap-core-hub.json
+      - ./logs/core-hub:/opt/gluesync/logs
+      - ./data/core-hub:/opt/gluesync/data
+    env_file:
+      - path: .env
+        required: false
+      - path: /opt/gluesync-conductor/root-folder/.env
+        required: false
+
+  gluesync-chronos:
+    restart: unless-stopped
+    # image: molo17/gluesync-chronos:0.1.36
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.chronos.rule=PathPrefix(`/chronos/`) || PathPrefix(`/api/`) || PathPrefix(`/chronos/api/`)
+      - traefik.http.routers.chronos.entrypoints=websecure
+      - traefik.http.routers.chronos.tls=true
+      - traefik.http.services.chronos.loadbalancer.server.port=1717
+      - traefik.http.services.chronos.loadbalancer.server.scheme=https
+      - traefik.http.routers.chronos.middlewares=chronos@docker
+      - traefik.http.routers.chronos.service=chronos
+      - traefik.http.middlewares.chronos.replacepathregex.regex=^/chronos/api/(.*)
+      - traefik.http.middlewares.chronos.replacepathregex.replacement=/api/$$1
+      - traefik.http.services.chronos.loadbalancer.passhostheader=true
+      - com.molo17.conductor.type=module
+    environment:
+      - SSL_ENABLED=true
+      - SSL_SKIP_VERIFY=true
+      - TIMEZONE=UTC # optionally hardcode timezone value in IANA format (es. Europe/Rome, from IANA database)
+    volumes:
+      - ./shared:/opt/gluesync/shared:ro
+      - ./data/chronos:/app/data
+      - ./logs/chronos:/app/logs
+    env_file:
+      - path: .env
+        required: false
+      - path: /opt/gluesync-conductor/root-folder/.env
+        required: false
+
+  gluesync-conductor:
+    restart: unless-stopped
+    image: molo17/gluesync-conductor:0.6.2
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.conductor.rule=PathPrefix(`/conductor/api/`)
+      - traefik.http.routers.conductor.entrypoints=websecure
+      - traefik.http.routers.conductor.tls=true
+      - traefik.http.services.conductor.loadbalancer.server.port=1717
+      - traefik.http.services.conductor.loadbalancer.server.scheme=https
+      - traefik.http.routers.conductor.middlewares=conductor@docker
+      - traefik.http.routers.conductor.service=conductor
+      - traefik.http.middlewares.conductor.replacepathregex.regex=^/conductor/api/(.*)
+      - traefik.http.middlewares.conductor.replacepathregex.replacement=/$$1
+      - traefik.http.services.conductor.loadbalancer.passhostheader=true
+      - com.molo17.conductor.type=module
+    environment:
+      - BASE_PATH=$PWD
+      - SSL_ENABLED=true
+      - SSL_SKIP_VERIFY=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/opt/gluesync-conductor/root-folder
+      - ./shared/:/opt/gluesync/data
+      - ./docker-compose.yml:/opt/gluesync-conductor/docker-compose.yml
+      - ./logs:/opt/gluesync-conductor/logs
+    env_file:
+      - path: .env
+        required: false
+      - path: /opt/gluesync-conductor/root-folder/.env
+        required: false
+
+  reverse-proxy:
+    restart: unless-stopped
+    image: molo17/traefik:3.6.2
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./proxy/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./proxy/certs.yml:/etc/traefik/certs.yml:ro
+      - ./shared/gluesync-cert.pem:/etc/traefik/gluesync-cert.pem:ro
+      - ./shared/gluesync-key.pem:/etc/traefik/gluesync-key.pem:ro
+    labels:
+      - com.molo17.conductor.type=third-party
+
+  prometheus:
+    restart: unless-stopped
+    image: molo17/prometheus:3.8.0
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.prometheus.entrypoints=websecure
+      - traefik.http.routers.prometheus.rule=PathPrefix(`/prometheus`)
+      - traefik.http.routers.prometheus.tls=true
+      - traefik.http.services.prometheus.loadbalancer.server.port=9090
+      - traefik.http.routers.prometheus.service=prometheus
+      - com.molo17.conductor.type=third-party
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+        # - ./data/prometheus:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.size=5GB
+      - --storage.tsdb.retention.time=5d
+      - --web.external-url=/prometheus/
+      - --web.route-prefix=/prometheus
+  grafana:
+    # Grafana default credentials: admin | password
+    restart: unless-stopped
+    image: molo17/grafana:12.3.0
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)
+      - traefik.http.routers.grafana.tls=true
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
+      - traefik.http.routers.grafana.service=grafana
+      - com.molo17.conductor.type=third-party
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=password
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ./grafana:/etc/grafana/provisioning
+        # - ./data:/var/lib/grafana
+
+  portainer:
+    # Portainer default credentials: admin | passwordpassword
+    image: molo17/portainer:2.33.6
+    restart: unless-stopped
+    ports:
+      - 9443:9443
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # - ./portainer_data:/data
+    command:
+      [
+        "--admin-password",
+        "$$2y$$05$$wxahdaIgY6yjxyPjvSqyr.NeLhCOY/pWLXSJykVsfUGaRXnjq3etK",
+      ]
+
+    labels:
+      - com.molo17.conductor.type=third-party

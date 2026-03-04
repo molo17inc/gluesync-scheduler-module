@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<included>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>
+                %d{yyyy-MM-dd'T'HH:mm:ss.SSS} [%t] %c{0} %p - %msg%n
+            </pattern>
+        </encoder>
+    </appender>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+       <file>C:\opt\gluesync\logs\${JAR_NAME:-gluesync}.log</file>
+       <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+           <fileNamePattern>C:\opt\gluesync\logs\archived\${JAR_NAME:-gluesync}.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+           <!-- each archived file, size max 100MB -->
+           <maxFileSize>100MB</maxFileSize>
+           <!-- total size of all archive files, if total size > 5GB, it will delete old archived file -->
+           <totalSizeCap>5GB</totalSizeCap>
+           <!-- 5 days to keep -->
+           <maxHistory>5</maxHistory>
+       </rollingPolicy>
+       <encoder>
+           <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSS} %c{1} %p %m%n</pattern>
+       </encoder>
+   </appender>
+
+    <logger name="com.molo17.gluesync" level="debug" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+
+</included>

@@ -1,0 +1,18 @@
+entryPoints:
+  # web:
+  #   address: ":80"
+  websecure:
+    address: ":443"
+
+log:
+  level: INFO
+
+providers:
+  docker:
+    exposedByDefault: false
+    endpoint: "unix:///var/run/docker.sock"
+  file:
+    filename: "/etc/traefik/certs.yml"
+    watch: true
+serversTransport:
+  insecureSkipVerify: true
