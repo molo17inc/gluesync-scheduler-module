@@ -246,6 +246,11 @@ async def redo_pipeline(
     if body and 'snapshot_write_method' in body:
         snapshot_write_method = body['snapshot_write_method']
 
+    # Force snapshot stage for every redo invocation, regardless of caller payload
+    if not with_snapshot:
+        logger.info("Overriding with_snapshot to True for redo operation")
+        with_snapshot = True
+
     logger.info(f"Received redo request for pipeline {pipeline_id}")
     if entity_ids:
         logger.info(f"Entity IDs: {entity_ids}")
@@ -340,6 +345,11 @@ async def redo_groups(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="group_ids must be provided for group redo operations"
         )
+
+    # Force snapshot stage for group redo as well to match pipeline behavior
+    if not with_snapshot:
+        logger.info("Overriding with_snapshot to True for group redo operation")
+        with_snapshot = True
 
     logger.info(f"Received group redo request for pipeline {pipeline_id} | groups={group_ids}")
     logger.info(f"With snapshot: {with_snapshot} | snapshot_write_method={snapshot_write_method}")
