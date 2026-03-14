@@ -121,7 +121,7 @@
 
     # Save tarball and upload to FTP before pushing images
     - |
-      $tarDir = "docker-images-windows"
+      $tarDir = Join-Path $env:CI_PROJECT_DIR "docker-images-windows"
       $null = New-Item -ItemType Directory -Path $tarDir -Force
       $rawTarName = "${env:APP_NAME}-${env:WINDOWS_TAG}.tar"
       $compressedTarName = "${rawTarName}.gz"
