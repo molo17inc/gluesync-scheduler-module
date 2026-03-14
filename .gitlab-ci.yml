@@ -55,17 +55,55 @@ deploy-linux:
   script:
     - echo "Building & deploying started..."
 
-    - apk add --no-cache bash
+    - apk add --no-cache bash curl
 
     - |
+      set -euo pipefail
+
       # Extract version part from tag
-      TAGPART=`echo $CI_COMMIT_TAG | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)'`
-      DEFAULT_NAME=${DOCKER_REGISTRY}/${APP_NAME}
+      TAGPART=$(echo "$CI_COMMIT_TAG" | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)')
+      DEFAULT_NAME="${DOCKER_REGISTRY}/${APP_NAME}"
       VERSION_TAG="${DEFAULT_NAME}:${TAGPART}"
+
+      # Determine release type based on tag prefix
+      if [[ "$CI_COMMIT_TAG" == release-* ]]; then
+        RELEASE_TYPE="GA"
+      elif [[ "$CI_COMMIT_TAG" == beta-* ]]; then
+        RELEASE_TYPE="BETA"
+      elif [[ "$CI_COMMIT_TAG" == tag-* ]]; then
+        RELEASE_TYPE="ALPHA"
+      else
+        echo "Unknown tag format: $CI_COMMIT_TAG"
+        exit 1
+      fi
+
+      LOWER_RELEASE_DIR=$(echo "$RELEASE_TYPE" | tr '[:upper:]' '[:lower:]')
+      FTP_RELEASE_DIR="/releases/${LOWER_RELEASE_DIR}"
+
+      export TAGPART DEFAULT_NAME VERSION_TAG RELEASE_TYPE FTP_RELEASE_DIR
 
       # Create VERSION file
       echo "${TAGPART}" > VERSION
       echo "VERSION file created with content: $(cat VERSION)"
+
+    - |
+      set -euo pipefail
+
+      TAR_DIR="docker-images-linux"
+      mkdir -p "$TAR_DIR"
+      TAR_FILE="${TAR_DIR}/${APP_NAME}-${TAGPART}.tar.gz"
+
+      echo "Building local image for FTP export: $VERSION_TAG"
+      docker build --no-cache --tag "$VERSION_TAG" .
+
+      echo "Saving Docker image to $TAR_FILE"
+      docker save "$VERSION_TAG" | gzip > "$TAR_FILE"
+
+      echo "Uploading $(basename "$TAR_FILE") to ftp://${FTP_SITE}${FTP_RELEASE_DIR}/"
+      curl --fail -T "$TAR_FILE" --user "$FTP_USER:$FTP_PASSWORD" "ftp://${FTP_SITE}${FTP_RELEASE_DIR}/$(basename "$TAR_FILE")"
+
+      rm -f "$TAR_FILE"
+      echo "FTP upload completed"
 
     # Set up Docker login
     - docker login -u danieleangeli -p "$CI_REGISTRY_PASSWORD"
@@ -101,9 +139,7 @@ deploy-linux:
           --tag "$VERSION_TAG" \
           --push .
       elif [[ $CI_COMMIT_TAG == tag-* ]]; then
-        echo "Building amd64-only version without latest tag..."
-        # Build and push only amd64 image without latest tag
-        docker build --no-cache --tag "$VERSION_TAG" .
+        echo "Pushing amd64-only image without latest tag..."
         docker push "$VERSION_TAG"
       else
         echo "Unknown tag format: $CI_COMMIT_TAG"
@@ -122,7 +158,7 @@ update_budibase_version:
     - apk add --no-cache bash curl jq
     - |
       set -euo pipefail
-      
+
       # Determine RELEASE_TYPE and MODULE_VERSION based on tag
       if [ -n "${CI_COMMIT_TAG:-}" ]; then
         MODULE_VERSION=$(echo "$CI_COMMIT_TAG" | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)')
@@ -141,11 +177,11 @@ update_budibase_version:
         echo "[ERROR] Not a tracked tag"
         exit 1
       fi
-      
+
       BUILD_TAG="chronos"
-      
+
       echo "[INFO] Updating Budibase version: BUILD_TAG=$BUILD_TAG, MODULE_VERSION=$MODULE_VERSION, RELEASE_TYPE=$RELEASE_TYPE"
-      
+
       # Search for existing row
       SEARCH_PAYLOAD="{
         \"query\": {
@@ -222,6 +258,6 @@ update_budibase_version:
           exit 1
       fi
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^release-/'
-    - if: '$CI_COMMIT_TAG =~ /^beta-/'
-    - if: '$CI_COMMIT_TAG =~ /^tag-/'
+    - if: "$CI_COMMIT_TAG =~ /^release-/"
+    - if: "$CI_COMMIT_TAG =~ /^beta-/"
+    - if: "$CI_COMMIT_TAG =~ /^tag-/"

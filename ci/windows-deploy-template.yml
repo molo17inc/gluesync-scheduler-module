@@ -18,6 +18,81 @@
     - $VERSION_TAG_WINDOWS = "${IMAGE_NAME}:${TAG_PART}-win-nanoserver-$env:WINDOWS_TAG"
     - "Write-Host Image name: $IMAGE_NAME; Write-Host Version tag: $VERSION_TAG_WINDOWS"
 
+    # Determine release type for FTP destination
+    - |
+      if ($env:CI_COMMIT_TAG -match '^release-') {
+        $env:RELEASE_TYPE = 'GA'
+      }
+      elseif ($env:CI_COMMIT_TAG -match '^beta-') {
+        $env:RELEASE_TYPE = 'BETA'
+      }
+      elseif ($env:CI_COMMIT_TAG -match '^tag-') {
+        $env:RELEASE_TYPE = 'ALPHA'
+      }
+      else {
+        throw "❌ Unknown tag format: $env:CI_COMMIT_TAG"
+      }
+
+      switch ($env:RELEASE_TYPE) {
+        'GA' { $script:FTP_RELEASE_DIR = '/releases/ga' }
+        'BETA' { $script:FTP_RELEASE_DIR = '/releases/beta' }
+        'ALPHA' { $script:FTP_RELEASE_DIR = '/releases/alpha' }
+        'INTERNAL_TEST' { $script:FTP_RELEASE_DIR = '/releases/internal' }
+        Default { throw "❌ Unsupported RELEASE_TYPE: $env:RELEASE_TYPE" }
+      }
+
+      function Upload-FtpFile {
+          param(
+              [Parameter(Mandatory = $true)][string] $LocalPath,
+              [Parameter(Mandatory = $true)][string] $RemoteUri,
+              [Parameter(Mandatory = $true)][string] $Username,
+              [Parameter(Mandatory = $true)][string] $Password
+          )
+
+          if (-not (Test-Path $LocalPath)) {
+              throw "Local file '$LocalPath' not found."
+          }
+
+          Write-Host "Starting FTP upload to $RemoteUri"
+          $ftpRequest = [System.Net.FtpWebRequest]::Create($RemoteUri)
+          $ftpRequest.Method = [System.Net.WebRequestMethods+Ftp]::UploadFile
+          $ftpRequest.Credentials = New-Object System.Net.NetworkCredential($Username, $Password)
+          $ftpRequest.UseBinary = $true
+          $ftpRequest.UsePassive = $true
+          $ftpRequest.KeepAlive = $false
+
+          $fileContent = [System.IO.File]::ReadAllBytes($LocalPath)
+          $ftpRequest.ContentLength = $fileContent.Length
+
+          $requestStream = $null
+          $response = $null
+
+          try {
+              $requestStream = $ftpRequest.GetRequestStream()
+              $requestStream.Write($fileContent, 0, $fileContent.Length)
+              $requestStream.Flush()
+
+              $response = $ftpRequest.GetResponse()
+              $statusDescription = $response.StatusDescription
+
+              try {
+                  $response.Close()
+              }
+              catch {
+                  Write-Warning "FTP server closed connection early: $_"
+              }
+
+              Write-Host "FTP upload completed ($statusDescription)"
+          }
+          catch {
+              throw "FTP upload failed: $_"
+          }
+          finally {
+              if ($requestStream) { $requestStream.Dispose() }
+              if ($response) { $response.Dispose() }
+          }
+      }
+
     # Initialize git submodules
     - Write-Host "Initializing git submodules..."
     - git submodule update --init --recursive
@@ -43,6 +118,43 @@
 
       if ($LASTEXITCODE -ne 0) { throw "❌ Docker build failed" }
       Write-Host "✅ Docker build completed successfully for $env:WINDOWS_TAG"
+
+    # Save tarball and upload to FTP before pushing images
+    - |
+      $tarDir = "docker-images-windows"
+      $null = New-Item -ItemType Directory -Path $tarDir -Force
+      $rawTarName = "${env:APP_NAME}-${env:WINDOWS_TAG}.tar"
+      $compressedTarName = "${rawTarName}.gz"
+      $rawTarPath = Join-Path $tarDir $rawTarName
+      $tarPath = Join-Path $tarDir $compressedTarName
+
+      Write-Host "Saving image $VERSION_TAG_WINDOWS to $rawTarPath"
+      docker save "$VERSION_TAG_WINDOWS" -o $rawTarPath
+      if ($LASTEXITCODE -ne 0) { throw "❌ Docker save failed" }
+
+      Write-Host "Compressing saved image to $tarPath"
+      $inputStream = $null
+      $outputStream = $null
+      $gzipStream = $null
+      try {
+          $inputStream = [System.IO.File]::OpenRead($rawTarPath)
+          $outputStream = [System.IO.File]::Create($tarPath)
+          $gzipStream = New-Object System.IO.Compression.GzipStream($outputStream, [System.IO.Compression.CompressionLevel]::Optimal)
+          $inputStream.CopyTo($gzipStream)
+      }
+      finally {
+          if ($gzipStream) { $gzipStream.Dispose() }
+          if ($outputStream) { $outputStream.Dispose() }
+          if ($inputStream) { $inputStream.Dispose() }
+      }
+
+      Remove-Item -Path $rawTarPath -Force -ErrorAction SilentlyContinue
+
+      $ftpUri = "ftp://$env:FTP_SITE$script:FTP_RELEASE_DIR/$compressedTarName"
+      Write-Host "Uploading $tarName to $ftpUri"
+      Upload-FtpFile -LocalPath $tarPath -RemoteUri $ftpUri -Username $env:FTP_USER -Password $env:FTP_PASSWORD
+
+      Remove-Item -Path $tarPath -Force
 
     # Push Windows Docker image
     - docker push "$VERSION_TAG_WINDOWS"
