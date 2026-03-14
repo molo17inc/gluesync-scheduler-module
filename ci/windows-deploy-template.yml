@@ -71,6 +71,8 @@
               $requestStream = $ftpRequest.GetRequestStream()
               $requestStream.Write($fileContent, 0, $fileContent.Length)
               $requestStream.Flush()
+              $requestStream.Dispose()
+              $requestStream = $null
 
               $response = $ftpRequest.GetResponse()
               $statusDescription = $response.StatusDescription
@@ -151,10 +153,10 @@
       Remove-Item -Path $rawTarPath -Force -ErrorAction SilentlyContinue
 
       $ftpUri = "ftp://$env:FTP_SITE$script:FTP_RELEASE_DIR/$compressedTarName"
-      Write-Host "Uploading $tarName to $ftpUri"
+      Write-Host "Uploading $compressedTarName to $ftpUri"
       Upload-FtpFile -LocalPath $tarPath -RemoteUri $ftpUri -Username $env:FTP_USER -Password $env:FTP_PASSWORD
 
-      Remove-Item -Path $tarPath -Force
+      Remove-Item -Path $tarPath -Force -ErrorAction SilentlyContinue
 
     # Push Windows Docker image
     - docker push "$VERSION_TAG_WINDOWS"
