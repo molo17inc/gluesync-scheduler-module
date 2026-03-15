@@ -36,10 +36,10 @@
       $script:ReleaseSuffix = $env:RELEASE_TYPE.ToLowerInvariant()
 
       switch ($env:RELEASE_TYPE) {
-        'GA' { $script:FTP_RELEASE_DIR = '/releases/windows/ga' }
-        'BETA' { $script:FTP_RELEASE_DIR = '/releases/windows/beta' }
-        'ALPHA' { $script:FTP_RELEASE_DIR = '/releases/windows/alpha' }
-        'INTERNAL_TEST' { $script:FTP_RELEASE_DIR = '/releases/windows/internal' }
+        'GA' { $script:FTP_RELEASE_DIR = '/releases/ga/windows' }
+        'BETA' { $script:FTP_RELEASE_DIR = '/releases/beta/windows' }
+        'ALPHA' { $script:FTP_RELEASE_DIR = '/releases/alpha/windows' }
+        'INTERNAL_TEST' { $script:FTP_RELEASE_DIR = '/releases/internal/windows' }
         Default { throw "❌ Unsupported RELEASE_TYPE: $env:RELEASE_TYPE" }
       }
 

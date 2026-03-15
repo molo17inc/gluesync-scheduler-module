@@ -78,7 +78,7 @@ deploy-linux:
       fi
 
       LOWER_RELEASE_DIR=$(echo "$RELEASE_TYPE" | tr '[:upper:]' '[:lower:]')
-      FTP_RELEASE_DIR="/releases/linux/${LOWER_RELEASE_DIR}"
+      FTP_RELEASE_DIR="/releases/${LOWER_RELEASE_DIR}/linux"
 
       export TAGPART DEFAULT_NAME VERSION_TAG RELEASE_TYPE FTP_RELEASE_DIR LOWER_RELEASE_DIR
 
