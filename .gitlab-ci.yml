@@ -78,9 +78,9 @@ deploy-linux:
       fi
 
       LOWER_RELEASE_DIR=$(echo "$RELEASE_TYPE" | tr '[:upper:]' '[:lower:]')
-      FTP_RELEASE_DIR="/releases/${LOWER_RELEASE_DIR}"
+      FTP_RELEASE_DIR="/releases/linux/${LOWER_RELEASE_DIR}"
 
-      export TAGPART DEFAULT_NAME VERSION_TAG RELEASE_TYPE FTP_RELEASE_DIR
+      export TAGPART DEFAULT_NAME VERSION_TAG RELEASE_TYPE FTP_RELEASE_DIR LOWER_RELEASE_DIR
 
       # Create VERSION file
       echo "${TAGPART}" > VERSION
@@ -91,7 +91,8 @@ deploy-linux:
 
       TAR_DIR="docker-images-linux"
       mkdir -p "$TAR_DIR"
-      TAR_FILE="${TAR_DIR}/${APP_NAME}-${TAGPART}.tar.gz"
+      FILE_BASENAME="${APP_NAME}-${LOWER_RELEASE_DIR}"
+      TAR_FILE="${TAR_DIR}/${FILE_BASENAME}.tar.gz"
 
       echo "Building local image for FTP export: $VERSION_TAG"
       docker build --no-cache --tag "$VERSION_TAG" .

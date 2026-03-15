@@ -33,11 +33,13 @@
         throw "❌ Unknown tag format: $env:CI_COMMIT_TAG"
       }
 
+      $script:ReleaseSuffix = $env:RELEASE_TYPE.ToLowerInvariant()
+
       switch ($env:RELEASE_TYPE) {
-        'GA' { $script:FTP_RELEASE_DIR = '/releases/ga' }
-        'BETA' { $script:FTP_RELEASE_DIR = '/releases/beta' }
-        'ALPHA' { $script:FTP_RELEASE_DIR = '/releases/alpha' }
-        'INTERNAL_TEST' { $script:FTP_RELEASE_DIR = '/releases/internal' }
+        'GA' { $script:FTP_RELEASE_DIR = '/releases/windows/ga' }
+        'BETA' { $script:FTP_RELEASE_DIR = '/releases/windows/beta' }
+        'ALPHA' { $script:FTP_RELEASE_DIR = '/releases/windows/alpha' }
+        'INTERNAL_TEST' { $script:FTP_RELEASE_DIR = '/releases/windows/internal' }
         Default { throw "❌ Unsupported RELEASE_TYPE: $env:RELEASE_TYPE" }
       }
 
@@ -125,7 +127,8 @@
     - |
       $tarDir = Join-Path $env:CI_PROJECT_DIR "docker-images-windows"
       $null = New-Item -ItemType Directory -Path $tarDir -Force
-      $rawTarName = "${env:APP_NAME}-${env:WINDOWS_TAG}.tar"
+      $baseName = "{0}-{1}" -f $env:APP_NAME, $script:ReleaseSuffix
+      $rawTarName = "${baseName}.tar"
       $compressedTarName = "${rawTarName}.gz"
       $rawTarPath = Join-Path $tarDir $rawTarName
       $tarPath = Join-Path $tarDir $compressedTarName
