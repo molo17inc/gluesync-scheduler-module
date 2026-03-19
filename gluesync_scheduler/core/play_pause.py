@@ -738,6 +738,48 @@ class CoreHubClient:
         except Exception as e:
             logger.error(f"Error redoing group {group_id} in pipeline {pipeline_id}: {str(e)}")
             return False
+    
+    def enter_maintenance_mode(self, pipeline_id: str) -> bool:
+        """Enter maintenance mode for a pipeline"""
+        path = f'/pipelines/{pipeline_id}/commands/maintenance/enter'
+        
+        try:
+            response = self.fetch_core_hub(path, method='POST')
+            
+            if response and isinstance(response, dict) and response.get('status') == 'error':
+                logger.error(f"Error entering maintenance mode for pipeline {pipeline_id}: {response.get('message')}")
+                return False
+                
+            success = response is not None
+            if success:
+                logger.info(f"Successfully entered maintenance mode for pipeline {pipeline_id}")
+            else:
+                logger.error(f"Failed to enter maintenance mode for pipeline {pipeline_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error entering maintenance mode for pipeline {pipeline_id}: {str(e)}")
+            return False
+    
+    def exit_maintenance_mode(self, pipeline_id: str) -> bool:
+        """Exit maintenance mode for a pipeline"""
+        path = f'/pipelines/{pipeline_id}/commands/maintenance/exit'
+        
+        try:
+            response = self.fetch_core_hub(path, method='POST')
+            
+            if response and isinstance(response, dict) and response.get('status') == 'error':
+                logger.error(f"Error exiting maintenance mode for pipeline {pipeline_id}: {response.get('message')}")
+                return False
+                
+            success = response is not None
+            if success:
+                logger.info(f"Successfully exited maintenance mode for pipeline {pipeline_id}")
+            else:
+                logger.error(f"Failed to exit maintenance mode for pipeline {pipeline_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error exiting maintenance mode for pipeline {pipeline_id}: {str(e)}")
+            return False
 
 
 class PipelineManager:
@@ -1133,6 +1175,30 @@ class PipelineManager:
         except Exception as e:
             logger.error(f"Error resyncing groups {group_ids} in pipeline {pipeline_id}: {str(e)}")
             return False
+    
+    async def enter_maintenance_mode(self, pipeline_id: str) -> bool:
+        """Enter maintenance mode for a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            
+        Returns:
+            bool: True if operation was successful, False otherwise
+        """
+        logger.info(f"Entering maintenance mode for pipeline {pipeline_id}")
+        return self.client.enter_maintenance_mode(pipeline_id)
+    
+    async def exit_maintenance_mode(self, pipeline_id: str) -> bool:
+        """Exit maintenance mode for a pipeline
+        
+        Args:
+            pipeline_id: Pipeline ID
+            
+        Returns:
+            bool: True if operation was successful, False otherwise
+        """
+        logger.info(f"Exiting maintenance mode for pipeline {pipeline_id}")
+        return self.client.exit_maintenance_mode(pipeline_id)
 
 
 async def main_async():

@@ -929,6 +929,10 @@ class JobService:
                 action = "redo"
             elif job.task_type == TaskType.GROUP_REDO:
                 action = "redo-group"
+            elif job.task_type == TaskType.PIPELINE_ENTER_MAINTENANCE:
+                action = "enter-maintenance"
+            elif job.task_type == TaskType.PIPELINE_EXIT_MAINTENANCE:
+                action = "exit-maintenance"
             else:
                 error_msg = f"Unknown task type: {job.task_type}"
                 logger.error(error_msg)

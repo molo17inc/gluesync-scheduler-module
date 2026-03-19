@@ -44,6 +44,8 @@ class TaskType(enum.Enum):
     ENTITY_REDO = "entity_redo"
     PIPELINE_REDO = "pipeline_redo"
     GROUP_REDO = "group_redo"
+    PIPELINE_ENTER_MAINTENANCE = "pipeline_enter_maintenance"
+    PIPELINE_EXIT_MAINTENANCE = "pipeline_exit_maintenance"
 
 
 class ScheduledJob(Base):

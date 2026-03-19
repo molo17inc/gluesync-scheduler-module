@@ -677,3 +677,203 @@ async def resync_pipeline(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error resyncing pipeline: {str(e)}"
         )
+
+@router.post("/{pipeline_id}/enter-maintenance", response_model=OperationResponse, summary="Enter maintenance mode for a pipeline")
+async def enter_maintenance_mode(
+    request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline to enter maintenance mode")
+):
+    """
+    Enter maintenance mode for a pipeline.
+    
+    **INTERNAL USE ONLY**: This endpoint is exclusively for internal system use by the scheduler module's cron jobs.
+    It is not intended for external API consumption and is restricted to localhost access only.
+    
+    ## Parameters
+    - **pipeline_id**: The ID of the pipeline to enter maintenance mode
+    
+    ## Returns
+    A JSON object containing:
+    - **success**: Whether the operation was successful
+    - **message**: A message describing the result
+    - **details**: Additional details about the operation (if any)
+    
+    ## Example Response
+    ```json
+    {
+      "success": true,
+      "message": "Pipeline entered maintenance mode successfully",
+      "details": {
+        "pipeline_id": "pipeline-123"
+      }
+    }
+    ```
+    
+    ## Errors
+    - **400**: Invalid request parameters
+    - **500**: Internal server error during operation
+    - **403**: Forbidden if accessed from non-localhost source
+    """
+    cron_job_identifier = getattr(request.state, 'cron_job_identifier', None)
+    
+    logger.info(f"Received enter maintenance mode request for pipeline {pipeline_id}")
+    if cron_job_identifier:
+        logger.info(f"Cron job identifier: {cron_job_identifier}")
+    
+    try:
+        pipeline_manager = PipelineManager()
+        
+        result = await pipeline_manager.enter_maintenance_mode(pipeline_id)
+        message = f"Pipeline {pipeline_id} entered maintenance mode successfully" if result else f"Failed to enter maintenance mode for pipeline {pipeline_id}"
+        details = {
+            "pipeline_id": pipeline_id
+        }
+        
+        if not result:
+            if cron_job_identifier:
+                from gluesync_scheduler.db.database import SessionLocal
+                from gluesync_scheduler.cli.job_runner import update_job_status
+                
+                try:
+                    update_job_status(cron_job_identifier, False, message)
+                    logger.info(f"Updated job status to failed for {cron_job_identifier}")
+                except Exception as update_error:
+                    logger.error(f"Error updating job status to failed: {str(update_error)}")
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=message
+            )
+        
+        if cron_job_identifier:
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            
+            try:
+                update_job_status(cron_job_identifier, True)
+                logger.info(f"Updated job status for {cron_job_identifier}")
+            except Exception as e:
+                logger.error(f"Error updating job status: {str(e)}")
+        
+        return {
+            "success": True,
+            "message": message,
+            "data": None
+        }
+    except Exception as e:
+        logger.error(f"Error entering maintenance mode for pipeline: {str(e)}")
+        
+        if cron_job_identifier:
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            
+            try:
+                update_job_status(cron_job_identifier, False, str(e))
+                logger.info(f"Updated job status to failed for {cron_job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Error updating job status to failed: {str(update_error)}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error entering maintenance mode: {str(e)}"
+        )
+
+@router.post("/{pipeline_id}/exit-maintenance", response_model=OperationResponse, summary="Exit maintenance mode for a pipeline")
+async def exit_maintenance_mode(
+    request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline to exit maintenance mode")
+):
+    """
+    Exit maintenance mode for a pipeline.
+    
+    **INTERNAL USE ONLY**: This endpoint is exclusively for internal system use by the scheduler module's cron jobs.
+    It is not intended for external API consumption and is restricted to localhost access only.
+    
+    ## Parameters
+    - **pipeline_id**: The ID of the pipeline to exit maintenance mode
+    
+    ## Returns
+    A JSON object containing:
+    - **success**: Whether the operation was successful
+    - **message**: A message describing the result
+    - **details**: Additional details about the operation (if any)
+    
+    ## Example Response
+    ```json
+    {
+      "success": true,
+      "message": "Pipeline exited maintenance mode successfully",
+      "details": {
+        "pipeline_id": "pipeline-123"
+      }
+    }
+    ```
+    
+    ## Errors
+    - **400**: Invalid request parameters
+    - **500**: Internal server error during operation
+    - **403**: Forbidden if accessed from non-localhost source
+    """
+    cron_job_identifier = getattr(request.state, 'cron_job_identifier', None)
+    
+    logger.info(f"Received exit maintenance mode request for pipeline {pipeline_id}")
+    if cron_job_identifier:
+        logger.info(f"Cron job identifier: {cron_job_identifier}")
+    
+    try:
+        pipeline_manager = PipelineManager()
+        
+        result = await pipeline_manager.exit_maintenance_mode(pipeline_id)
+        message = f"Pipeline {pipeline_id} exited maintenance mode successfully" if result else f"Failed to exit maintenance mode for pipeline {pipeline_id}"
+        details = {
+            "pipeline_id": pipeline_id
+        }
+        
+        if not result:
+            if cron_job_identifier:
+                from gluesync_scheduler.db.database import SessionLocal
+                from gluesync_scheduler.cli.job_runner import update_job_status
+                
+                try:
+                    update_job_status(cron_job_identifier, False, message)
+                    logger.info(f"Updated job status to failed for {cron_job_identifier}")
+                except Exception as update_error:
+                    logger.error(f"Error updating job status to failed: {str(update_error)}")
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=message
+            )
+        
+        if cron_job_identifier:
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            
+            try:
+                update_job_status(cron_job_identifier, True)
+                logger.info(f"Updated job status for {cron_job_identifier}")
+            except Exception as e:
+                logger.error(f"Error updating job status: {str(e)}")
+        
+        return {
+            "success": True,
+            "message": message,
+            "data": None
+        }
+    except Exception as e:
+        logger.error(f"Error exiting maintenance mode for pipeline: {str(e)}")
+        
+        if cron_job_identifier:
+            from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.cli.job_runner import update_job_status
+            
+            try:
+                update_job_status(cron_job_identifier, False, str(e))
+                logger.info(f"Updated job status to failed for {cron_job_identifier}")
+            except Exception as update_error:
+                logger.error(f"Error updating job status to failed: {str(update_error)}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error exiting maintenance mode: {str(e)}"
+        )
