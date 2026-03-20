@@ -77,39 +77,6 @@ deploy-linux:
         exit 1
       fi
 
-    - |
-      set -euo pipefail
-
-      TAR_DIR="docker-images-linux"
-      mkdir -p "$TAR_DIR"
-      FILE_BASENAME="${APP_NAME}-${LOWER_RELEASE_DIR}"
-
-      ARCHITECTURES="amd64"
-      if [[ $CI_COMMIT_TAG == release-* || $CI_COMMIT_TAG == beta-* ]]; then
-        ARCHITECTURES="amd64 arm64"
-      fi
-
-      for ARCH in $ARCHITECTURES; do
-        TAR_FILE="${TAR_DIR}/${FILE_BASENAME}-${ARCH}.tar.gz"
-        echo "Pulling $VERSION_TAG for linux/${ARCH}"
-        docker pull --platform "linux/${ARCH}" "$VERSION_TAG"
-
-        IMAGE_ID=$(docker image inspect -f '{{.ID}}' "$VERSION_TAG")
-        echo "Saving Docker image ($IMAGE_ID) to $TAR_FILE"
-        docker save "$IMAGE_ID" | gzip > "$TAR_FILE"
-
-        BASENAME=$(basename "$TAR_FILE")
-        echo "Uploading ${BASENAME} to ftp://${FTP_SITE}${FTP_RELEASE_DIR}/"
-        curl --fail -T "$TAR_FILE" --user "$FTP_USER:$FTP_PASSWORD" "ftp://${FTP_SITE}${FTP_RELEASE_DIR}/${BASENAME}"
-
-        rm -f "$TAR_FILE"
-        docker rmi "$IMAGE_ID" >/dev/null 2>&1 || true
-        echo "FTP upload for ${ARCH} completed"
-      done
-
-    - |
-      set -euo pipefail
-
       LOWER_RELEASE_DIR=$(echo "$RELEASE_TYPE" | tr '[:upper:]' '[:lower:]')
       FTP_RELEASE_DIR="/releases/${LOWER_RELEASE_DIR}/linux"
 
@@ -159,6 +126,37 @@ deploy-linux:
         echo "Unknown tag format: $CI_COMMIT_TAG"
         exit 1
       fi
+
+    # Export per-architecture tarballs to FTP
+    - |
+      set -euo pipefail
+
+      TAR_DIR="docker-images-linux"
+      mkdir -p "$TAR_DIR"
+      FILE_BASENAME="${APP_NAME}-${LOWER_RELEASE_DIR}"
+
+      ARCHITECTURES="amd64"
+      if [[ $CI_COMMIT_TAG == release-* || $CI_COMMIT_TAG == beta-* ]]; then
+        ARCHITECTURES="amd64 arm64"
+      fi
+
+      for ARCH in $ARCHITECTURES; do
+        TAR_FILE="${TAR_DIR}/${FILE_BASENAME}-${ARCH}.tar.gz"
+        echo "Pulling $VERSION_TAG for linux/${ARCH}"
+        docker pull --platform "linux/${ARCH}" "$VERSION_TAG"
+
+        IMAGE_ID=$(docker image inspect -f '{{.ID}}' "$VERSION_TAG")
+        echo "Saving Docker image ($IMAGE_ID) to $TAR_FILE"
+        docker save "$IMAGE_ID" | gzip > "$TAR_FILE"
+
+        BASENAME=$(basename "$TAR_FILE")
+        echo "Uploading ${BASENAME} to ftp://${FTP_SITE}${FTP_RELEASE_DIR}/"
+        curl --fail -T "$TAR_FILE" --user "$FTP_USER:$FTP_PASSWORD" "ftp://${FTP_SITE}${FTP_RELEASE_DIR}/${BASENAME}"
+
+        rm -f "$TAR_FILE"
+        docker rmi "$IMAGE_ID" >/dev/null 2>&1 || true
+        echo "FTP upload for ${ARCH} completed"
+      done
   rules:
     - if: $CI_COMMIT_TAG
 
