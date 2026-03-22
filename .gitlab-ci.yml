@@ -146,16 +146,15 @@ deploy-linux:
         echo "Pulling $VERSION_TAG for linux/${ARCH}"
         docker pull --platform "linux/${ARCH}" "$VERSION_TAG"
 
-        IMAGE_ID=$(docker image inspect -f '{{.ID}}' "$VERSION_TAG")
-        echo "Saving Docker image ($IMAGE_ID) to $TAR_FILE"
-        docker save "$IMAGE_ID" | gzip > "$TAR_FILE"
+        echo "Saving Docker image $VERSION_TAG to $TAR_FILE"
+        docker save "$VERSION_TAG" | gzip > "$TAR_FILE"
 
         BASENAME=$(basename "$TAR_FILE")
         echo "Uploading ${BASENAME} to ftp://${FTP_SITE}${FTP_RELEASE_DIR}/"
         curl --fail -T "$TAR_FILE" --user "$FTP_USER:$FTP_PASSWORD" "ftp://${FTP_SITE}${FTP_RELEASE_DIR}/${BASENAME}"
 
         rm -f "$TAR_FILE"
-        docker rmi "$IMAGE_ID" >/dev/null 2>&1 || true
+        docker rmi "$VERSION_TAG" >/dev/null 2>&1 || true
         echo "FTP upload for ${ARCH} completed"
       done
   rules:
