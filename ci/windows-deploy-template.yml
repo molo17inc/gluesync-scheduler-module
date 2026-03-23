@@ -127,7 +127,7 @@
     - |
       $tarDir = Join-Path $env:CI_PROJECT_DIR "docker-images-windows"
       $null = New-Item -ItemType Directory -Path $tarDir -Force
-      $baseName = "{0}-{1}" -f $env:APP_NAME, $script:ReleaseSuffix
+      $baseName = "{0}-{1}-{2}" -f $env:APP_NAME, $script:ReleaseSuffix, $env:WINDOWS_TAG
       $rawTarName = "${baseName}.tar"
       $compressedTarName = "${rawTarName}.gz"
       $rawTarPath = Join-Path $tarDir $rawTarName
