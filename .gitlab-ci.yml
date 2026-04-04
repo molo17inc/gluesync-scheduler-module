@@ -30,7 +30,7 @@ variables:
   PIP_EXTRA_INDEX_URL: "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple"
   SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
   GIT_DEPTH: "0"
-  SONAR_PROJECT_KEY: "molo17-public_gluesync_gluesync-bootstrapper_422821b0-a562-4286-a737-066ee5d2ee88"
+  SONAR_PROJECT_KEY: "molo17-public_gluesync_gluesync-scheduler-module_4ca71c42-0404-415f-80de-4f577703721b"
 
 include:
   - local: "ci/windows-deploy-template.yml"
