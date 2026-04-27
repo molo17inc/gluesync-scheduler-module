@@ -846,7 +846,10 @@ class PipelineManager:
             bool: True if operation was successful, False otherwise
         """
         logger.info(f"Starting pipeline {pipeline_id} (with_snapshot={with_snapshot})")
-        return self.client.start_pipeline(pipeline_id, with_snapshot)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.start_pipeline, pipeline_id, with_snapshot
+        )
     
     async def play_entities(self, pipeline_id: str, entity_ids: List[str], with_snapshot: bool = False) -> bool:
         """Start specific entities in a pipeline
@@ -860,17 +863,20 @@ class PipelineManager:
             bool: True if all operations were successful, False otherwise
         """
         logger.info(f"Starting entities {entity_ids} in pipeline {pipeline_id} (with_snapshot={with_snapshot})")
+        loop = asyncio.get_running_loop()
         success = True
         
         for entity_id in entity_ids:
             logger.info(f"Starting entity {entity_id}")
-            result = self.client.start_entity(pipeline_id, entity_id, with_snapshot)
+            result = await loop.run_in_executor(
+                None, self.client.start_entity, pipeline_id, entity_id, with_snapshot
+            )
             if not result:
                 logger.error(f"Failed to start entity {entity_id}")
                 success = False
             
             # Wait a short time between entity operations to avoid overwhelming the Core Hub
-            time.sleep(self.client.entity_start_timeout)
+            await asyncio.sleep(self.client.entity_start_timeout)
         
         return success
 
@@ -880,7 +886,10 @@ class PipelineManager:
         logger.info(
             f"Redo group {group_id} in pipeline {pipeline_id} (with_snapshot={with_snapshot}, snapshot_write_method={snapshot_write_method})"
         )
-        return self.client.redo_group(pipeline_id, group_id, with_snapshot, snapshot_write_method)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.redo_group, pipeline_id, group_id, with_snapshot, snapshot_write_method
+        )
 
     async def redo_groups(self, pipeline_id: str, group_ids: List[str], with_snapshot: bool = False,
                           snapshot_write_method: str = 'UPSERT') -> bool:
@@ -894,7 +903,7 @@ class PipelineManager:
                 logger.error(f"Failed to redo group {group_id}")
                 success = False
 
-            time.sleep(self.client.entity_start_timeout)
+            await asyncio.sleep(self.client.entity_start_timeout)
 
         return success
 
@@ -903,7 +912,10 @@ class PipelineManager:
         logger.info(
             f"Redo pipeline {pipeline_id} (with_snapshot={with_snapshot}, snapshot_write_method={snapshot_write_method})"
         )
-        return self.client.redo_pipeline(pipeline_id, with_snapshot, snapshot_write_method)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.redo_pipeline, pipeline_id, with_snapshot, snapshot_write_method
+        )
 
     async def redo_entities(self, pipeline_id: str, entity_ids: List[str], with_snapshot: bool = False,
                             snapshot_write_method: str = 'UPSERT') -> bool:
@@ -911,16 +923,19 @@ class PipelineManager:
         logger.info(
             f"Redo entities {entity_ids} in pipeline {pipeline_id} (with_snapshot={with_snapshot}, snapshot_write_method={snapshot_write_method})"
         )
+        loop = asyncio.get_running_loop()
         success = True
 
         for entity_id in entity_ids:
             logger.info(f"Redoing entity {entity_id}")
-            result = self.client.redo_entity(pipeline_id, entity_id, with_snapshot, snapshot_write_method)
+            result = await loop.run_in_executor(
+                None, self.client.redo_entity, pipeline_id, entity_id, with_snapshot, snapshot_write_method
+            )
             if not result:
                 logger.error(f"Failed to redo entity {entity_id}")
                 success = False
 
-            time.sleep(self.client.entity_start_timeout)
+            await asyncio.sleep(self.client.entity_start_timeout)
 
         return success
     
@@ -934,7 +949,8 @@ class PipelineManager:
             bool: True if operation was successful, False otherwise
         """
         logger.info(f"Stopping pipeline {pipeline_id}")
-        return self.client.stop_pipeline(pipeline_id)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.client.stop_pipeline, pipeline_id)
     
     async def pause_entities(self, pipeline_id: str, entity_ids: List[str]) -> bool:
         """Stop specific entities in a pipeline
@@ -947,17 +963,20 @@ class PipelineManager:
             bool: True if all operations were successful, False otherwise
         """
         logger.info(f"Stopping entities {entity_ids} in pipeline {pipeline_id}")
+        loop = asyncio.get_running_loop()
         success = True
         
         for entity_id in entity_ids:
             logger.info(f"Stopping entity {entity_id}")
-            result = self.client.stop_entity(pipeline_id, entity_id)
+            result = await loop.run_in_executor(
+                None, self.client.stop_entity, pipeline_id, entity_id
+            )
             if not result:
                 logger.error(f"Failed to stop entity {entity_id}")
                 success = False
             
             # Wait a short time between entity operations to avoid overwhelming the Core Hub
-            time.sleep(self.client.entity_start_timeout)
+            await asyncio.sleep(self.client.entity_start_timeout)
         
         return success
     
@@ -972,7 +991,10 @@ class PipelineManager:
             bool: True if operation was successful, False otherwise
         """
         logger.info(f"Resyncing pipeline {pipeline_id} (snapshot_write_method={snapshot_write_method})")
-        return self.client.resync_pipeline(pipeline_id, snapshot_write_method)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.resync_pipeline, pipeline_id, snapshot_write_method
+        )
     
     async def resync_entities(self, pipeline_id: str, entity_ids: List[str], snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger a one-time snapshot for specific entities in a pipeline
@@ -986,17 +1008,20 @@ class PipelineManager:
             bool: True if all operations were successful, False otherwise
         """
         logger.info(f"Resyncing entities {entity_ids} in pipeline {pipeline_id} (snapshot_write_method={snapshot_write_method})")
+        loop = asyncio.get_running_loop()
         success = True
         
         for entity_id in entity_ids:
             logger.info(f"Resyncing entity {entity_id}")
-            result = self.client.resync_entity(pipeline_id, entity_id, snapshot_write_method)
+            result = await loop.run_in_executor(
+                None, self.client.resync_entity, pipeline_id, entity_id, snapshot_write_method
+            )
             if not result:
                 logger.error(f"Failed to resync entity {entity_id}")
                 success = False
             
             # Wait a short time between entity operations to avoid overwhelming the Core Hub
-            time.sleep(self.client.entity_start_timeout)
+            await asyncio.sleep(self.client.entity_start_timeout)
         
         return success
     
@@ -1186,7 +1211,8 @@ class PipelineManager:
             bool: True if operation was successful, False otherwise
         """
         logger.info(f"Entering maintenance mode for pipeline {pipeline_id}")
-        return self.client.enter_maintenance_mode(pipeline_id)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.client.enter_maintenance_mode, pipeline_id)
     
     async def exit_maintenance_mode(self, pipeline_id: str) -> bool:
         """Exit maintenance mode for a pipeline
@@ -1198,7 +1224,8 @@ class PipelineManager:
             bool: True if operation was successful, False otherwise
         """
         logger.info(f"Exiting maintenance mode for pipeline {pipeline_id}")
-        return self.client.exit_maintenance_mode(pipeline_id)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.client.exit_maintenance_mode, pipeline_id)
 
 
 async def main_async():

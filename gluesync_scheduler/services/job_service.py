@@ -995,13 +995,17 @@ class JobService:
                         cert = (cert_file, key_file)
                         logger.info(f"Using certificate files for HTTPS request: {cert_file} and {key_file}")
                 
-                # Make the HTTP request
+                # Make the HTTP request.
+                # Timeout is configurable via SCHEDULER_INTERNAL_HTTP_TIMEOUT (seconds).
+                # The previous hard-coded 30s caused false "Read timed out" failures when
+                # multiple cron jobs on the same pipeline collided (e.g. at :00 and :30).
+                internal_http_timeout = int(os.getenv('SCHEDULER_INTERNAL_HTTP_TIMEOUT', '120'))
                 response = requests.request(
                     method=method,
                     url=endpoint,
                     json=json_data,
                     headers={"Content-Type": "application/json"},
-                    timeout=30,  # Add timeout to prevent hanging requests
+                    timeout=internal_http_timeout,
                     verify=verify,  # Control SSL certificate verification
                     cert=cert  # Include certificates for client authentication if available
                 )
