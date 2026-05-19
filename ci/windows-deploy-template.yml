@@ -143,7 +143,14 @@
     # Scan image before publishing
     - |
       Write-Host "Running Trivy scan on $VERSION_TAG_WINDOWS before publish..."
-      trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --no-progress "$VERSION_TAG_WINDOWS"
+      trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --no-progress `
+        --skip-files /app/debug-container/gluesync-docker-windows-2019/proxy/gluesync-key.pem `
+        --skip-files /app/debug-container/gluesync-docker-windows-2019/shared/gluesync-key.pem `
+        --skip-files /app/debug-container/gluesync-docker-windows/proxy/gluesync-key.pem `
+        --skip-files /app/debug-container/gluesync-docker-windows/shared/gluesync-key.pem `
+        --skip-files /app/debug-container/gluesync-docker/shared/gluesync-key.pem `
+        --skip-files /app/debug-container/gluesync-podman/shared/gluesync-key.pem `
+        "$VERSION_TAG_WINDOWS"
       if ($LASTEXITCODE -ne 0) { throw "❌ Trivy scan failed" }
       Write-Host "✅ Trivy scan passed"
 

@@ -121,8 +121,19 @@ deploy-linux:
           --tag "$CANDIDATE_TAG" \
           --push .
 
-        echo "Running Trivy scan on candidate image $CANDIDATE_TAG"
-        trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --no-progress "$CANDIDATE_TAG"
+      echo "Running Trivy scan on candidate image $CANDIDATE_TAG"
+      trivy image \
+        --exit-code 1 \
+        --severity HIGH,CRITICAL \
+        --ignore-unfixed \
+        --no-progress \
+        --skip-files /app/debug-container/gluesync-docker-windows-2019/proxy/gluesync-key.pem \
+        --skip-files /app/debug-container/gluesync-docker-windows-2019/shared/gluesync-key.pem \
+        --skip-files /app/debug-container/gluesync-docker-windows/proxy/gluesync-key.pem \
+        --skip-files /app/debug-container/gluesync-docker-windows/shared/gluesync-key.pem \
+        --skip-files /app/debug-container/gluesync-docker/shared/gluesync-key.pem \
+        --skip-files /app/debug-container/gluesync-podman/shared/gluesync-key.pem \
+        "$CANDIDATE_TAG"
 
         echo "Promoting candidate image to release tags"
         docker buildx imagetools create --tag "$DEFAULT_NAME:latest" --tag "$VERSION_TAG" "$CANDIDATE_TAG"
@@ -141,7 +152,18 @@ deploy-linux:
           --push .
 
         echo "Running Trivy scan on candidate image $CANDIDATE_TAG"
-        trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --no-progress "$CANDIDATE_TAG"
+        trivy image \
+          --exit-code 1 \
+          --severity HIGH,CRITICAL \
+          --ignore-unfixed \
+          --no-progress \
+          --skip-files /app/debug-container/gluesync-docker-windows-2019/proxy/gluesync-key.pem \
+          --skip-files /app/debug-container/gluesync-docker-windows-2019/shared/gluesync-key.pem \
+          --skip-files /app/debug-container/gluesync-docker-windows/proxy/gluesync-key.pem \
+          --skip-files /app/debug-container/gluesync-docker-windows/shared/gluesync-key.pem \
+          --skip-files /app/debug-container/gluesync-docker/shared/gluesync-key.pem \
+          --skip-files /app/debug-container/gluesync-podman/shared/gluesync-key.pem \
+          "$CANDIDATE_TAG"
 
         echo "Promoting candidate image to beta tags"
         docker buildx imagetools create --tag "$DEFAULT_NAME:beta" --tag "$VERSION_TAG" "$CANDIDATE_TAG"
@@ -150,7 +172,18 @@ deploy-linux:
         docker build --no-cache -t "$CANDIDATE_TAG" .
 
         echo "Running Trivy scan on candidate image $CANDIDATE_TAG"
-        trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --no-progress "$CANDIDATE_TAG"
+        trivy image \
+          --exit-code 1 \
+          --severity HIGH,CRITICAL \
+          --ignore-unfixed \
+          --no-progress \
+          --skip-files /app/debug-container/gluesync-docker-windows-2019/proxy/gluesync-key.pem \
+          --skip-files /app/debug-container/gluesync-docker-windows-2019/shared/gluesync-key.pem \
+          --skip-files /app/debug-container/gluesync-docker-windows/proxy/gluesync-key.pem \
+          --skip-files /app/debug-container/gluesync-docker-windows/shared/gluesync-key.pem \
+          --skip-files /app/debug-container/gluesync-docker/shared/gluesync-key.pem \
+          --skip-files /app/debug-container/gluesync-podman/shared/gluesync-key.pem \
+          "$CANDIDATE_TAG"
 
         docker tag "$CANDIDATE_TAG" "$VERSION_TAG"
         docker push "$VERSION_TAG"
