@@ -1,5 +1,5 @@
 # Build stage for SDK installation
-FROM python:3.13.3-slim-bookworm AS builder
+FROM python:3.13-slim-bookworm AS builder
 
 WORKDIR /build
 
@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rustc \
     cargo \
     patchelf && \
+    apt-get upgrade -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -54,7 +55,7 @@ COPY ./gluesync_scheduler ./gluesync_scheduler
 RUN python -m pip wheel --wheel-dir=/wheels .
 
 # Final stage
-FROM python:3.13.3-slim-bookworm
+FROM python:3.13-slim-bookworm
 
 WORKDIR /app
 
@@ -64,6 +65,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     procps \
     openssl && \
+    apt-get upgrade -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

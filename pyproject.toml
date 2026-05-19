@@ -19,7 +19,7 @@ classifiers = [
 ]
 keywords = ["gluesync", "scheduler", "pipeline", "cron", "automation"]
 dependencies = [
-    "fastapi==0.115.12",
+    "fastapi==0.136.1",
     "uvicorn==0.29.0",
     "pydantic==2.10.6",
     "requests==2.32.3",
