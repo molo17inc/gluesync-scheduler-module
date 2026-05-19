@@ -12,9 +12,14 @@
 
     # Install Trivy
     - |
+      $trivyRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/aquasecurity/trivy/releases/latest"
+      $trivyVersion = $trivyRelease.tag_name.TrimStart('v')
+      if ([string]::IsNullOrWhiteSpace($trivyVersion)) {
+        throw "❌ Unable to resolve latest Trivy version"
+      }
       $trivyZip = "$env:TEMP\trivy.zip"
       $trivyExtractPath = "$env:TEMP\trivy"
-      Invoke-WebRequest -Uri "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_Windows-64bit.zip" -OutFile $trivyZip
+      Invoke-WebRequest -Uri "https://github.com/aquasecurity/trivy/releases/download/v$trivyVersion/trivy_${trivyVersion}_Windows-64bit.zip" -OutFile $trivyZip
       if (Test-Path $trivyExtractPath) {
         Remove-Item -Path $trivyExtractPath -Recurse -Force
       }
