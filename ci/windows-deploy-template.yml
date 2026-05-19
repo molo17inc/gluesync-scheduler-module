@@ -10,6 +10,19 @@
     - if ($LASTEXITCODE -ne 0) { throw "❌ Docker login failed" }
     - Write-Host "✅ Docker login successful"
 
+    # Install Trivy
+    - |
+      $trivyVersion = "0.53.0"
+      $trivyZip = "$env:TEMP\trivy.zip"
+      $trivyExtractPath = "$env:TEMP\trivy"
+      Invoke-WebRequest -Uri "https://github.com/aquasecurity/trivy/releases/download/v$trivyVersion/trivy_${trivyVersion}_Windows-64bit.zip" -OutFile $trivyZip
+      if (Test-Path $trivyExtractPath) {
+        Remove-Item -Path $trivyExtractPath -Recurse -Force
+      }
+      Expand-Archive -Path $trivyZip -DestinationPath $trivyExtractPath -Force
+      $env:PATH = "$trivyExtractPath;$env:PATH"
+      trivy --version
+
     # Extract version from tag
     - "Write-Host Processing tag: $env:CI_COMMIT_TAG"
     - $TAG_PART = [regex]::Match($env:CI_COMMIT_TAG, '[0-9]+\.[0-9]+\.[0-9](.*)').Value
@@ -122,6 +135,13 @@
 
       if ($LASTEXITCODE -ne 0) { throw "❌ Docker build failed" }
       Write-Host "✅ Docker build completed successfully for $env:WINDOWS_TAG"
+
+    # Scan image before publishing
+    - |
+      Write-Host "Running Trivy scan on $VERSION_TAG_WINDOWS before publish..."
+      trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --no-progress "$VERSION_TAG_WINDOWS"
+      if ($LASTEXITCODE -ne 0) { throw "❌ Trivy scan failed" }
+      Write-Host "✅ Trivy scan passed"
 
     # Save tarball and upload to FTP before pushing images
     - |
