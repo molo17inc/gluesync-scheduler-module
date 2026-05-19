@@ -62,8 +62,7 @@ deploy-linux:
     - apk add --no-cache bash curl
 
     - |
-      TRIVY_VERSION="0.53.0"
-      curl -sfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o /tmp/trivy.tar.gz
+      curl -sfL --retry 3 --retry-delay 2 "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_Linux-64bit.tar.gz" -o /tmp/trivy.tar.gz
       tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
       install -m 0755 /tmp/trivy /usr/local/bin/trivy
       trivy --version

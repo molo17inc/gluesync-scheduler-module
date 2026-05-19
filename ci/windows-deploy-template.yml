@@ -12,10 +12,9 @@
 
     # Install Trivy
     - |
-      $trivyVersion = "0.53.0"
       $trivyZip = "$env:TEMP\trivy.zip"
       $trivyExtractPath = "$env:TEMP\trivy"
-      Invoke-WebRequest -Uri "https://github.com/aquasecurity/trivy/releases/download/v$trivyVersion/trivy_${trivyVersion}_Windows-64bit.zip" -OutFile $trivyZip
+      Invoke-WebRequest -Uri "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_Windows-64bit.zip" -OutFile $trivyZip
       if (Test-Path $trivyExtractPath) {
         Remove-Item -Path $trivyExtractPath -Recurse -Force
       }
