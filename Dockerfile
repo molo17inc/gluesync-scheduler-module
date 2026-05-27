@@ -1,9 +1,10 @@
 # Build stage for SDK installation
-FROM python:3.13-slim-bookworm AS builder
+# Use Python 3.13 slim-trixie (Debian 13) for latest security fixes
+FROM python:3.13-slim-trixie AS builder
 
 WORKDIR /build
 
-# Install build dependencies (single RUN)
+# Install build dependencies (single RUN) with security updates from trixie
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -16,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cargo \
     patchelf && \
     apt-get upgrade -y && \
+    apt-get dist-upgrade -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -55,17 +57,19 @@ COPY ./gluesync_scheduler ./gluesync_scheduler
 RUN python -m pip wheel --wheel-dir=/wheels .
 
 # Final stage
-FROM python:3.13-slim-bookworm
+# Use Python 3.13 slim-trixie (Debian 13) for latest security fixes
+FROM python:3.13-slim-trixie
 
 WORKDIR /app
 
-# Install required system packages in a single layer (minimal)
+# Install required system packages - trixie has fixed versions of vulnerable packages
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     procps \
     openssl && \
     apt-get upgrade -y && \
+    apt-get dist-upgrade -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
