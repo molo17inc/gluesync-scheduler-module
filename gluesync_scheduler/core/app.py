@@ -512,6 +512,7 @@ def create_ssl_context():
 
 def extract_from_pkcs12():
     """Extract certificate and key from PKCS12 file if available"""
+    import subprocess
     # Resolve security config file with fallbacks
     gluesync_security_config, config_exists = resolve_gluesync_file(
         'GLUESYNC_SECURITY_CONFIG', 'security-config.json'
@@ -519,47 +520,71 @@ def extract_from_pkcs12():
     if not config_exists:
         logger.warning(f"Security config file not found: {gluesync_security_config}")
         return None, None
-    
+
     try:
         # Load the security config
         with open(gluesync_security_config, 'r') as f:
             security_config = json.load(f)
-        
+
         # Check if SSL is configured
         if 'ssl' not in security_config or 'sslCertificatePath' not in security_config['ssl']:
             logger.warning("SSL not configured in security config")
             return None, None
-        
+
         # Get the certificate path and password
         cert_path = security_config['ssl']['sslCertificatePath']
         cert_password = security_config['ssl'].get('certificatePassword', '')
-        
+
         if not os.path.exists(cert_path):
             logger.warning(f"Certificate file not found: {cert_path}")
             return None, None
-        
+
         # Check if the certificate is a PKCS12 file (usually .p12 or .pfx, but may be .jks in Gluesync)
         if cert_path.endswith('.p12') or cert_path.endswith('.pfx') or cert_path.endswith('.jks'):
             logger.info(f"Extracting certificate and key from PKCS12 file: {cert_path}")
-            
+
             # Create temporary files for the extracted certificate and key
             cert_file = os.path.join(os.path.dirname(cert_path), 'temp_cert.pem')
             key_file = os.path.join(os.path.dirname(cert_path), 'temp_key.pem')
-            
-            # Extract the certificate and key using OpenSSL
-            # For .jks files, we need to convert to PKCS12 first, but in this case we assume
-            # the .jks file is actually a PKCS12 file with a .jks extension (as is common in Gluesync)
-            
-            # Extract the certificate
-            os.system(f'openssl pkcs12 -in "{cert_path}" -out "{cert_file}" -nokeys -passin pass:"{cert_password}"')
-            
-            # Extract the key
-            os.system(f'openssl pkcs12 -in "{cert_path}" -out "{key_file}" -nocerts -nodes -passin pass:"{cert_password}"')
-            
+
+            # Detect OpenSSL version
+            try:
+                ver = subprocess.run(["openssl", "version"], capture_output=True, text=True, check=True)
+                is_openssl3 = "OpenSSL 3." in ver.stdout
+            except Exception:
+                is_openssl3 = False
+
+            def do_extract(extra_args=None):
+                cert_cmd = [
+                    "openssl", "pkcs12", "-in", cert_path,
+                    "-nokeys", "-out", cert_file,
+                    "-passin", f"pass:{cert_password}"
+                ]
+                key_cmd = [
+                    "openssl", "pkcs12", "-in", cert_path,
+                    "-nocerts", "-nodes", "-out", key_file,
+                    "-passin", f"pass:{cert_password}"
+                ]
+                if extra_args:
+                    cert_cmd.extend(extra_args)
+                    key_cmd.extend(extra_args)
+                try:
+                    subprocess.run(cert_cmd, check=True, capture_output=True, text=True)
+                    subprocess.run(key_cmd, check=True, capture_output=True, text=True)
+                    return True
+                except subprocess.CalledProcessError:
+                    return False
+
+            if not do_extract() and is_openssl3:
+                logger.info("Standard PKCS12 extraction failed; retrying with -legacy flag for OpenSSL 3.x")
+                if not do_extract(["-legacy"]):
+                    logger.error("Failed to extract certificate and key from PKCS12 file")
+                    return None, None
+
             # Check if the extraction was successful
             if os.path.exists(cert_file) and os.path.exists(key_file):
                 logger.info(f"Certificate and key extracted successfully")
-                
+
                 # Register cleanup function to remove temporary files on shutdown
                 @app.on_event("shutdown")
                 async def cleanup_temp_files():
@@ -571,7 +596,7 @@ def extract_from_pkcs12():
                         logger.info("Temporary certificate and key files removed")
                     except Exception as e:
                         logger.error(f"Error removing temporary files: {e}")
-                
+
                 return cert_file, key_file
             else:
                 logger.error("Failed to extract certificate and key from PKCS12 file")
