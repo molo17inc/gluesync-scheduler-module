@@ -252,5 +252,98 @@ def test_pipeline_manager_resync_action(mock_sdk_client, mock_requests):
         assert kwargs["params"]["snapshotWriteMethod"] == "UPSERT"
 
 
+def test_job_service_group_redo_action(mock_sdk_client):
+    """Test that JobService._execute_group_operation correctly handles redo-group action"""
+    from unittest.mock import MagicMock, patch
+    import sys
+
+    # Pre-load a mock scheduler_service module to prevent real initialization
+    mock_scheduler_module = MagicMock()
+    mock_scheduler_module.scheduler_service = MagicMock()
+    sys.modules['gluesync_scheduler.services.scheduler_service'] = mock_scheduler_module
+
+    from gluesync_scheduler.services.job_service import JobService
+    from gluesync_scheduler.models.models import TaskType, ScheduledJob
+
+    mock_db = MagicMock()
+    job_service = JobService(db=mock_db)
+
+    mock_job = MagicMock(spec=ScheduledJob)
+    mock_job.pipeline_id = "test-pipeline"
+    mock_job.group_ids = '["group-123"]'
+    mock_job.with_snapshot = True
+    mock_job.snapshot_write_method = "INSERT"
+    mock_job.task_type = TaskType.GROUP_REDO
+
+    with patch('gluesync_scheduler.core.play_pause.CoreHubClient') as mock_client_class:
+        mock_instance = MagicMock()
+        mock_instance.redo_group.return_value = True
+        mock_client_class.return_value = mock_instance
+
+        success, message, details = job_service._execute_group_operation(
+            job=mock_job,
+            group_ids=["group-123"],
+            action="redo-group"
+        )
+
+        mock_instance.redo_group.assert_called_once_with(
+            "test-pipeline",
+            "group-123",
+            with_snapshot=True,
+            snapshot_write_method="INSERT"
+        )
+
+        assert success is True
+        assert "Successfully executed redo-group for all 1 groups" in message
+        assert details["total_groups"] == 1
+        assert details["successful_groups"] == 1
+
+
+def test_job_service_group_redo_action_failure(mock_sdk_client):
+    """Test that JobService._execute_group_operation correctly handles redo-group failures"""
+    from unittest.mock import MagicMock, patch
+    import sys
+
+    mock_scheduler_module = MagicMock()
+    mock_scheduler_module.scheduler_service = MagicMock()
+    sys.modules['gluesync_scheduler.services.scheduler_service'] = mock_scheduler_module
+
+    from gluesync_scheduler.services.job_service import JobService
+    from gluesync_scheduler.models.models import TaskType, ScheduledJob
+
+    mock_db = MagicMock()
+    job_service = JobService(db=mock_db)
+
+    mock_job = MagicMock(spec=ScheduledJob)
+    mock_job.pipeline_id = "test-pipeline"
+    mock_job.group_ids = '["group-456"]'
+    mock_job.with_snapshot = False
+    mock_job.snapshot_write_method = "UPSERT"
+    mock_job.task_type = TaskType.GROUP_REDO
+
+    with patch('gluesync_scheduler.core.play_pause.CoreHubClient') as mock_client_class:
+        mock_instance = MagicMock()
+        mock_instance.redo_group.return_value = False
+        mock_client_class.return_value = mock_instance
+
+        success, message, details = job_service._execute_group_operation(
+            job=mock_job,
+            group_ids=["group-456"],
+            action="redo-group"
+        )
+
+        mock_instance.redo_group.assert_called_once_with(
+            "test-pipeline",
+            "group-456",
+            with_snapshot=False,
+            snapshot_write_method="UPSERT"
+        )
+
+        assert success is False
+        assert "Executed redo-group for 0/1 groups successfully" in message
+        assert details["total_groups"] == 1
+        assert details["successful_groups"] == 0
+
+
 if __name__ == "__main__":
     pytest.main(["-xvs", __file__])

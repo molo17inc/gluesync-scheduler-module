@@ -1111,8 +1111,16 @@ class JobService:
                         result = corehub_client.stop_group(job.pipeline_id, group_id)
                     elif action == "resync" or action == "one-time-snapshot-group":
                         result = corehub_client.resync_group(
-                            job.pipeline_id, 
+                            job.pipeline_id,
                             group_id,
+                            snapshot_write_method=snapshot_write_method
+                        )
+                    elif action == "redo-group":
+                        with_snapshot = getattr(job, 'with_snapshot', False)
+                        result = corehub_client.redo_group(
+                            job.pipeline_id,
+                            group_id,
+                            with_snapshot=with_snapshot,
                             snapshot_write_method=snapshot_write_method
                         )
                     else:
