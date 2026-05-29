@@ -154,84 +154,49 @@ def extract_from_pkcs12():
         temp_dir = tempfile.mkdtemp()
         temp_cert = os.path.join(temp_dir, "cert.pem")
         temp_key = os.path.join(temp_dir, "key.pem")
-
-        # Detect OpenSSL version to handle OpenSSL 3.x legacy algorithms
+        
+        # Extract certificate
+        cert_cmd = [
+            openssl_path, "pkcs12", 
+            "-in", p12_path, 
+            "-passin", f"pass:{cert_password}",
+            "-nokeys", "-out", temp_cert
+        ]
+        
+        # Run with better error handling
         try:
-            version_result = subprocess.run([openssl_path, "version"], capture_output=True, text=True, check=True)
-            openssl_version_str = version_result.stdout.strip()
-            print(f"Detected OpenSSL version: {openssl_version_str}")
-            is_openssl3 = "OpenSSL 3." in openssl_version_str
-        except Exception as verr:
-            print(f"Could not detect OpenSSL version: {verr}")
-            is_openssl3 = False
-
-        def try_extract(cert_extra_args=None, key_extra_args=None):
-            cert_cmd = [
-                openssl_path, "pkcs12",
-                "-in", p12_path,
-                "-passin", f"pass:{cert_password}",
-                "-nokeys", "-out", temp_cert
-            ]
-            if cert_extra_args:
-                cert_cmd.extend(cert_extra_args)
-
-            key_cmd = [
-                openssl_path, "pkcs12",
-                "-in", p12_path,
-                "-passin", f"pass:{cert_password}",
-                "-nocerts", "-out", temp_key,
-                "-nodes"
-            ]
-            if key_extra_args:
-                key_cmd.extend(key_extra_args)
-
-            try:
-                cres = subprocess.run(cert_cmd, check=True, capture_output=True, text=True)
-                print(f"Certificate extraction output: {cres.stdout}")
-            except subprocess.CalledProcessError as ce:
-                print(f"Certificate extraction failed: {ce.stderr}")
-                return False
-
-            try:
-                kres = subprocess.run(key_cmd, check=True, capture_output=True, text=True)
-                print(f"Key extraction output: {kres.stdout}")
-            except subprocess.CalledProcessError as ke:
-                print(f"Key extraction failed: {ke.stderr}")
-                return False
-
-            return True
-
-        # First try standard extraction; if that fails on OpenSSL 3.x, retry with -legacy
-        if not try_extract() and is_openssl3:
-            print("Standard extraction failed, retrying with OpenSSL 3.x -legacy flag...")
-            if not try_extract(cert_extra_args=["-legacy"], key_extra_args=["-legacy"]):
-                print("Legacy extraction also failed.")
-                return None, None
-
+            result = subprocess.run(cert_cmd, check=True, capture_output=True, text=True)
+            print(f"Certificate extraction output: {result.stdout}")
+        except subprocess.CalledProcessError as e:
+            print(f"Certificate extraction failed: {e.stderr}")
+            return None, None
+        
+        # Extract key without encryption (nodes = no DES encryption)
+        key_cmd = [
+            openssl_path, "pkcs12", 
+            "-in", p12_path, 
+            "-passin", f"pass:{cert_password}",
+            "-nocerts", "-out", temp_key,
+            "-nodes"
+        ]
+        
+        # Run with better error handling
+        try:
+            result = subprocess.run(key_cmd, check=True, capture_output=True, text=True)
+            print(f"Key extraction output: {result.stdout}")
+        except subprocess.CalledProcessError as e:
+            print(f"Key extraction failed: {e.stderr}")
+            return None, None
+            
         # Verify the extracted files exist and have content
         if not os.path.exists(temp_cert) or os.path.getsize(temp_cert) == 0:
             print(f"Certificate file missing or empty: {temp_cert}")
             return None, None
-
+            
         if not os.path.exists(temp_key) or os.path.getsize(temp_key) == 0:
             print(f"Key file missing or empty: {temp_key}")
             return None, None
-
-        # Verify certificate chain completeness
-        try:
-            chain_check = subprocess.run(
-                [openssl_path, "crl2pkcs7", "-nocrl", "-certfile", temp_cert],
-                capture_output=True, text=True, check=True
-            )
-            cert_count = chain_check.stdout.count("-----BEGIN CERTIFICATE-----")
-            print(f"Extracted certificate chain contains {cert_count} certificate(s)")
-            if cert_count < 1:
-                print("WARNING: No certificates found in extracted file")
-            elif cert_count == 1:
-                print("WARNING: Only leaf certificate found; intermediates may be missing. Browsers may show ERR_CERT_AUTHORITY_INVALID.")
-        except Exception as chain_err:
-            print(f"Could not verify certificate chain: {chain_err}")
-
+        
         print(f"Successfully extracted certificate and key from PKCS12 file: {p12_path}")
         return temp_cert, temp_key
     
