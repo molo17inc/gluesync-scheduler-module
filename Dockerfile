@@ -2,6 +2,10 @@
 # Use Python 3.13 slim-trixie (Debian 13) for latest security fixes
 FROM python:3.13-slim-trixie AS builder
 
+# Non-root runtime user/group ids (overridable at build time)
+ARG USER_UID=10001
+ARG USER_GID=10001
+
 WORKDIR /build
 
 # Install build dependencies (single RUN) with security updates from trixie
@@ -59,6 +63,14 @@ RUN python -m pip wheel --wheel-dir=/wheels .
 # Final stage
 # Use Python 3.13 slim-trixie (Debian 13) for latest security fixes
 FROM python:3.13-slim-trixie
+
+# Non-root runtime user/group ids (overridable at build time)
+ARG USER_UID=10001
+ARG USER_GID=10001
+
+# Create a dedicated non-root user/group to run the application
+RUN groupadd --gid "$USER_GID" gluesync && \
+    useradd --uid "$USER_UID" --gid "$USER_GID" --create-home --shell /usr/sbin/nologin gluesync
 
 WORKDIR /app
 
@@ -140,6 +152,11 @@ COPY . .
 
 # Make scripts executable
 RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh
+
+# Ensure the non-root user owns the application and Gluesync data directories,
+# then drop privileges so the container does not run as root.
+RUN chown -R "$USER_UID:$USER_GID" /app /opt/gluesync
+USER gluesync
 
 # Python dependencies installed from requirements.txt above
 
