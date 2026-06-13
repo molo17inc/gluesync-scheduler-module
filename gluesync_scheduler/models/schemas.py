@@ -29,8 +29,39 @@ import os
 from enum import Enum
 from pydantic import BaseModel, Field, validator, field_serializer, ConfigDict
 
-from gluesync_scheduler.models.models import TaskType
+from gluesync_scheduler.models.models import TaskType, ExecutionMode
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
+
+
+class ChainedEventMode(str, Enum):
+    """Execution mode for a chained event"""
+    ASYNC = "async"   # fire-and-forget; don't wait for completion
+    SYNC = "sync"     # register a corehub webhook and wait for callback before proceeding
+
+
+class ChainedEventBase(BaseModel):
+    """Fields shared by create and response schemas for chained events"""
+    task_type: TaskType = Field(..., description="Type of task to perform")
+    pipeline_id: str = Field(..., description="Pipeline ID to operate on")
+    entity_ids: Optional[List[str]] = Field(None, description="Entity IDs (required for entity operations)")
+    group_ids: Optional[List[str]] = Field(None, description="Group IDs (required for group operations)")
+    with_snapshot: bool = Field(False, description="Whether to include a snapshot")
+    snapshot_write_method: str = Field("UPSERT", description="Snapshot write method: UPSERT or INSERT", pattern="^(UPSERT|INSERT)$")
+    execution_mode: ChainedEventMode = Field(ChainedEventMode.ASYNC, description="async: fire-and-forget; sync: wait for corehub webhook callback before next event")
+
+
+class ChainedEventCreate(ChainedEventBase):
+    """Schema used when creating chained events (no extra fields)"""
+    pass
+
+
+class ChainedEventResponse(ChainedEventBase):
+    """Schema returned by the API for a chained event"""
+    id: int
+    position: int
+    parent_job_id: int
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DayOfWeek(str, Enum):
@@ -91,7 +122,11 @@ class JobBase(BaseModel):
     snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
-    
+    chained_events: Optional[List[ChainedEventCreate]] = Field(
+        None,
+        description="Ordered list of additional tasks to fire after this job completes"
+    )
+
     @validator("schedule", "cron_expression")
     def validate_schedule_options(cls, v, values):
         # Ensure either schedule or cron_expression is provided
@@ -133,7 +168,8 @@ class JobUpdate(BaseModel):
     snapshot_write_method: Optional[str] = Field(None, description="Updated write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
-    
+    chained_events: Optional[List[ChainedEventCreate]] = Field(None, description="Replace all chained events with this list (pass empty list to clear)")
+
     model_config = ConfigDict(
         json_schema_extra = {
             "example": {
@@ -272,6 +308,7 @@ class Job(JobBase):
             return datetime.now(timezone.utc) + timedelta(days=1)
     start_time: Optional[str] = Field(None, description="Scheduled start time for the job in the job's timezone", example="2025-04-14T23:19:46+02:00")
     timezone_name: Optional[str] = Field(None, description="Name of the timezone used for scheduling", example="Asia/Tokyo")
+    chained_events: List[ChainedEventResponse] = Field(default_factory=list, description="Ordered chained events for this job")
     
     @validator('entity_ids', pre=True)
     def parse_entity_ids(cls, v):

@@ -24,4 +24,8 @@ python3 "$SCRIPT_DIR/migrate_add_is_cron_expression.py" "$@"
 echo "Running migration: migrate_add_group_ids_field.py"
 python3 "$SCRIPT_DIR/migrate_add_group_ids_field.py" "$PROJECT_ROOT/data/scheduler.db"
 
+# Add chained_job_events table migration
+echo "Running migration: migrate_add_chained_events.py"
+python3 "$SCRIPT_DIR/migrate_add_chained_events.py" "$@"
+
 echo "All migrations completed."

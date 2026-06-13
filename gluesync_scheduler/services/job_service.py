@@ -34,8 +34,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ScheduledJob, TaskType, Setting
-from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig
+from gluesync_scheduler.models.models import ScheduledJob, TaskType, Setting, ChainedJobEvent, ExecutionMode
+from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
@@ -214,6 +214,7 @@ class JobService:
         for job in jobs:
             job_model = Job.from_orm(job)
             job_model = self._apply_timezone_to_job(job_model, job)
+            job_model.chained_events = _load_chained_events(self.db, job.id)
             job_responses.append(job_model)
             
         return job_responses, total
@@ -229,7 +230,9 @@ class JobService:
                 detail=f"Job with ID {job_id} not found"
             )
         job_model = Job.from_orm(job)
-        return self._apply_timezone_to_job(job_model, job)
+        job_model = self._apply_timezone_to_job(job_model, job)
+        job_model.chained_events = _load_chained_events(self.db, job_id)
+        return job_model
 
     def get_job(self, job_id: int) -> Job:
         """
@@ -402,7 +405,26 @@ class JobService:
                 self.db.commit()
                 self.db.refresh(db_job)
             
-            return Job.from_orm(db_job)
+            # Persist chained events
+            if job_data.chained_events:
+                for pos, ce in enumerate(job_data.chained_events):
+                    chained = ChainedJobEvent(
+                        parent_job_id=db_job.id,
+                        position=pos,
+                        task_type=ce.task_type,
+                        pipeline_id=ce.pipeline_id,
+                        entity_ids=json.dumps(ce.entity_ids) if ce.entity_ids else None,
+                        group_ids=json.dumps(ce.group_ids) if ce.group_ids else None,
+                        with_snapshot=ce.with_snapshot,
+                        snapshot_write_method=ce.snapshot_write_method,
+                        execution_mode=ExecutionMode(ce.execution_mode.value),
+                    )
+                    self.db.add(chained)
+                self.db.commit()
+
+            result = Job.from_orm(db_job)
+            result.chained_events = _load_chained_events(self.db, db_job.id)
+            return result
             
         except Exception as e:
             self.db.rollback()
@@ -585,8 +607,10 @@ class JobService:
                 # Check if cron_expression is being updated
                 cron_updated = "cron_expression" in update_data
             
-            # Update the job record
+            # Update the job record  (skip chained_events — handled separately below)
             for key, value in update_data.items():
+                if key == "chained_events":
+                    continue
                 # Special handling for schedule to preserve original days
                 if key == "schedule" and value is not None:
                     # Store original schedule days for validation
@@ -688,7 +712,31 @@ class JobService:
                     self.db.commit()
                     self.db.refresh(db_job)
             
-            return Job.from_orm(db_job)
+            # Replace chained events when the caller provides a list (even empty)
+            if "chained_events" in job_data.dict(exclude_unset=True):
+                self.db.query(ChainedJobEvent).filter(
+                    ChainedJobEvent.parent_job_id == db_job.id
+                ).delete()
+                self.db.commit()
+                if job_data.chained_events:
+                    for pos, ce in enumerate(job_data.chained_events):
+                        chained = ChainedJobEvent(
+                            parent_job_id=db_job.id,
+                            position=pos,
+                            task_type=ce.task_type,
+                            pipeline_id=ce.pipeline_id,
+                            entity_ids=json.dumps(ce.entity_ids) if ce.entity_ids else None,
+                            group_ids=json.dumps(ce.group_ids) if ce.group_ids else None,
+                            with_snapshot=ce.with_snapshot,
+                            snapshot_write_method=ce.snapshot_write_method,
+                            execution_mode=ExecutionMode(ce.execution_mode.value),
+                        )
+                        self.db.add(chained)
+                    self.db.commit()
+
+            result = Job.from_orm(db_job)
+            result.chained_events = _load_chained_events(self.db, db_job.id)
+            return result
             
         except Exception as e:
             self.db.rollback()
@@ -823,7 +871,28 @@ class JobService:
             
             # Save the updated job status
             self.db.commit()
-            
+
+            # Fire chained events in the background (non-blocking)
+            if success:
+                import threading
+                import asyncio as _asyncio
+                from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+                from gluesync_scheduler.db.database import SessionLocal
+
+                def _run_chain(parent_job_id: int):
+                    chain_db = SessionLocal()
+                    try:
+                        parent = chain_db.query(ScheduledJob).filter(
+                            ScheduledJob.id == parent_job_id
+                        ).first()
+                        if parent:
+                            _asyncio.run(chain_execution_service.execute_chain(parent, chain_db))
+                    finally:
+                        chain_db.close()
+
+                t = threading.Thread(target=_run_chain, args=(job_id,), daemon=True)
+                t.start()
+
             # Return an extremely minimal response structure to avoid any possible recursion
             # Only use primitive types (strings, numbers, booleans)
             return {
@@ -1200,3 +1269,33 @@ class JobService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error deleting job: {str(e)}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Module-level helper (not a method — avoids duplication across get_* methods)
+# ---------------------------------------------------------------------------
+
+def _load_chained_events(db, parent_job_id: int) -> list:
+    """Query and return ChainedEventResponse objects for a given job."""
+    rows = (
+        db.query(ChainedJobEvent)
+        .filter(ChainedJobEvent.parent_job_id == parent_job_id)
+        .order_by(ChainedJobEvent.position)
+        .all()
+    )
+    result = []
+    for row in rows:
+        resp = ChainedEventResponse(
+            id=row.id,
+            position=row.position,
+            parent_job_id=row.parent_job_id,
+            task_type=row.task_type,
+            pipeline_id=row.pipeline_id,
+            entity_ids=json.loads(row.entity_ids) if row.entity_ids else None,
+            group_ids=json.loads(row.group_ids) if row.group_ids else None,
+            with_snapshot=row.with_snapshot,
+            snapshot_write_method=row.snapshot_write_method,
+            execution_mode=row.execution_mode.value,
+        )
+        result.append(resp)
+    return result

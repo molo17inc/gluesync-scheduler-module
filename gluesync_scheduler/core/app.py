@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Set
 from gluesync_scheduler.api.router import router
 from gluesync_scheduler.api.pipeline_router import router as pipeline_router
 from gluesync_scheduler.api.settings_router import router as settings_router
+from gluesync_scheduler.api.webhook_router import router as webhook_router
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
 from gluesync_scheduler.core.path_resolver import resolve_gluesync_file
 from gluesync_scheduler.services.job_service import JobService
@@ -474,6 +475,7 @@ async def shutdown_event():
 app.include_router(router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(pipeline_router, prefix="/api")
+app.include_router(webhook_router, prefix="/api")
 
 # Custom JSON encoder to handle datetime objects
 class JSONEncoder(json.JSONEncoder):

@@ -23,7 +23,7 @@
 
 import enum
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Enum, Text, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Enum, Text, Boolean, ForeignKey
 from sqlalchemy.sql.expression import text
 from sqlalchemy.sql.sqltypes import TIMESTAMP
 
@@ -74,6 +74,28 @@ class ScheduledJob(Base):
     start_time = Column(String, nullable=True)
     timezone_name = Column(String, nullable=True)
     is_cron_expression = Column(Boolean, default=False, nullable=False)
+
+
+class ExecutionMode(enum.Enum):
+    ASYNC = "async"
+    SYNC = "sync"
+
+
+class ChainedJobEvent(Base):
+    __tablename__ = "chained_job_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    parent_job_id = Column(Integer, ForeignKey("scheduled_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    position = Column(Integer, nullable=False)  # 0-based ordering
+    task_type = Column(Enum(TaskType), nullable=False)
+    pipeline_id = Column(String, nullable=False)
+    entity_ids = Column(Text, nullable=True)   # JSON array
+    group_ids = Column(Text, nullable=True)    # JSON array
+    with_snapshot = Column(Boolean, default=False)
+    snapshot_write_method = Column(String, nullable=False, default="UPSERT")
+    execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
 
 class Setting(Base):
