@@ -233,9 +233,6 @@ class Job(JobBase):
                 "4": "thursday", "5": "friday", "6": "saturday"
             }
             
-            # Create a detailed log string to help with debugging
-            log_msg = f"Extracting days from cron expression: {cron}, day of week part: {dow_part}"
-            
             # Handle different dow formats
             if dow_part == "*":
                 # All days
@@ -301,7 +298,7 @@ class Job(JobBase):
                 next_datetime = next_datetime.astimezone(tz)
             
             return next_datetime
-        except Exception as e:
+        except Exception:
             # If croniter is not available or other error, return current time + 1 day as fallback
             # This ensures we at least have a value for next_run
             from datetime import datetime, timezone, timedelta
@@ -430,7 +427,7 @@ class Job(JobBase):
             
             # Return consistent ISO8601 format
             return dt_in_timezone.isoformat()
-        except Exception as e:
+        except Exception:
             # If we can't parse it, return as is
             return start_time
 
