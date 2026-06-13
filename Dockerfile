@@ -150,12 +150,11 @@ COPY ./migrations ./migrations
 # Copy app code
 COPY . .
 
-# Make scripts executable
-RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh
-
-# Ensure the non-root user owns the application and Gluesync data directories,
-# then drop privileges so the container does not run as root.
-RUN chown -R "$USER_UID:$USER_GID" /app /opt/gluesync
+# Make scripts executable and ensure the non-root user owns the application
+# and Gluesync data directories, then drop privileges so the container does
+# not run as root.
+RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh && \
+    chown -R "$USER_UID:$USER_GID" /app /opt/gluesync
 USER gluesync
 
 # Python dependencies installed from requirements.txt above
