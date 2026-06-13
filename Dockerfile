@@ -3,7 +3,10 @@
 # near-zero CVEs, and ships pip + a shell + apk for building dependencies.
 FROM cgr.dev/chainguard/python:latest-dev AS builder
 
-USER root
+# Non-root runtime user/group ids (overridable at build time)
+ARG USER_UID=10001
+ARG USER_GID=10001
+
 WORKDIR /build
 
 # Set environment variables for Python and dependency installation
@@ -50,7 +53,15 @@ RUN pip install .
 # curl, ncurses, sqlite, libssh2, ...) that carried unfixable CVEs.
 FROM cgr.dev/chainguard/python:latest-dev
 
-USER root
+# Non-root runtime user/group ids (overridable at build time)
+ARG USER_UID=10001
+ARG USER_GID=10001
+
+# Create a dedicated non-root user/group to run the application
+# (Wolfi/busybox compatible — no shadow-utils required)
+RUN echo "gluesync:x:$USER_GID:" >> /etc/group && \
+    echo "gluesync:x:$USER_UID:$USER_GID::/nonexistent:/bin/false" >> /etc/passwd
+
 WORKDIR /app
 
 # Minimal runtime OS packages (Wolfi, continuously patched)
@@ -110,8 +121,12 @@ COPY ./migrations ./migrations
 # Copy remaining app code
 COPY . .
 
-# Make scripts executable
-RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh
+# Make scripts executable and ensure the non-root user owns the application
+# and Gluesync data directories, then drop privileges so the container does
+# not run as root.
+RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh && \
+    chown -R "$USER_UID:$USER_GID" /app /opt/gluesync
+USER gluesync
 
 # Expose the port the app runs on
 EXPOSE 1717
