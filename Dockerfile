@@ -3,8 +3,10 @@
 FROM python:3.13-slim-trixie AS builder
 
 # Non-root runtime user/group ids (overridable at build time)
-ARG USER_UID=10001
-ARG USER_GID=10001
+# UID/GID 1017 matches the gluesync user in the CoreHub (gluesync-kotlin) image
+# so that shared Docker volumes (/opt/gluesync/shared) have consistent ownership.
+ARG USER_UID=1017
+ARG USER_GID=1017
 
 WORKDIR /build
 
@@ -65,8 +67,10 @@ RUN python -m pip wheel --wheel-dir=/wheels .
 FROM python:3.13-slim-trixie
 
 # Non-root runtime user/group ids (overridable at build time)
-ARG USER_UID=10001
-ARG USER_GID=10001
+# UID/GID 1017 matches the gluesync user in the CoreHub (gluesync-kotlin) image
+# so that shared Docker volumes (/opt/gluesync/shared) have consistent ownership.
+ARG USER_UID=1017
+ARG USER_GID=1017
 
 # Create a dedicated non-root user/group to run the application
 RUN groupadd --gid "$USER_GID" gluesync && \
@@ -79,7 +83,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     procps \
-    openssl && \
+    openssl \
+    gosu && \
     apt-get upgrade -y && \
     apt-get dist-upgrade -y && \
     apt-get clean && \
@@ -119,7 +124,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LOG_DIR=/app/logs \
     DATA_DIR=/app/data \
     ALLOWED_ORIGINS=* \
-    CRONTAB_USER=root \
+    CRONTAB_USER=gluesync \
     SSL_ENABLED=false \
     SSL_SKIP_VERIFY=true \
     TIMEZONE=UTC \
@@ -155,7 +160,9 @@ COPY . .
 # not run as root.
 RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh && \
     chown -R "$USER_UID:$USER_GID" /app /opt/gluesync
-USER gluesync
+# NOTE: We intentionally do NOT set USER here.
+# The entrypoint starts as root, fixes volume ownership (upgrade path from rootful image),
+# then re-execs as the 'gluesync' user via gosu — see entrypoint.sh.
 
 # Python dependencies installed from requirements.txt above
 
