@@ -4,8 +4,10 @@
 FROM cgr.dev/chainguard/python:latest-dev AS builder
 
 # Non-root runtime user/group ids (overridable at build time)
-ARG USER_UID=10001
-ARG USER_GID=10001
+# UID/GID 1017 matches the gluesync user in the CoreHub (gluesync-kotlin) image
+# so that shared Docker volumes (/opt/gluesync/shared) have consistent ownership.
+ARG USER_UID=1017
+ARG USER_GID=1017
 
 WORKDIR /build
 
@@ -54,8 +56,10 @@ RUN pip install .
 FROM cgr.dev/chainguard/python:latest-dev
 
 # Non-root runtime user/group ids (overridable at build time)
-ARG USER_UID=10001
-ARG USER_GID=10001
+# UID/GID 1017 matches the gluesync user in the CoreHub (gluesync-kotlin) image
+# so that shared Docker volumes (/opt/gluesync/shared) have consistent ownership.
+ARG USER_UID=1017
+ARG USER_GID=1017
 
 # Create a dedicated non-root user/group to run the application
 # (Wolfi/busybox compatible — no shadow-utils required)
@@ -65,7 +69,10 @@ RUN echo "gluesync:x:$USER_GID:" >> /etc/group && \
 WORKDIR /app
 
 # Minimal runtime OS packages (Wolfi, continuously patched)
-RUN apk add --no-cache openssl procps tzdata
+RUN apk add --no-cache openssl procps tzdata su-exec && \
+    ln -s /usr/bin/su-exec /usr/local/bin/gosu 2>/dev/null || \
+    ln -s /sbin/su-exec /usr/local/bin/gosu 2>/dev/null || \
+    ln -s /bin/su-exec /usr/local/bin/gosu
 
 # Bring in the prebuilt virtual environment from the builder stage
 COPY --from=builder /opt/venv /opt/venv
@@ -102,7 +109,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LOG_DIR=/app/logs \
     DATA_DIR=/app/data \
     ALLOWED_ORIGINS=* \
-    CRONTAB_USER=root \
+    CRONTAB_USER=gluesync \
     SSL_ENABLED=false \
     SSL_SKIP_VERIFY=true \
     TIMEZONE=UTC \
@@ -126,7 +133,9 @@ COPY . .
 # not run as root.
 RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh && \
     chown -R "$USER_UID:$USER_GID" /app /opt/gluesync
-USER gluesync
+# NOTE: We intentionally do NOT set USER here.
+# The entrypoint starts as root, fixes volume ownership (upgrade path from rootful image),
+# then re-execs as the 'gluesync' user via gosu — see entrypoint.sh.
 
 # Expose the port the app runs on
 EXPOSE 1717

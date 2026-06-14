@@ -1,6 +1,28 @@
 #!/bin/sh
 set -e
 
+# ---------------------------------------------------------------------------
+# Upgrade-path ownership fix (rootful → rootless migration)
+# ---------------------------------------------------------------------------
+# When upgrading from an image that ran as root, Docker volumes may contain
+# files owned by UID 0.  Since the container now runs as 'gluesync' (UID 1017)
+# it cannot write to those files.  We detect this by checking whether we were
+# started as root and, if so, chown all persistent directories before
+# dropping privileges via gosu.  On a fresh install the directories are
+# already owned by gluesync (set during image build), so the chown is a
+# fast no-op.
+# ---------------------------------------------------------------------------
+if [ "$(id -u)" = "0" ]; then
+    echo "[entrypoint] Running as root — fixing volume ownership for 'gluesync' (upgrade path)..."
+    chown -R gluesync:gluesync /app /opt/gluesync 2>/dev/null || true
+    chmod +x /app/run_job.sh 2>/dev/null || true
+    chmod +x /app/run_scheduler.py 2>/dev/null || true
+    echo "[entrypoint] Ownership fixed — dropping privileges to 'gluesync'..."
+    exec gosu gluesync "$0" "$@"
+fi
+
+# From here on the process runs as 'gluesync' (non-root).
+
 # Only auto-detect timezone if TIMEZONE isn't already set
 if [ -z "$TIMEZONE" ]; then
     echo "TIMEZONE not set, auto-detecting..."
