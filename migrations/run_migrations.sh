@@ -1,8 +1,8 @@
-#!/bin/bash
+#!/bin/sh
 # This script runs all migrations in order
 
 # Get the directory where this script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SCRIPT_DIR="$( cd "$( dirname "$0" )" && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Run each migration script in sequence
