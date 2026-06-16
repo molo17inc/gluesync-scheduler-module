@@ -1,7 +1,7 @@
 # Build stage
 # Chainguard/Wolfi Python (-dev variant): glibc-based, continuously patched for
 # near-zero CVEs, and ships pip + a shell + apk for building dependencies.
-FROM cgr.dev/chainguard/python:3.13-dev AS builder
+FROM cgr.dev/chainguard/python:latest-dev AS builder
 
 USER root
 WORKDIR /build
@@ -48,7 +48,7 @@ RUN pip install .
 # Same Chainguard/Wolfi Python image: keeps a POSIX shell so entrypoint.sh and
 # the migration script still run, while dropping the Debian OS packages (perl,
 # curl, ncurses, sqlite, libssh2, ...) that carried unfixable CVEs.
-FROM cgr.dev/chainguard/python:3.13-dev
+FROM cgr.dev/chainguard/python:latest-dev
 
 USER root
 WORKDIR /app
