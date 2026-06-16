@@ -21,7 +21,6 @@ RUN apk add --no-cache \
     libffi-dev \
     pkgconf \
     rust \
-    cargo \
     patchelf
 
 # Isolated virtual environment that is copied verbatim into the final stage
