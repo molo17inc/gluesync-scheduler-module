@@ -54,7 +54,7 @@ USER root
 WORKDIR /app
 
 # Minimal runtime OS packages (Wolfi, continuously patched)
-RUN apk add --no-cache openssl procps
+RUN apk add --no-cache openssl procps tzdata
 
 # Bring in the prebuilt virtual environment from the builder stage
 COPY --from=builder /opt/venv /opt/venv
