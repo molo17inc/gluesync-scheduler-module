@@ -41,7 +41,7 @@ Write-Host ""
 # and creates a compressed ZIP archive.
 
 # Script version
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.6"
 
 function Add-SectionHeader {
     param(
@@ -64,6 +64,97 @@ function Test-FileReadable {
         return $true
     } catch {
         return $false
+    }
+}
+
+# Safe per-file copy used to stage files into a snapshot directory before archiving.
+#
+# Strategy (in order):
+#   1. robocopy /B (backup mode) - opens via the Windows backup API and
+#      bypasses share-mode restrictions on files held open for writing by
+#      another process (Logback file appender, Docker daemon log files).
+#   2. Fallback: [System.IO.File]::Open with FileShare::ReadWrite to copy
+#      the bytes ourselves. Works for almost all log files since Logback
+#      does not open them exclusively.
+#
+# Returns a PSCustomObject:
+#   Ok       [bool]    - true on success
+#   Method   [string]  - 'robocopy' or 'stream'
+#   Reason   [string]  - failure reason when Ok=$false
+function Copy-FileSafe {
+    param(
+        [Parameter(Mandatory=$true)][string]$Source,
+        [Parameter(Mandatory=$true)][string]$Destination
+    )
+
+    $sourceDir  = Split-Path -Parent $Source
+    $sourceName = Split-Path -Leaf  $Source
+    $destDir    = Split-Path -Parent $Destination
+    $destName   = Split-Path -Leaf  $Destination
+
+    try {
+        if (-not (Test-Path $destDir)) {
+            New-Item -Path $destDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        }
+    } catch {
+        return [PSCustomObject]@{
+            Ok = $false; Method = 'none';
+            Reason = "mkdir failed: $($_.Exception.Message)"
+        }
+    }
+
+    # ---- 1) robocopy /B -------------------------------------------------
+    if (Get-Command -Name 'robocopy' -ErrorAction SilentlyContinue) {
+        # /B          backup mode (Windows backup API) - bypasses share-mode locks
+        # /R:1 /W:1   one retry, one second wait - don't hang on stubborn files
+        # /NJH /NJS   no job header / summary noise
+        # /NP  /NDL   no progress / no directory list
+        # /COPY:DAT   data + attributes + timestamps (no ACL/owner/audit)
+        $robocopyArgs = @(
+            $sourceDir, $destDir, $sourceName,
+            '/B', '/R:1', '/W:1', '/NJH', '/NJS', '/NP', '/NDL', '/COPY:DAT'
+        )
+
+        $robocopyOut = & robocopy @robocopyArgs 2>&1 | Out-String
+        # robocopy exit codes 0..7 are "success-ish" (0/1 = no/files copied,
+        # 2/4 = extras/mismatched, 8+ = real failure). Accept 0..7.
+        if ($LASTEXITCODE -ge 0 -and $LASTEXITCODE -le 7) {
+            # robocopy preserves the source filename - rename if target differs.
+            if ($sourceName -ne $destName) {
+                $robocopyTarget = Join-Path $destDir $sourceName
+                try {
+                    Move-Item -Path $robocopyTarget -Destination $Destination -Force -ErrorAction Stop
+                } catch {
+                    return [PSCustomObject]@{
+                        Ok = $false; Method = 'robocopy';
+                        Reason = "robocopy rename failed: $($_.Exception.Message)"
+                    }
+                }
+            }
+            return [PSCustomObject]@{ Ok = $true; Method = 'robocopy'; Reason = '' }
+        }
+
+        $robocopyReason = "robocopy exit $LASTEXITCODE"
+    } else {
+        $robocopyReason = 'robocopy not available'
+    }
+
+    # ---- 2) Fallback: stream copy with shared-read ---------------------
+    try {
+        $inStream  = [System.IO.File]::Open($Source, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        $outStream = [System.IO.File]::Open($Destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try {
+            $inStream.CopyTo($outStream)
+        } finally {
+            $outStream.Dispose()
+            $inStream.Dispose()
+        }
+        return [PSCustomObject]@{ Ok = $true; Method = 'stream'; Reason = '' }
+    } catch {
+        return [PSCustomObject]@{
+            Ok = $false; Method = 'none';
+            Reason = "$robocopyReason | stream copy: $($_.Exception.Message)"
+        }
     }
 }
 
@@ -430,6 +521,17 @@ function Export-DockerContainerLogs {
 $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $ArchiveName = "support-logs-v$ScriptVersion-$Timestamp.zip"
 
+# Lookback for file-based logs (in days). Files older than this are not collected.
+# Mirrors the conductor's COLLECT_LOG_LOOKBACK_DAYS default.
+$LogLookbackDays = 3
+if ($env:COLLECT_LOG_LOOKBACK_DAYS) {
+    $parsed = 0
+    if ([int]::TryParse($env:COLLECT_LOG_LOOKBACK_DAYS, [ref]$parsed) -and $parsed -gt 0) {
+        $LogLookbackDays = $parsed
+    }
+}
+$LogLookbackCutoff = (Get-Date).AddDays(-$LogLookbackDays)
+
 # Get the directory where the script is located (robust across invocation methods)
 if ($PSScriptRoot) {
     $scriptDir = $PSScriptRoot
@@ -474,19 +576,62 @@ if (-not $Ticket) {
 Write-Host "Log Collection Script v$ScriptVersion - Searching for .log and .err files in $searchDir..."
 Write-Host ""
 
+# ---- Well-known mount points -------------------------------------------
+# The trial-assembler docker-compose template mounts log volumes at:
+#   ./logs/core-hub  -> C:\opt\gluesync\logs       (Logback file appender)
+#   ./logs/chronos   -> C:\app\logs                (Chronos service logs)
+#   ./logs           -> C:\opt\gluesync-conductor\logs (Conductor logs)
+# Hitting these explicitly is a safety net for environments where
+# $searchDir resolves somewhere unexpected.
+$wellKnownLogDirs = @(
+    (Join-Path $searchDir 'logs'),
+    (Join-Path $searchDir 'logs\core-hub'),
+    (Join-Path $searchDir 'logs\chronos')
+) | Select-Object -Unique
+
+$wellKnownDirReport = New-Object System.Collections.Generic.List[PSCustomObject]
+$wellKnownLogFiles  = @()
+foreach ($dir in $wellKnownLogDirs) {
+    if (Test-Path -Path $dir -PathType Container) {
+        $matched = @(
+            Get-ChildItem -Path $dir -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -in '.log', '.err' }
+        )
+        $wellKnownDirReport.Add([PSCustomObject]@{
+            Path = $dir; Exists = $true; Matched = $matched.Count
+        }) | Out-Null
+        $wellKnownLogFiles += $matched
+    } else {
+        $wellKnownDirReport.Add([PSCustomObject]@{
+            Path = $dir; Exists = $false; Matched = 0
+        }) | Out-Null
+    }
+}
+
 # Robust recursive discovery by filtering extensions in the pipeline
 try {
-    $logFiles = Get-ChildItem -Path $searchDir -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension -in '.log', '.err' }
+    $recursiveLogFiles = @(
+        Get-ChildItem -Path $searchDir -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in '.log', '.err' }
+    )
 } catch {
-    Write-Error ("Failed to enumerate files in {0}: {1}" -f $searchDir, $_.Exception.Message)  
+    Write-Error ("Failed to enumerate files in {0}: {1}" -f $searchDir, $_.Exception.Message)
     exit 1
 }
 
+# Merge well-known + recursive and de-duplicate by full path
+$logFiles = @($wellKnownLogFiles + $recursiveLogFiles) |
+    Sort-Object -Property FullName -Unique
+
+# Apply lookback window (skip files older than $LogLookbackDays)
 if ($logFiles) {
-    Write-Host "Found $($logFiles.Count) log files."
+    $logFiles = $logFiles | Where-Object { $_.LastWriteTime -ge $LogLookbackCutoff }
+}
+
+if ($logFiles) {
+    Write-Host "Found $($logFiles.Count) log files within last $LogLookbackDays day(s)."
 } else {
-    Write-Host "No .log or .err files found."
+    Write-Host "No .log or .err files found within last $LogLookbackDays day(s)."
 }
 
 # Prepare list of full paths
@@ -525,6 +670,7 @@ $diagnosticFiles = Get-ChildItem -Path $extraDir -Recurse -File -ErrorAction Sil
 if ($diagnosticFiles) {
     $filePaths += ($diagnosticFiles | ForEach-Object { $_.FullName })
 }
+$candidateFileCount = $filePaths.Count
 
 if (-not $filePaths -or $filePaths.Count -eq 0) {
     Write-Host "No files found to archive (logs or diagnostics)."
@@ -552,6 +698,117 @@ if ($readableFilePaths.Count -eq 0) {
     Write-Error "Failed to create archive: all files are locked or inaccessible."
     exit 1
 }
+
+# ---- Snapshot stage -----------------------------------------------------
+# Copy every candidate into a snapshot directory BEFORE archiving so the
+# archive reads from stable copies, not from live files that may be
+# rotated/truncated mid-zip. Uses robocopy /B as primary method, with a
+# share-mode stream copy as fallback.
+$snapshotDir = Join-Path $outputDir ("gluesync-snapshot-{0}-{1}" -f [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(), $PID)
+New-Item -Path $snapshotDir -ItemType Directory -Force | Out-Null
+
+$snapshotResults = New-Object System.Collections.Generic.List[PSCustomObject]
+foreach ($file in $readableFilePaths) {
+    # Choose a relative path inside the snapshot dir:
+    #   - if file lives under $searchDir, mirror that hierarchy
+    #   - else if it lives under $extraDir, place under "diagnostics/..."
+    #   - else fall back to just the basename
+    $fullPath = [System.IO.Path]::GetFullPath($file)
+    $normalizedSearch = ([System.IO.Path]::GetFullPath($searchDir)).TrimEnd('\')
+    $normalizedExtra  = ([System.IO.Path]::GetFullPath($extraDir)).TrimEnd('\')
+
+    if ($fullPath.StartsWith($normalizedSearch + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $safeRel = $fullPath.Substring($normalizedSearch.Length).TrimStart('\')
+    } elseif ($fullPath.StartsWith($normalizedExtra + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $safeRel = Join-Path 'diagnostics' ($fullPath.Substring($normalizedExtra.Length).TrimStart('\'))
+    } else {
+        $safeRel = Split-Path -Leaf $fullPath
+    }
+
+    $target = Join-Path $snapshotDir $safeRel
+    $copy = Copy-FileSafe -Source $file -Destination $target
+    $snapshotResults.Add([PSCustomObject]@{
+        Source = $file; Target = $target;
+        Ok = $copy.Ok; Method = $copy.Method; Reason = $copy.Reason
+    }) | Out-Null
+}
+
+$snapshotOk     = @($snapshotResults | Where-Object { $_.Ok })
+$snapshotFailed = @($snapshotResults | Where-Object { -not $_.Ok })
+
+foreach ($f in $snapshotFailed) {
+    Write-Warning ("Failed to snapshot {0}: {1}" -f $f.Source, $f.Reason)
+}
+
+# Per-method counts for the report
+$methodCounts = @{ robocopy = 0; stream = 0; none = 0 }
+foreach ($r in $snapshotOk) {
+    if ($methodCounts.ContainsKey($r.Method)) { $methodCounts[$r.Method]++ }
+}
+
+# ---- Collection report -------------------------------------------------
+# Always included in the archive so support can see exactly what was
+# enumerated, snapshotted, dropped, and why.
+$collectionReport = Join-Path $snapshotDir 'collection-report.txt'
+$reportLines = New-Object System.Collections.Generic.List[string]
+[void]$reportLines.Add("Gluesync Log Collection Report (PowerShell)")
+[void]$reportLines.Add("Script version: $ScriptVersion")
+[void]$reportLines.Add("Generated on: $(Get-Date -Format o)")
+[void]$reportLines.Add("Platform: Windows")
+[void]$reportLines.Add("Log lookback: $LogLookbackDays day(s)")
+[void]$reportLines.Add("")
+[void]$reportLines.Add("--- Search roots ---")
+[void]$reportLines.Add("  searchDir: $searchDir")
+[void]$reportLines.Add("  Well-known mount points:")
+foreach ($d in $wellKnownDirReport) {
+    $tag = if ($d.Exists) { 'PRESENT' } else { 'MISSING' }
+    [void]$reportLines.Add("    $tag  $($d.Path)  (matched $($d.Matched))")
+}
+[void]$reportLines.Add("")
+[void]$reportLines.Add("--- Enumerated candidates ---")
+[void]$reportLines.Add("  Total candidates found:   $candidateFileCount")
+[void]$reportLines.Add("  Readable (passed Test-FileReadable): $($readableFilePaths.Count)")
+[void]$reportLines.Add("  Locked / inaccessible:    $($lockedFilePaths.Count)")
+[void]$reportLines.Add("  Successfully snapshotted: $($snapshotOk.Count)")
+[void]$reportLines.Add("  Failed to snapshot:       $($snapshotFailed.Count)")
+[void]$reportLines.Add("")
+if ($lockedFilePaths.Count -gt 0) {
+    [void]$reportLines.Add("--- Files skipped by readability pre-check ---")
+    foreach ($p in $lockedFilePaths) { [void]$reportLines.Add("  LOCKED  $p") }
+    [void]$reportLines.Add("")
+}
+if ($snapshotFailed.Count -gt 0) {
+    [void]$reportLines.Add("--- Snapshot failures (files excluded from archive) ---")
+    foreach ($f in $snapshotFailed) {
+        [void]$reportLines.Add("  FAILED  $($f.Source)")
+        [void]$reportLines.Add("    reason: $($f.Reason)")
+    }
+    [void]$reportLines.Add("")
+}
+[void]$reportLines.Add("--- Snapshot method breakdown ---")
+[void]$reportLines.Add("  robocopy: $($methodCounts['robocopy'])")
+[void]$reportLines.Add("  stream:   $($methodCounts['stream'])")
+[void]$reportLines.Add("")
+[void]$reportLines.Add("--- Files included in archive ---")
+foreach ($r in $snapshotOk) {
+    [void]$reportLines.Add("  OK  [$($r.Method)]  $($r.Source)")
+}
+[void]$reportLines.Add("")
+Set-Content -Path $collectionReport -Value $reportLines -Encoding UTF8
+
+# The actual files we will archive are the snapshot copies + the report
+$archiveInputs = @($snapshotOk | ForEach-Object { $_.Target })
+$archiveInputs += $collectionReport
+
+if ($archiveInputs.Count -eq 0) {
+    Write-Error "Failed to create archive: snapshot stage produced no files."
+    Remove-Item -Path $snapshotDir -Recurse -Force -ErrorAction SilentlyContinue
+    exit 1
+}
+
+# From here on the archiver consumes the snapshot copies, not the live files
+$readableFilePaths = New-Object System.Collections.Generic.List[string]
+foreach ($p in $archiveInputs) { [void]$readableFilePaths.Add($p) }
 
 # Check if the Compress-Archive cmdlet is available
 if (Get-Command -Name Compress-Archive -ErrorAction SilentlyContinue) {
@@ -605,15 +862,21 @@ if (Get-Command -Name Compress-Archive -ErrorAction SilentlyContinue) {
             }
         } catch {
             Write-Host "Failed to upload to FTP: $($_.Exception.Message)"
+            Remove-Item -Path $snapshotDir -Recurse -Force -ErrorAction SilentlyContinue
             exit 1
         } finally {
             if ($webClient) { $webClient.Dispose() }
         }
     } else {
         Write-Host "Email or ticket not provided. Skipping upload."
+        Remove-Item -Path $snapshotDir -Recurse -Force -ErrorAction SilentlyContinue
         exit 1
     }
+
+    # Always clean up the snapshot directory
+    Remove-Item -Path $snapshotDir -Recurse -Force -ErrorAction SilentlyContinue
 } else {
     Write-Error "Error: 'Compress-Archive' cmdlet not found. This script requires PowerShell 5.0 or newer."
+    Remove-Item -Path $snapshotDir -Recurse -Force -ErrorAction SilentlyContinue
     exit 1
 }
