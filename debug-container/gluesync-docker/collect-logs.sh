@@ -18,16 +18,19 @@
 # acceptance of one of these licenses. See the accompanying LICENSE files or contact
 # MOLO17 for more information.
 #
-# Copyright (C) 2025 MOLO17. All rights reserved.
+# Copyright (C) 2026 MOLO17. All rights reserved.
 
 echo "=================================================================================="
-echo " Welcome to the Gluesync Logs Collector & Uploader!"
+echo " Welcome to the Gluesync Logs Collector & Uploader"
 echo ""
 echo " This script safely collects all .log and .err files recursively from Gluesync"
 echo " directories and creates a compressed archive (.zip or .tar.gz)."
 echo ""
 echo " If you have a support ticket, you can upload the logs directly to your secure"
 echo " MOLO17 support area for faster troubleshooting assistance."
+echo ""
+echo " No internet connection? Just press ENTER twice when asked for email and ticket"
+echo " to skip the upload and keep the archive locally."
 echo ""
 echo " Usage: $0 [-e email] [-t ticket]"
 echo "=================================================================================="
@@ -41,12 +44,30 @@ echo ""
 # If neither command is found, it prints an error message.
 
 # Script version
-SCRIPT_VERSION="1.2"
+SCRIPT_VERSION="1.4 Linux"
+
+# Remote upload defaults (can be overridden via env vars)
+WEBDAV_BASE_URL=${WEBDAV_BASE_URL:-https://webdav.hq.molo17.com}
+WEBDAV_REMOTE_PATH=${WEBDAV_REMOTE_PATH:-}
+
+normalize_webdav_paths() {
+    WEBDAV_BASE_URL=${WEBDAV_BASE_URL%/}
+    if [ -n "$WEBDAV_REMOTE_PATH" ]; then
+        WEBDAV_REMOTE_PATH="/${WEBDAV_REMOTE_PATH#/}"
+        WEBDAV_REMOTE_PATH="${WEBDAV_REMOTE_PATH%/}"
+    fi
+}
+normalize_webdav_paths
+
+set -o pipefail
 
 ARCHIVE_FILE_LIST=""
 TAR_FILE_LIST=""
 TAR_ERR_FILE=""
 EXTRA_DIR=""
+ZIP_ERR_FILE=""
+UPLOAD_ERR_FILE=""
+LOG_FILE=""
 
 cleanup() {
     if [ -n "$ARCHIVE_FILE_LIST" ] && [ -f "$ARCHIVE_FILE_LIST" ]; then
@@ -277,22 +298,127 @@ collect_docker_info() {
     append_cmd_output "$output_file" "docker info" docker info
     append_cmd_output "$output_file" "docker ps -a" docker ps -a
     append_cmd_output "$output_file" "docker images" docker images
+    append_cmd_output "$output_file" "docker stats --no-stream" docker stats --no-stream
     append_cmd_output "$output_file" "docker compose version" docker compose version
     append_cmd_output "$output_file" "docker-compose --version" docker-compose --version
 }
 
 # Function to URL-encode a string
 urlencode() {
-    echo "$1" | sed 's/@/%40/g'
+    local raw="$1"
+    local length=${#raw}
+    local i char encoded=""
+    for (( i=0; i<length; i++ )); do
+        char=${raw:i:1}
+        case "$char" in
+            [a-zA-Z0-9.~_-])
+                encoded+="$char"
+                ;;
+            *)
+                printf -v hex '%%%02X' "'${char}'"
+                encoded+="$hex"
+                ;;
+        esac
+    done
+    printf '%s' "$encoded"
+}
+
+preflight_validate_credentials() {
+    if [ -z "$EMAIL" ] || [ -z "$TICKET" ]; then
+        return 0
+    fi
+
+    local err_file
+    err_file=$(mktemp 2>/dev/null || echo "/tmp/collect-logs-credcheck.$$.err")
+    local webdav_payload='<?xml version="1.0" encoding="UTF-8"?><propfind xmlns="DAV:"><propname/></propfind>'
+
+    local probe_url="${WEBDAV_BASE_URL}${WEBDAV_REMOTE_PATH}/"
+
+    echo "Validating credentials via WebDAV..."
+    if curl --silent --fail --show-error --user "$TICKET:$EMAIL" \
+        -H "Depth: 0" -H "Content-Type: text/xml" \
+        --data "$webdav_payload" -X PROPFIND "$probe_url" \
+        >/dev/null 2>"$err_file"; then
+        echo "Credential pre-check succeeded via WebDAV."
+        rm -f "$err_file" >/dev/null 2>&1 || true
+        return 0
+    else
+        local dav_status=$?
+        echo "WebDAV credential pre-check failed (curl exit $dav_status). Trying FTP..." >&2
+    fi
+
+    if curl --silent --fail --show-error --connect-timeout 15 --max-time 30 --user "$TICKET:$EMAIL" \
+        --list-only "ftp://ftp.molo17.com/" >/dev/null 2>>"$err_file"; then
+        echo "Credential pre-check succeeded via FTP fallback."
+        rm -f "$err_file" >/dev/null 2>&1 || true
+        return 0
+    else
+        local ftp_status=$?
+        if [ "$ftp_status" -eq 6 ] || [ "$ftp_status" -eq 7 ] || [ "$ftp_status" -eq 28 ]; then
+            echo "WARNING: Unable to reach MOLO17 upload servers (curl exit $ftp_status)." >&2
+            echo "This usually means outbound HTTPS/FTP is blocked by a firewall or proxy." >&2
+            echo "Logs will be collected locally. You can upload the archive manually later." >&2
+            rm -f "$err_file" >/dev/null 2>&1 || true
+            return 0
+        fi
+    fi
+
+    fail_with_last_error "Unable to validate ticket/email credentials before collecting logs." "$err_file"
+}
+
+describe_upload_failure() {
+    local status="$1"
+    local log_file="$2"
+    local hint=""
+
+    if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+        if grep -qi "550" "$log_file"; then
+            hint="FTP server returned 550 (permission/target issue). Double-check ticket $TICKET, credentials, and available space."
+        elif grep -qi "530" "$log_file"; then
+            hint="FTP server returned 530 (auth failure). Verify the ticket number and email are correct."
+        elif grep -qi "curl: (7)" "$log_file"; then
+            hint="Unable to reach ftp.molo17.com (curl 7). Ensure outbound FTP is allowed."
+        fi
+    fi
+
+    if [ -z "$hint" ]; then
+        case "$status" in
+            18)
+                hint="FTP transfer was interrupted before completion (curl 18)."
+                ;;
+            28)
+                hint="Upload timed out (curl 28). Your firewall or proxy may be blocking outbound FTP. Check network stability or upload the archive manually."
+                ;;
+            67)
+                hint="Authentication failed (curl 67). Verify ticket/email values."
+                ;;
+        esac
+    fi
+
+    if [ -n "$hint" ]; then
+        echo "$hint" >&2
+    fi
 }
 
 # Function to print last error and exit
 fail_with_last_error() {
     local message="$1"
-    local tmp=$(mktemp)
-    echo "$message" > "$tmp"
-    tail -n 1 "$tmp" >&2
-    rm -f "$tmp"
+    local details_file="${2:-}"
+    {
+        echo ""
+        echo "ERROR: $message"
+    } >&2
+
+    if [ -n "$details_file" ] && [ -f "$details_file" ]; then
+        echo "---- Captured output ----" >&2
+        tail -n 40 "$details_file" >&2 || true
+        echo "---- End captured output ----" >&2
+    fi
+
+    if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
+        echo "For a full execution trace see: $LOG_FILE" >&2
+    fi
+
     exit 1
 }
 
@@ -330,6 +456,8 @@ if [ -z "$TICKET" ]; then
   read -p "Enter ticket number: " TICKET
 fi
 
+preflight_validate_credentials
+
 # The directory where the script is located
 BASE_DIR=$(dirname "$0")
 
@@ -340,11 +468,24 @@ else
   SEARCH_DIR=$(realpath "$BASE_DIR/..")
 fi
 
+# Delete logs older than 30 days
+echo "Deleting logs older than 30 days in $SEARCH_DIR ..."
+find "$SEARCH_DIR" -type f \( -name "*.log" -o -name "*.err" \) -mtime +30 -exec rm -f {} \; 2>/dev/null || echo "Warning: failed to delete some old logs."
+
 INVOKE_DIR=$(pwd)
 OUTPUT_DIR="$INVOKE_DIR"
 TMP_TEST=".collect_logs_write_test_$$"
 if ! ( : > "$OUTPUT_DIR/$TMP_TEST" 2>/dev/null && rm -f "$OUTPUT_DIR/$TMP_TEST" 2>/dev/null ); then
   OUTPUT_DIR="/tmp"
+fi
+
+LOG_FILE="$OUTPUT_DIR/collect-logs-debug-$(date +%Y%m%d-%H%M%S).log"
+if touch "$LOG_FILE" 2>/dev/null; then
+  exec > >(tee -a "$LOG_FILE") 2>&1
+  echo "Persisting detailed execution output to $LOG_FILE"
+else
+  echo "Warning: unable to create debug log at $LOG_FILE. Continuing without persistent log."
+  LOG_FILE=""
 fi
 
 # The name of the output archive
@@ -381,13 +522,15 @@ TAR_CMD=$(command -v tar 2>/dev/null || true)
 # Prefer zip if truly runnable; otherwise fall back to tar
 if command -v zip >/dev/null 2>&1; then
   echo "'zip' command found. Creating ${ARCHIVE_NAME}.zip..."
+  ZIP_ERR_FILE=$(mktemp 2>/dev/null || echo "/tmp/collect-logs-zip.$$.err")
   # Feed file list directly into zip via stdin (-@ reads from stdin)
-  if zip -@ "${OUTPUT_DIR}/${ARCHIVE_NAME}.zip" < "$ARCHIVE_FILE_LIST"; then
+  if zip -@ "${OUTPUT_DIR}/${ARCHIVE_NAME}.zip" < "$ARCHIVE_FILE_LIST" 2> >(tee "$ZIP_ERR_FILE" >&2); then
     ARCHIVE_PATH="${OUTPUT_DIR}/${ARCHIVE_NAME}.zip"
     echo "Successfully created ${ARCHIVE_PATH}"
   else
-    fail_with_last_error "Failed to create ${ARCHIVE_NAME}.zip"
+    fail_with_last_error "Failed to create ${ARCHIVE_NAME}.zip" "$ZIP_ERR_FILE"
   fi
+  rm -f "$ZIP_ERR_FILE" >/dev/null 2>&1 || true
 elif command -v tar >/dev/null 2>&1; then
   echo "'zip' command not found. Falling back to 'tar'."
   echo "Creating ${ARCHIVE_NAME}.tar.gz..."
@@ -426,30 +569,65 @@ elif command -v tar >/dev/null 2>&1; then
     echo "Successfully created $ARCHIVE_PATH"
     rm -f "$TAR_ERR_FILE" >/dev/null 2>&1 || true
   else
-    # Only now print tar error output if we truly failed to produce an archive
-    tail -n 1 "$TAR_ERR_FILE" >&2 || true
     rm -f "$TAR_ERR_FILE" >/dev/null 2>&1 || true
-    fail_with_last_error "Failed to create $ARCHIVE_PATH"
+    fail_with_last_error "Failed to create $ARCHIVE_PATH" "$TAR_ERR_FILE"
   fi
 else
   fail_with_last_error "Error: Neither 'zip' nor 'tar' command found or runnable. Please install one of them to create the archive."
 fi
 
-# Attempt FTP upload if email and ticket provided
+# Attempt upload if email and ticket provided (WebDAV first, FTP fallback)
 if [ -n "$EMAIL" ] && [ -n "$TICKET" ]; then
+  REMOTE_ARCHIVE_NAME=$(basename "$ARCHIVE_PATH")
+  ENCODED_REMOTE_NAME=$(urlencode "$REMOTE_ARCHIVE_NAME")
+  echo "Attempting WebDAV upload of $REMOTE_ARCHIVE_NAME..."
+  WEBDAV_ERR_FILE=$(mktemp 2>/dev/null || echo "/tmp/collect-logs-webdav.$$.err")
+  WEBDAV_URL="${WEBDAV_BASE_URL}${WEBDAV_REMOTE_PATH}/$ENCODED_REMOTE_NAME"
+  if curl --fail --show-error -u "$TICKET:$EMAIL" -T "$ARCHIVE_PATH" "$WEBDAV_URL" 2> >(tee "$WEBDAV_ERR_FILE" >&2); then
+    echo "Successfully uploaded via WebDAV."
+    if [ "$CLEAN_AFTER_UPLOAD" = true ]; then
+      echo "Removing archive: $ARCHIVE_PATH"
+      rm -f "$ARCHIVE_PATH"
+    fi
+    rm -f "$WEBDAV_ERR_FILE" >/dev/null 2>&1 || true
+    exit 0
+  else
+    WEBDAV_STATUS=$?
+    echo "WebDAV upload failed (curl exit $WEBDAV_STATUS). Falling back to FTP..." >&2
+    if [ -s "$WEBDAV_ERR_FILE" ]; then
+      echo "---- WebDAV error output ----" >&2
+      tail -n 40 "$WEBDAV_ERR_FILE" >&2 || true
+      echo "---- End WebDAV error output ----" >&2
+    fi
+    rm -f "$WEBDAV_ERR_FILE" >/dev/null 2>&1 || true
+  fi
+
   ENCODED_EMAIL=$(urlencode "$EMAIL")
   echo "Uploading $ARCHIVE_PATH to FTP..."
-  if curl -T "$ARCHIVE_PATH" "ftp://$TICKET:$ENCODED_EMAIL@ftp.molo17.com/"; then
-    echo "Successfully uploaded to FTP."
+  UPLOAD_ERR_FILE=$(mktemp 2>/dev/null || echo "/tmp/collect-logs-upload.$$.err")
+  if curl --connect-timeout 15 --max-time 120 -T "$ARCHIVE_PATH" "ftp://$TICKET:$ENCODED_EMAIL@ftp.molo17.com/$ENCODED_REMOTE_NAME" 2> >(tee "$UPLOAD_ERR_FILE" >&2); then
+    echo "Successfully uploaded to FTP (fallback)."
     # Remove archive if cleaning after upload requested
     if [ "$CLEAN_AFTER_UPLOAD" = true ]; then
       echo "Removing archive: $ARCHIVE_PATH"
       rm -f "$ARCHIVE_PATH"
     fi
   else
-    fail_with_last_error "Failed to upload to FTP."
+    UPLOAD_STATUS=$?
+    describe_upload_failure "$UPLOAD_STATUS" "$UPLOAD_ERR_FILE"
+    echo "" >&2
+    echo "Archive saved locally at: $ARCHIVE_PATH" >&2
+    echo "You can retry the script or upload manually using ticket credentials." >&2
+    rm -f "$UPLOAD_ERR_FILE" >/dev/null 2>&1 || true
+    exit 1
   fi
+  rm -f "$UPLOAD_ERR_FILE" >/dev/null 2>&1 || true
 else
   echo "Email or ticket not provided. Skipping upload."
-  exit 1
+  echo "Archive saved locally at: $ARCHIVE_PATH"
+  echo "Re-run with -e <email> -t <ticket> to upload automatically."
+  if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
+    echo "Execution log stored at: $LOG_FILE"
+  fi
+  exit 0
 fi

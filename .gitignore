@@ -66,4 +66,3 @@ debug-container/**/data
 debug-container/**/logs
 !debug-container/**/logs/**/
 !debug-container/**/logs/**/.gitkeep
-VERSION

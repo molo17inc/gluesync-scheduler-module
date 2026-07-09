@@ -16,17 +16,7 @@
 # acceptance of one of these licenses. See the accompanying LICENSE files or contact
 # MOLO17 for more information.
 #
-# Copyright (C) 2026 MOLO17. All rights reserved.
-
-# Gluesync platform official run script
-# Script version: 1.1
-# 
-# This script is used to run the Gluesync docker compose file.
-# It will search for the docker compose file in the current directory or in the parent directory.
-#
-# Usage:
-#   ./run.ps1
-#
+# Copyright (C) 2025 MOLO17. All rights reserved.
 
 $ErrorActionPreference = 'Stop'
 
@@ -76,19 +66,141 @@ if (-not $ComposeFile) {
     exit 1
 }
 
+$SetupCompletedPath = Join-Path $ComposeDir ".setup_completed"
+
+Write-Host "Granting Docker Engine access to Gluesync installation directory..." -ForegroundColor Cyan
+$dockerAccount = "NT SERVICE\docker"
+try {
+    # (OI) Object Inherit - Files will inherit the permission
+    # (CI) Container Inherit - Folders will inherit the permission
+    # (F) Full Control
+    # /T Recursive
+    icacls $ComposeDir /grant "${dockerAccount}:(OI)(CI)(F)" /T | Out-Null
+    Write-Host "Permissions updated successfully." -ForegroundColor Green
+}
+catch {
+    Write-Warning "Failed to set permissions: $($_.Exception.Message). You might need to run this script as Administrator."
+}
+
 # Ensure Docker is available
 if (-not (Get-Command docker-compose -ErrorAction SilentlyContinue)) {
     Write-Error "'docker-compose' command not found. Please install Docker Compose."
 }
 
+# --- PROXY DETECTION SECTION ---
+
+function Get-HostIPAddress {
+    $ip = Get-NetIPAddress -AddressFamily IPv4 |
+        Where-Object {
+            $_.IPAddress -notlike "127.*" -and
+            $_.IPAddress -notlike "169.254.*" -and
+            $_.IPAddress -notlike "0.0.0.0"
+        } |
+        Select-Object -First 1 -ExpandProperty IPAddress
+
+    return $ip
+}
+
+$EnvFilePath = Join-Path $ComposeDir ".env"
+
+# Ensure .env exists
+if (-not (Test-Path -Path $EnvFilePath)) {
+    Write-Host ".env does not exist, creating..." -ForegroundColor Yellow
+    New-Item -Path $EnvFilePath -ItemType File -Force | Out-Null
+    $ExistingContent = ""
+} else {
+    Write-Host ".env already exists, reading content." -ForegroundColor Green
+    try {
+        $ExistingContent = Get-Content -Path $EnvFilePath -Raw -ErrorAction Stop
+    } catch {
+        Write-Warning "Failed to read .env; treating as empty."
+        $ExistingContent = ""
+    }
+}
+
+Write-Host "Detecting system proxy settings..." -ForegroundColor Cyan
+
+$Proxy = [System.Net.WebRequest]::GetSystemWebProxy()
+$ProxyUri = $Proxy.GetProxy("https://api.backoffice.molo17.com/agent/core-hub/version")
+
+if ($ProxyUri -and $ProxyUri.Host -and $ProxyUri.Host -ne "api.backoffice.molo17.com") {
+
+    Write-Host "System proxy detected: $($ProxyUri.ToString())" -ForegroundColor Yellow
+
+    $OriginalHost = $ProxyUri.Host
+    $Port = $ProxyUri.Port
+
+    if (-not $Port -or $Port -eq -1) {
+        $Port = 8080
+    }
+
+    # Decide whether to replace host
+    $NeedsReplacement = $OriginalHost -eq "127.0.0.1" -or $OriginalHost -eq "localhost"
+
+    if ($NeedsReplacement) {
+        $HostIP = Get-HostIPAddress
+
+        if (-not $HostIP) {
+            Write-Warning "Could not determine host IP. Falling back to host.docker.internal"
+            $HostIP = "host.docker.internal"
+        }
+
+        Write-Host "Replacing proxy host '$OriginalHost' with '$HostIP'" -ForegroundColor Yellow
+        $FinalHost = $HostIP
+    } else {
+        Write-Host "Using original proxy host '$OriginalHost'" -ForegroundColor Yellow
+        $FinalHost = $OriginalHost
+    }
+
+    $ProxyString = "http://$FinalHost`:$Port"
+
+    Write-Host "Using container-compatible proxy: $ProxyString" -ForegroundColor Yellow
+
+    $HasHttp = $ExistingContent -match "PROXY_HTTP="
+    $HasHttps = $ExistingContent -match "PROXY_HTTPS="
+
+    if (-not $HasHttp) {
+        Write-Host "Adding PROXY_HTTP to .env" -ForegroundColor Green
+        "PROXY_HTTP=$ProxyString" | Out-File -FilePath $EnvFilePath -Encoding utf8 -Append
+    } else {
+        Write-Host "PROXY_HTTP already present, skipping." -ForegroundColor Green
+    }
+
+    if (-not $HasHttps) {
+        Write-Host "Adding PROXY_HTTPS to .env" -ForegroundColor Green
+        "PROXY_HTTPS=$ProxyString" | Out-File -FilePath $EnvFilePath -Encoding utf8 -Append
+    } else {
+        Write-Host "PROXY_HTTPS already present, skipping." -ForegroundColor Green
+    }
+
+} else {
+    Write-Host "No system proxy detected." -ForegroundColor Green
+}
+
+# -------------------------------
+
 $env:BASE_PATH = $ComposeDir
 Write-Host "Using BASE_PATH=$($env:BASE_PATH)"
 
-Write-Host "Running: docker-compose -f $ComposeFile pull"
-Write-Host "Please note that Windows container image pulls may appear stuck at 99% for several minutes. This is normal - do not restart the process; just wait for it to finish." -ForegroundColor Cyan
-docker-compose -f "$ComposeFile" pull
+if (Test-Path -Path $SetupCompletedPath) {
+    Write-Host ".setup_completed already exists, skipping docker-compose pull." -ForegroundColor Green
+} else {
+    Write-Host "Running: docker-compose -f $ComposeFile pull"
+    Write-Host "Please note that Windows container image pulls may appear stuck at 99% for several minutes. This is normal - do not restart the process; just wait for it to finish." -ForegroundColor Cyan
+    try {
+        docker-compose -f "$ComposeFile" pull
+    }
+    catch {
+        Write-Warning "docker-compose pull failed (possibly due to offline environment). Continuing with locally available images."
+    }
+}
 
 Write-Host "Running: docker-compose -f $ComposeFile up -d --remove-orphans"
 docker-compose -f "$ComposeFile" up -d --remove-orphans
+
+if (-not (Test-Path -Path $SetupCompletedPath)) {
+    New-Item -Path $SetupCompletedPath -ItemType File -Force | Out-Null
+    Write-Host ".setup_completed created at $SetupCompletedPath" -ForegroundColor Green
+}
 
 Write-Host "Gluesync stack started (detached)."

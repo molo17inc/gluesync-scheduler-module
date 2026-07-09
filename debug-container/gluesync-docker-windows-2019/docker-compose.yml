@@ -48,7 +48,7 @@ name: gluesync-windows
 
 services:
   gluesync-core-hub:
-    image: molo17/gluesync-core-hub:latest-win-nanoserver-ltsc2019
+    image: molo17/gluesync-core-hub:2.2.9.5-win-nanoserver-ltsc2019
     restart: unless-stopped
     # deploy:
     #   resources:
@@ -71,7 +71,6 @@ services:
     environment:
       - SSL_ENABLED=true
       - LOG_CONFIG_FILE=C:\\opt\\gluesync\\shared\\logback.xml
-      - GRAFANA_REMOTE_ADDRESS=/grafana/d/fecxnzptcq8zkd/core-hub-metrics
     volumes:
       - ./shared:C:\opt\gluesync\shared
       - ./data/core-hub:C:\opt\gluesync\data
@@ -80,7 +79,7 @@ services:
       - gluesync-windows-net
 
   gluesync-chronos:
-    # image: molo17/gluesync-chronos:0.1.36-win-nanoserver-ltsc2019
+    # image: molo17/gluesync-chronos:0.1.56-win-nanoserver-ltsc2019
     restart: unless-stopped
     build:
       context: ../..
@@ -111,7 +110,7 @@ services:
       - gluesync-windows-net
 
   gluesync-conductor:
-    image: molo17/gluesync-conductor:0.6.2-win-nanoserver-ltsc2019
+    image: molo17/gluesync-conductor:0.8.4-win-nanoserver-ltsc2019
     restart: unless-stopped
     labels:
       - traefik.enable=true
@@ -172,7 +171,7 @@ services:
       - --web.route-prefix=/prometheus
     volumes:
       - ./prometheus:C:\etc\prometheus:ro
-        # - ./prometheus_data:C:\prometheus
+      # - ./prometheus_data:C:\prometheus
     networks:
       - gluesync-windows-net
 
@@ -193,6 +192,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=password
       - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_SECURITY_ALLOW_EMBEDDING=true
     volumes:
       - ./grafana:C:\grafana\conf\provisioning
         # - ./grafana:/var/lib/grafana

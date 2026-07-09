@@ -22,16 +22,19 @@ param(
 # acceptance of one of these licenses. See the accompanying LICENSE files or contact
 # MOLO17 for more information.
 #
-# Copyright (C) 2025 MOLO17. All rights reserved.
+# Copyright (C) 2026 MOLO17. All rights reserved.
 
 Write-Host "=================================================================================="
-Write-Host " Welcome to the Gluesync Logs Collector & Uploader!"
+Write-Host " Welcome to the Gluesync Logs Collector & Uploader"
 Write-Host ""
 Write-Host " This script safely collects all .log and .err files recursively from Gluesync"
 Write-Host " directories and creates a compressed archive (.zip)."
 Write-Host ""
 Write-Host " If you have a support ticket, you can upload the logs directly to your secure"
 Write-Host " MOLO17 support area for faster troubleshooting assistance."
+Write-Host ""
+Write-Host " No internet connection? Just press ENTER twice when asked for email and ticket"
+Write-Host " to skip the upload and keep the archive locally."
 Write-Host ""
 Write-Host " Usage: .\collect-logs.ps1 [-Email email] [-Ticket ticket]"
 Write-Host "=================================================================================="
@@ -41,7 +44,19 @@ Write-Host ""
 # and creates a compressed ZIP archive.
 
 # Script version
-$ScriptVersion = "1.5"
+$ScriptVersion = "1.7 Windows"
+
+$WebDavBaseUrl = if ($env:WEBDAV_BASE_URL) { $env:WEBDAV_BASE_URL } else { "https://webdav.hq.molo17.com" }
+$WebDavRemotePath = if ($env:WEBDAV_REMOTE_PATH) { $env:WEBDAV_REMOTE_PATH } else { "" }
+
+function Get-WebDavRootUri {
+    $base = $WebDavBaseUrl.TrimEnd('/')
+    if (-not [string]::IsNullOrWhiteSpace($WebDavRemotePath)) {
+        $normalized = $WebDavRemotePath.Trim('/')
+        return "$base/$normalized/"
+    }
+    return "$base/"
+}
 
 function Add-SectionHeader {
     param(
@@ -53,6 +68,105 @@ function Add-SectionHeader {
         $Title,
         "=============================="
     )
+}
+
+function Test-CredentialConnectivity {
+    param(
+        [string]$Email,
+        [string]$Ticket
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Email) -or [string]::IsNullOrWhiteSpace($Ticket)) {
+        return $true
+    }
+
+    $credential = New-Object System.Net.NetworkCredential($Ticket, $Email)
+    $webdavPayload = '<?xml version="1.0" encoding="UTF-8"?><propfind xmlns="DAV:"><propname/></propfind>'
+
+    Write-Host "Validating credentials via WebDAV..."
+    try {
+        $probeUri = Get-WebDavRootUri
+        $request = [System.Net.HttpWebRequest]::Create($probeUri)
+        $request.Credentials = $credential
+        $request.Method = "PROPFIND"
+        $request.ContentType = "text/xml"
+        $request.Headers["Depth"] = "0"
+        $payloadBytes = [System.Text.Encoding]::UTF8.GetBytes($webdavPayload)
+        $request.ContentLength = $payloadBytes.Length
+        $requestStream = $request.GetRequestStream()
+        $requestStream.Write($payloadBytes, 0, $payloadBytes.Length)
+        $requestStream.Dispose()
+        $response = $request.GetResponse()
+        $response.Dispose()
+        Write-Host "Credential pre-check succeeded via WebDAV."
+        return $true
+    } catch {
+        Write-Warning ("WebDAV credential pre-check failed: {0}" -f $_.Exception.Message)
+    }
+
+    Write-Host "Attempting FTP credential check..."
+    try {
+        $ftpRequest = [System.Net.FtpWebRequest]::Create("ftp://ftp.molo17.com/")
+        $ftpRequest.Credentials = $credential
+        $ftpRequest.Method = [System.Net.WebRequestMethods+Ftp]::ListDirectory
+        $ftpRequest.Timeout = 15000
+        $ftpRequest.ReadWriteTimeout = 15000
+        $ftpResponse = $ftpRequest.GetResponse()
+        $ftpResponse.Dispose()
+        Write-Host "Credential pre-check succeeded via FTP."
+        return $true
+    } catch {
+        $ex = $_.Exception
+        if ($ex -is [System.Net.WebException] -and $ex.Status -eq [System.Net.WebExceptionStatus]::Timeout) {
+            Write-Warning "Unable to reach MOLO17 upload servers (timeout)."
+            Write-Warning "This usually means outbound HTTPS/FTP is blocked by a firewall or proxy."
+            Write-Warning "Logs will be collected locally. You can upload the archive manually later."
+            return $true
+        }
+        Write-Error ("Unable to validate ticket/email credentials before collecting logs: {0}" -f $_.Exception.Message)
+        $hint = Get-UploadFailureHint -Exception $_.Exception
+        if ($hint) {
+            Write-Warning $hint
+        }
+        return $false
+    }
+}
+
+function Get-UploadFailureHint {
+    param(
+        [System.Exception]$Exception
+    )
+
+    if (-not $Exception) { return $null }
+
+    $webEx = $Exception
+    while ($webEx -and ($webEx -isnot [System.Net.WebException]) -and $webEx.InnerException) {
+        $webEx = $webEx.InnerException
+    }
+
+    if ($webEx -is [System.Net.WebException]) {
+        $ftpResponse = $webEx.Response
+        if ($ftpResponse -is [System.Net.FtpWebResponse]) {
+            switch ($ftpResponse.StatusCode) {
+                ([System.Net.FtpStatusCode]::ActionNotTakenFileUnavailable) { return "FTP server returned 550 (file unavailable). Confirm ticket $Ticket exists and has space." }
+                ([System.Net.FtpStatusCode]::ActionNotTakenFilenameNotAllowed) { return "FTP server rejected the file name. Ensure ticket $Ticket is correct." }
+                ([System.Net.FtpStatusCode]::NotLoggedIn) { return "FTP authentication failed (530). Verify the ticket number and email." }
+                ([System.Net.FtpStatusCode]::ActionNotTakenInsufficientSpace) { return "FTP reported insufficient space. Remove older uploads for ticket $Ticket." }
+                ([System.Net.FtpStatusCode]::ConnectionClosed) { return "FTP connection closed before completion. Check network stability." }
+            }
+            if ($ftpResponse.StatusDescription -and $ftpResponse.StatusDescription -match '550') {
+                return "FTP server returned 550 (permission/target issue). Double-check ticket $Ticket and credentials."
+            }
+        }
+        if ($webEx.Message -match '550') {
+            return "FTP server reported 550. Confirm that ticket $Ticket exists and credentials are valid."
+        }
+        if ($webEx.Status -eq [System.Net.WebExceptionStatus]::Timeout) {
+            return "Upload timed out. Your firewall or proxy may be blocking outbound FTP. Please verify connectivity or upload the archive manually."
+        }
+    }
+
+    return $null
 }
 
 function Test-FileReadable {
@@ -326,6 +440,7 @@ function Write-DockerReport {
     Append-CommandOutput -Path $OutputPath -Title "docker info" -Command "docker" -Arguments @("info")
     Append-CommandOutput -Path $OutputPath -Title "docker ps -a" -Command "docker" -Arguments @("ps", "-a")
     Append-CommandOutput -Path $OutputPath -Title "docker images" -Command "docker" -Arguments @("images")
+    Append-CommandOutput -Path $OutputPath -Title "docker stats --no-stream" -Command "docker" -Arguments @("stats", "--no-stream")
     Append-CommandOutput -Path $OutputPath -Title "docker-compose version" -Command "docker-compose" -Arguments @("version")
 }
 
@@ -450,6 +565,16 @@ if (Test-Path $rootFolderPath) {
     Write-Host "Root-folder not found. Searching logs inside parent directory: $searchDir"
 }
 
+# Delete logs older than 30 days
+Write-Host "Deleting logs older than 30 days in $searchDir ..."
+try {
+    Get-ChildItem -Path $searchDir -Include *.log, *.err -Recurse -File -ErrorAction SilentlyContinue | 
+        Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | 
+        Remove-Item -Force -ErrorAction SilentlyContinue
+} catch {
+    Write-Warning "Failed to delete some old logs: $($_.Exception.Message)"
+}
+
 # Determine where to place the archive: try invoking directory then fallback to temp
 $invokeDir = (Get-Location).Path
 $outputDir = $invokeDir
@@ -464,11 +589,13 @@ try {
 $archivePath = Join-Path $outputDir $ArchiveName
 
 # Prompt for email and ticket if not provided
-if (-not $Email) {
-    $Email = Read-Host "Enter your email address"
-}
-if (-not $Ticket) {
-    $Ticket = Read-Host "Enter ticket number"
+$Email = if (-not [string]::IsNullOrWhiteSpace($Email)) { $Email } else { Read-Host "Enter your email address" }
+$Ticket = if (-not [string]::IsNullOrWhiteSpace($Ticket)) { $Ticket } else { Read-Host "Enter ticket number" }
+$Email = if ($Email) { $Email.Trim() } else { $null }
+$Ticket = if ($Ticket) { $Ticket.Trim() } else { $null }
+
+if (-not (Test-CredentialConnectivity -Email $Email -Ticket $Ticket)) {
+    exit 1
 }
 
 Write-Host "Log Collection Script v$ScriptVersion - Searching for .log and .err files in $searchDir..."
@@ -483,16 +610,35 @@ try {
     exit 1
 }
 
+$readableLogFiles = @()
+$liveLockedLogs = @()
 if ($logFiles) {
+    foreach ($log in $logFiles) {
+        if (Test-FileReadable -Path $log.FullName) {
+            $readableLogFiles += $log
+        } else {
+            $liveLockedLogs += $log.FullName
+        }
+    }
+
     Write-Host "Found $($logFiles.Count) log files."
+    if ($liveLockedLogs.Count -gt 0) {
+        Write-Host "Skipping $($liveLockedLogs.Count) active log file(s) locked by running processes."
+        foreach ($lockedLog in $liveLockedLogs) {
+            Write-Host "  $lockedLog"
+        }
+    }
+    if ($readableLogFiles.Count -gt 0) {
+        Write-Host "Collecting $($readableLogFiles.Count) readable log file(s)."
+    }
 } else {
     Write-Host "No .log or .err files found."
 }
 
 # Prepare list of full paths
 $filePaths = @()
-if ($logFiles) {
-    $filePaths += ($logFiles | ForEach-Object { $_.FullName })
+if ($readableLogFiles.Count -gt 0) {
+    $filePaths += ($readableLogFiles | ForEach-Object { $_.FullName })
 }
 
 $extraDirName = ("gluesync-support-extra-{0}-{1}" -f [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(), $PID)
@@ -591,27 +737,64 @@ if (Get-Command -Name Compress-Archive -ErrorAction SilentlyContinue) {
         }
     }
 
-    # Attempt FTP upload if email and ticket provided
+    # Attempt upload if email and ticket provided (WebDAV first, FTP fallback)
     if ($Email -and $Ticket) {
-        Write-Host "Uploading $archivePath to FTP..."
+        $sanitizedArchiveName = $ArchiveName -replace '[\r\n\t]', ''
+        $encodedArchiveName = [System.Uri]::EscapeDataString($sanitizedArchiveName)
+        $webdavUri = (Get-WebDavRootUri) + $encodedArchiveName
+        $ftpUri = "ftp://ftp.molo17.com/$encodedArchiveName"
+        $credential = New-Object System.Net.NetworkCredential($Ticket, $Email)
+
+        # WebDAV attempt via HTTPS
+        Write-Host "Attempting WebDAV upload of $archivePath ..."
+        $webClient = $null
+        $webdavSucceeded = $false
         try {
             $webClient = New-Object System.Net.WebClient
-            $webClient.Credentials = New-Object System.Net.NetworkCredential($Ticket, $Email)
-            $webClient.UploadFile("ftp://ftp.molo17.com/$ArchiveName", "STOR", $archivePath)
-            Write-Host "Successfully uploaded to FTP."
+            $webClient.Credentials = $credential
+            $webClient.UploadFile($webdavUri, "PUT", $archivePath)
+            $webdavSucceeded = $true
+            Write-Host "Successfully uploaded via WebDAV."
             if ($CleanAfterUpload.IsPresent) {
                 Write-Host "CleanAfterUpload requested. Removing archive: $archivePath"
                 Remove-Item -Path $archivePath -Force -ErrorAction SilentlyContinue
             }
         } catch {
-            Write-Host "Failed to upload to FTP: $($_.Exception.Message)"
-            exit 1
+            Write-Warning "WebDAV upload failed: $($_.Exception.Message)"
+            Write-Warning "Falling back to FTP..."
         } finally {
-            if ($webClient) { $webClient.Dispose() }
+            if ($webClient) { $webClient.Dispose(); $webClient = $null }
+        }
+
+        if (-not $webdavSucceeded) {
+            Write-Host "Uploading $archivePath to FTP..."
+            try {
+                $webClient = New-Object System.Net.WebClient
+                $webClient.Credentials = $credential
+                $webClient.UploadFile($ftpUri, "STOR", $archivePath)
+                Write-Host "Successfully uploaded to FTP (fallback)."
+                if ($CleanAfterUpload.IsPresent) {
+                    Write-Host "CleanAfterUpload requested. Removing archive: $archivePath"
+                    Remove-Item -Path $archivePath -Force -ErrorAction SilentlyContinue
+                }
+            } catch {
+                Write-Host "Failed to upload to FTP after WebDAV failure: $($_.Exception.Message)"
+                $hint = Get-UploadFailureHint -Exception $_.Exception
+                if ($hint) {
+                    Write-Warning $hint
+                }
+                Write-Host "Archive is still available locally at: $archivePath"
+                Write-Host "You can retry the script or upload manually using ticket credentials."
+                exit 1
+            } finally {
+                if ($webClient) { $webClient.Dispose() }
+            }
         }
     } else {
         Write-Host "Email or ticket not provided. Skipping upload."
-        exit 1
+        Write-Host "Archive saved locally at: $archivePath"
+        Write-Host "Re-run with -Email <email> -Ticket <ticket> to upload automatically."
+        exit 0
     }
 } else {
     Write-Error "Error: 'Compress-Archive' cmdlet not found. This script requires PowerShell 5.0 or newer."

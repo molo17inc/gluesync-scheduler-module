@@ -70,17 +70,6 @@ check_docker_permission() {
     return 0
 }
 
-# Function to validate podman usability
-check_podman_permission() {
-    if ! podman info &>/dev/null; then
-        add_warning "Podman is installed but not usable by the current user."
-        log_message "   Ensure Podman is configured for rootless usage or run this script with sudo."
-        log_message "   See https://podman.io/docs for configuration guidance."
-        return 1
-    fi
-    return 0
-}
-
 # 1. Check Docker
 print_section "Docker Check"
 check_command "docker" "--version"
@@ -95,56 +84,10 @@ if [ $DOCKER_INSTALLED -eq 0 ]; then
     fi
 fi
 
-# 1b. Check Podman
-print_section "Podman Check"
-PODMAN_INSTALLED=1
-if command -v podman >/dev/null 2>&1; then
-    log_message "podman found: $(podman --version 2>&1)"
-    PODMAN_INSTALLED=0
-    check_podman_permission || PODMAN_INSTALLED=1
-else
-    add_warning "Podman is not installed. Required only if you plan to run Gluesync with Podman."
-fi
-
-# 2b. Podman functionality (only if installed)
-if [ $PODMAN_INSTALLED -eq 0 ]; then
-    print_section "Podman Functionality Test"
-    log_message "Testing Podman with hello-world container..."
-    if podman run --rm docker.io/library/hello-world > /dev/null 2>&1; then
-        log_message "✅ Podman hello-world test: SUCCESS"
-    else
-        add_warning "Podman hello-world test failed. Ensure Podman can pull docker.io/library/hello-world."
-        log_message "  - Try running: podman pull docker.io/library/hello-world"
-    fi
-fi
-
 # 2. Check Docker Compose
 print_section "Docker Compose Check"
 check_command "docker" "compose version"
 DOCKER_COMPOSE_INSTALLED=$?
-
-# 2c. Check Podman Compose
-print_section "Podman Compose Check"
-PODMAN_COMPOSE_VERSION=""
-if [ $PODMAN_INSTALLED -eq 0 ]; then
-    if podman compose version &>/dev/null; then
-        PODMAN_COMPOSE_VERSION=$(podman compose version 2>/dev/null | awk '{print $3}' | tr -d ',')
-    elif command -v podman-compose >/dev/null 2>&1; then
-        PODMAN_COMPOSE_VERSION=$(podman-compose --version 2>/dev/null | awk '{print $3}' | tr -d ',')
-    fi
-
-    if [ -n "$PODMAN_COMPOSE_VERSION" ]; then
-        if [ "$(printf '%s\n' "2.0.0" "$PODMAN_COMPOSE_VERSION" | sort -V | head -n1)" = "2.0.0" ]; then
-            log_message "✅ Podman Compose Version: $PODMAN_COMPOSE_VERSION (Meets requirement: >= 2.0.0)"
-        else
-            add_warning "Podman Compose Version: $PODMAN_COMPOSE_VERSION (Below recommended: >= 2.0.0)"
-        fi
-    else
-        add_warning "Podman Compose not found. Install 'podman compose' plugin or 'podman-compose' if you plan to run the Podman kit."
-    fi
-else
-    log_message "Skipping Podman Compose check - Podman not available"
-fi
 
 # 3. Check Docker functionality
 if [ $DOCKER_INSTALLED -eq 0 ]; then

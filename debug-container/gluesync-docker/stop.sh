@@ -18,7 +18,7 @@
 # acceptance of one of these licenses. See the accompanying LICENSE files or contact
 # MOLO17 for more information.
 #
-# Copyright (C) 2025 MOLO17. All rights reserved.
+# Copyright (C) 2026 MOLO17. All rights reserved.
 
 set -euo pipefail
 
@@ -27,15 +27,13 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The docker compose file may be in the same folder or in the parent directory.
 # Search in both locations and use the first one found.
 
-# Define search directories: script directory first, then parent directory
 search_dirs=("$script_dir" "$(dirname "$script_dir")")
 
-# Function to find compose file in a directory
 find_compose_file() {
   local dir="$1"
   local yaml_file="$dir/docker-compose.yaml"
   local yml_file="$dir/docker-compose.yml"
-  
+
   if [[ -f "$yaml_file" ]]; then
     echo "$yaml_file"
   elif [[ -f "$yml_file" ]]; then
@@ -45,13 +43,10 @@ find_compose_file() {
   fi
 }
 
-# Search for compose file in order of preference
 compose_file=""
-compose_dir=""
 for search_dir in "${search_dirs[@]}"; do
   if found_file=$(find_compose_file "$search_dir"); then
     compose_file="$found_file"
-    compose_dir="$search_dir"
     break
   fi
 done
@@ -61,15 +56,11 @@ if [[ -z "$compose_file" ]]; then
   exit 1
 fi
 
-setup_completed_file="$compose_dir/.setup_completed"
-
-# Ensure Docker is available
 if ! command -v docker >/dev/null 2>&1; then
   echo "Error: docker is not installed or not in PATH." >&2
   exit 1
 fi
 
-# Determine compose command: prefer 'docker compose' plugin, fallback to standalone 'docker-compose'
 COMPOSE_CMD=""
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_CMD="docker compose"
@@ -80,50 +71,7 @@ else
   exit 1
 fi
 
-# Skip if .env already exists
-if [ -f .env ]; then
-    echo ".env already exists, skipping."
-else
-    # Try to detect host timezone
-    HOST_TZ=""
+echo "Running: $COMPOSE_CMD -f $compose_file down --remove-orphans"
+$COMPOSE_CMD -f "$compose_file" down --remove-orphans
 
-    # Debian/Ubuntu style
-    if [ -f /etc/timezone ]; then
-        HOST_TZ="$(cat /etc/timezone)"
-    fi
-
-    # Generic Linux using /etc/localtime symlink
-    if [ -z "$HOST_TZ" ] && [ -L /etc/localtime ]; then
-        HOST_TZ="$(readlink /etc/localtime | sed 's#.*/zoneinfo/##')"
-    fi
-
-    # If timezone not detected, abort without creating file
-    if [ -z "$HOST_TZ" ]; then
-        echo "Unable to detect timezone, no .env file created."
-    else
-        echo "TZ=$HOST_TZ" > .env
-        echo ".env created with TZ=$HOST_TZ"
-    fi
-fi
-
-if [[ -f "$setup_completed_file" ]]; then
-  echo ".setup_completed already exists, skipping docker compose pull."
-else
-  echo "Running: $COMPOSE_CMD -f $compose_file pull"
-  if ! $COMPOSE_CMD -f "$compose_file" pull; then
-    echo "[WARNING] docker compose pull failed (possibly due to offline environment). Continuing with locally available images."
-  fi
-fi
-
-echo "Running: docker image prune -f"
-docker image prune -f
-
-echo "Running: $COMPOSE_CMD -f $compose_file up -d --remove-orphans"
-$COMPOSE_CMD -f "$compose_file" up -d --remove-orphans
-
-if [[ ! -f "$setup_completed_file" ]]; then
-  touch "$setup_completed_file"
-  echo ".setup_completed created at $setup_completed_file"
-fi
-
-echo "Gluesync stack started (detached)."
+echo "Gluesync stack stopped."

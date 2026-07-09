@@ -85,7 +85,7 @@ services:
 
   gluesync-chronos:
     restart: unless-stopped
-    # image: molo17/gluesync-chronos:0.1.36
+    # image: molo17/gluesync-chronos:0.1.56
     build:
       context: ../..
       dockerfile: Dockerfile

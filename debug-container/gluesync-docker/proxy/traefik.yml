@@ -16,3 +16,6 @@ providers:
     watch: true
 serversTransport:
   insecureSkipVerify: true
+# api:
+#   dashboard: true
+#   insecure: true
