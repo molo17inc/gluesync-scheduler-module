@@ -899,6 +899,8 @@ class JobService:
                 "success": success,
                 "message": message,
                 "job_id": job_id,
+                "chain_started": success,
+                "chain_status": "running" if success else "not_started",
                 "timestamp": str(datetime.now(timezone.utc))
             }
         except Exception as e:

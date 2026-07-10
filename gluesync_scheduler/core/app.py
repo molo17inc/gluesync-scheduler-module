@@ -449,6 +449,15 @@ async def startup_event():
     
     logger.info("Gluesync Scheduler Module started successfully")
 
+    # Clean up any stale one-shot webhooks left in CoreHub from a previous run
+    try:
+        from gluesync_scheduler.services.chain_execution_service import ChainExecutionService
+        removed = await ChainExecutionService.cleanup_stale_webhooks()
+        if removed:
+            logger.info("Startup cleanup removed %d stale webhook(s) from CoreHub", removed)
+    except Exception as e:
+        logger.warning("Stale webhook cleanup failed (non-fatal): %s", e)
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on shutdown"""

@@ -23,10 +23,11 @@
 
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Body
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from gluesync_scheduler.db.database import get_db
-from gluesync_scheduler.models.models import TaskType
+from gluesync_scheduler.models.models import TaskType, ScheduledJob, ChainedJobEvent
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, JobList, ErrorResponse
 from gluesync_scheduler.services.job_service import JobService
 
@@ -438,7 +439,63 @@ def run_job(
     - **500**: Server error during job execution
     """
     job_service = JobService(db)
-    return job_service.run_job(job_id)
+    result = job_service.run_job(job_id)
+    return JSONResponse(content=result)
+
+@router.get("/{job_id}/chain-status", responses={
+    status.HTTP_200_OK: {
+        "description": "Chain execution status",
+        "content": {
+            "application/json": {
+                "example": {
+                    "job_id": 2,
+                    "has_chained_events": True,
+                    "chain_error": "Chained event pos=0 (PIPELINE_EXIT_MAINTENANCE) failed: SSL certificate verification failed",
+                    "last_error_time": "2026-07-10T08:49:38Z"
+                }
+            }
+        }
+    },
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponse,
+        "description": "Job not found"
+    }
+})
+def get_chain_status(
+    job_id: int = Path(..., description="The ID of the job to check"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get the chain execution status for a job.
+
+    Returns whether the job has chained events and any errors from the last
+    chain execution.  The UI can poll this endpoint after triggering a job
+    to see if its chained events succeeded or failed.
+
+    ## Parameters
+    - **job_id**: The unique identifier of the job
+
+    ## Returns
+    - **job_id**: The job ID
+    - **has_chained_events**: Whether the job has any chained events configured
+    - **chain_error**: Error message from the last chain execution (null if no error)
+    - **last_error_time**: Timestamp of the last error (null if no error)
+    """
+    job = db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job with ID {job_id} not found"
+        )
+    chained_count = db.query(ChainedJobEvent).filter(
+        ChainedJobEvent.parent_job_id == job_id
+    ).count()
+    return JSONResponse(content={
+        "job_id": job_id,
+        "has_chained_events": chained_count > 0,
+        "chain_error": job.last_error_message,
+        "last_error_time": job.last_run_error_time.isoformat() if job.last_run_error_time else None,
+    })
 
 @router.patch("/{job_id}/status", response_model=Job, responses={
     status.HTTP_404_NOT_FOUND: {
