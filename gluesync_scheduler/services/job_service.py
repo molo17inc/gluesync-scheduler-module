@@ -446,6 +446,10 @@ class JobService:
             if "group_ids" in update_data:
                 update_data["group_ids"] = json.dumps(update_data["group_ids"]) if update_data["group_ids"] else None
             
+            # snapshot_write_method column is NOT NULL; default to UPSERT when sent as null
+            if "snapshot_write_method" in update_data and update_data["snapshot_write_method"] is None:
+                update_data["snapshot_write_method"] = 'UPSERT'
+            
             # Validate group jobs have group_ids (check both new task_type and existing)
             final_task_type = update_data.get("task_type", db_job.task_type)
             if final_task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
