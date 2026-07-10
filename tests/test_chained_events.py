@@ -266,16 +266,10 @@ async def test_execute_chain_sync_waits_for_webhook(db_session):
     async def fake_execute(event, db):
         return True
 
-    async def fake_register(task_guid):
-        return "webhook-id-fake"
-
-    async def fake_delete(webhook_id):
-        pass
-
+    # Persistent webhook model: no register/delete at execution time.
+    # The webhook is registered at job create/update time and persists.
     with (
         patch.object(svc, "_execute_chained_event", side_effect=fake_execute),
-        patch.object(svc, "_register_corehub_webhook", side_effect=fake_register),
-        patch.object(svc, "_delete_corehub_webhook", side_effect=fake_delete),
     ):
         # Schedule the chain, then notify after a brief delay
         async def notify_after_delay():
@@ -303,7 +297,7 @@ def test_webhook_notify_valid_module():
         mock_svc.notify_webhook_received.return_value = True
         resp = client.post(
             "/api/webhooks/notify",
-            headers={"X-Task-GUID": "test-guid-123", "EXT_MODULE": "chronos"},
+            headers={"X-Event-ID": "test-event-123", "EXT_MODULE": "chronos"},
             json={"user": "alice"},
         )
     assert resp.status_code == 200
@@ -321,7 +315,7 @@ def test_webhook_notify_wrong_module():
 
     resp = client.post(
         "/api/webhooks/notify",
-        headers={"X-Task-GUID": "test-guid-456", "EXT_MODULE": "other-module"},
+        headers={"X-Event-ID": "test-event-456", "EXT_MODULE": "other-module"},
         json={},
     )
     assert resp.status_code == 400
@@ -334,7 +328,7 @@ def test_webhook_notify_missing_module():
 
     resp = client.post(
         "/api/webhooks/notify",
-        headers={"X-Task-GUID": "test-guid-789"},
+        headers={"X-Event-ID": "test-event-789"},
         json={},
     )
     assert resp.status_code == 400
@@ -344,10 +338,10 @@ def test_webhook_notify_missing_module():
 # Test 7 — notify_webhook_received with unknown guid → returns False
 # ---------------------------------------------------------------------------
 
-def test_notify_webhook_received_unknown_guid():
+def test_notify_webhook_received_unknown_key():
     svc = ChainExecutionService()
     svc._pending = {}
-    result = svc.notify_webhook_received("completely-unknown-guid")
+    result = svc.notify_webhook_received("completely-unknown-key")
     assert result is False
 
 

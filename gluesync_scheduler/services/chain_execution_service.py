@@ -25,7 +25,6 @@ import asyncio
 import json
 import logging
 import os
-import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -202,18 +201,149 @@ class ChainExecutionService:
 
         return {"started": True, "success": chain_success, "errors": errors}
 
-    def notify_webhook_received(self, task_guid: str) -> bool:
+    def sync_register_webhooks_for_events(self, events: List[ChainedJobEvent]) -> None:
+        """Sync wrapper to register persistent webhooks for SYNC chained events.
+
+        Called from JobService.create_job / update_job (sync context).
+        ASYNC events are skipped (they don't use webhooks).
+        """
+        sync_events = [e for e in events if e.execution_mode == ExecutionMode.SYNC]
+        if not sync_events:
+            return
+        try:
+            asyncio.run(self._register_webhooks_batch(sync_events))
+        except RuntimeError:
+            # Event loop already running — fall back to thread
+            import threading
+            def _run():
+                asyncio.run(self._register_webhooks_batch(sync_events))
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            t.join(timeout=30)
+        except Exception as exc:
+            logger.error("Failed to register webhooks for events: %s", exc)
+
+    def sync_delete_webhooks_for_events(self, event_ids: List[int]) -> None:
+        """Sync wrapper to delete persistent webhooks for the given event IDs.
+
+        Called from JobService.update_job / delete_job (sync context).
+        """
+        if not event_ids:
+            return
+        webhook_ids = [f"{_CHRONOS_WEBHOOK_PREFIX}{eid}" for eid in event_ids]
+        try:
+            asyncio.run(self._delete_webhooks_batch(webhook_ids))
+        except RuntimeError:
+            import threading
+            def _run():
+                asyncio.run(self._delete_webhooks_batch(webhook_ids))
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            t.join(timeout=30)
+        except Exception as exc:
+            logger.error("Failed to delete webhooks for events %s: %s", event_ids, exc)
+
+    def sync_delete_webhooks_for_job(self, job_id: int) -> None:
+        """Sync wrapper to delete all persistent webhooks for a job's chained events.
+
+        Called from JobService.delete_job (sync context).
+        """
+        try:
+            from gluesync_scheduler.db.database import SessionLocal
+            db = SessionLocal()
+            try:
+                events = db.query(ChainedJobEvent).filter(
+                    ChainedJobEvent.parent_job_id == job_id
+                ).all()
+                event_ids = [e.id for e in events]
+            finally:
+                db.close()
+            self.sync_delete_webhooks_for_events(event_ids)
+        except Exception as exc:
+            logger.error("Failed to delete webhooks for job %d: %s", job_id, exc)
+
+    async def _register_webhooks_batch(self, events: List[ChainedJobEvent]) -> None:
+        """Register persistent webhooks for multiple events sequentially."""
+        for event in events:
+            webhook_id = await self._register_corehub_webhook(event)
+            if not webhook_id:
+                detail = getattr(self, '_last_webhook_error', 'unknown error')
+                logger.error(
+                    "Could not register persistent webhook for event %d: %s",
+                    event.id, detail,
+                )
+
+    async def _delete_webhooks_batch(self, webhook_ids: List[str]) -> None:
+        """Delete multiple webhooks from CoreHub in a single GET-then-PUT cycle."""
+        if not webhook_ids:
+            return
+        try:
+            corehub_url = _get_corehub_base()
+            if not corehub_url:
+                logger.warning("Cannot delete webhooks — corehub URL unknown")
+                return
+
+            config_endpoint = f"{corehub_url}/global-config/webhooks"
+            auth_headers = _get_corehub_auth_headers()
+            ssl_verify = _get_corehub_ssl_verify()
+            loop = asyncio.get_event_loop()
+
+            ids_to_remove = set(webhook_ids)
+
+            async with self._webhook_list_lock:
+                get_resp = await loop.run_in_executor(
+                    None,
+                    lambda: requests.get(config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify),
+                )
+                if get_resp.status_code != 200:
+                    logger.warning("Cannot fetch webhook list for batch delete: HTTP %d", get_resp.status_code)
+                    return
+
+                try:
+                    existing: list = get_resp.json()
+                    if not isinstance(existing, list):
+                        return
+                except Exception:
+                    return
+
+                updated = [w for w in existing if w.get("id") not in ids_to_remove]
+                if len(updated) == len(existing):
+                    # Nothing to delete
+                    return
+
+                put_resp = await loop.run_in_executor(
+                    None,
+                    lambda: requests.put(
+                        config_endpoint,
+                        json=updated,
+                        headers=auth_headers,
+                        timeout=10,
+                        verify=ssl_verify,
+                    ),
+                )
+                if put_resp.status_code in (200, 201, 202, 204):
+                    removed = len(existing) - len(updated)
+                    logger.info("Batch deleted %d webhook(s) from corehub", removed)
+                else:
+                    logger.error(
+                        "Failed to batch delete webhooks: HTTP %d — response: %s",
+                        put_resp.status_code, put_resp.text[:300],
+                    )
+        except Exception as exc:
+            logger.warning("Exception during batch webhook delete: %s", exc)
+
+    def notify_webhook_received(self, correlation_key: str) -> bool:
         """Called by the webhook receiver endpoint.
 
-        Returns True when the guid was pending (i.e. a waiting coroutine was
-        unblocked), False when the guid is unknown.
+        Returns True when the key was pending (i.e. a waiting coroutine was
+        unblocked), False when the key is unknown.
         """
-        event = self._pending.get(task_guid)
+        event = self._pending.get(correlation_key)
         if event is None:
-            logger.warning("notify_webhook_received: unknown guid %s", task_guid)
+            logger.warning("notify_webhook_received: unknown correlation key %s", correlation_key)
             return False
         event.set()
-        logger.info("notify_webhook_received: signalled guid %s", task_guid)
+        logger.info("notify_webhook_received: signalled key %s", correlation_key)
         return True
 
     # ---------------------------------------------------------------------------
@@ -287,19 +417,14 @@ class ChainExecutionService:
             return False
 
     async def _execute_sync_event(self, event: ChainedJobEvent, db: Session) -> bool:
-        """Register a corehub webhook, fire the event, and wait for the callback."""
-        task_guid = str(uuid.uuid4())
-        webhook_id: Optional[str] = None
-        try:
-            webhook_id = await self._register_corehub_webhook(task_guid, event)
-            if not webhook_id:
-                detail = getattr(self, '_last_webhook_error', 'unknown error')
-                logger.error(
-                    "Could not register corehub webhook for sync event %d: %s",
-                    event.id, detail,
-                )
-                return False
+        """Fire the event and wait for the persistent webhook callback.
 
+        The webhook is registered at job creation/update time and persists
+        in CoreHub until the chained event is deleted.  Here we only fire
+        the operation and wait for the callback.
+        """
+        correlation_key = str(event.id)
+        try:
             # Fire the actual task
             ok = await self._execute_chained_event(event, db)
             if not ok:
@@ -307,25 +432,19 @@ class ChainExecutionService:
 
             # Wait for callback (default 1h timeout)
             timeout = int(os.getenv("CHRONOS_SYNC_WEBHOOK_TIMEOUT_SECONDS", "3600"))
-            completed = await self._wait_for_webhook(task_guid, timeout_seconds=timeout)
+            completed = await self._wait_for_webhook(correlation_key, timeout_seconds=timeout)
             if not completed:
                 logger.warning("Timed out waiting for webhook callback for sync event %d", event.id)
             return completed
         finally:
-            # Always clean up the one-shot webhook
-            if webhook_id:
-                await self._delete_corehub_webhook(webhook_id)
-            self._pending.pop(task_guid, None)
+            self._pending.pop(correlation_key, None)
 
-    async def _register_corehub_webhook(self, task_guid: str, event: ChainedJobEvent) -> Optional[str]:
-        """Register a one-shot webhook configuration in the corehub.
+    async def _register_corehub_webhook(self, event: ChainedJobEvent) -> Optional[str]:
+        """Register a persistent webhook configuration in the corehub.
 
-        The corehub exposes a PUT /global-config/webhooks endpoint that
-        replaces the full list, so we first GET the current list and append.
-        Returns the id of the newly registered webhook, or None on failure.
-
-        The GET-then-PUT cycle is protected by ``_webhook_list_lock`` and
-        retried up to 3 times to handle transient failures.
+        The webhook is keyed by the chained event's database ID and stays
+        in CoreHub until the event is deleted or updated.
+        Returns the webhook id on success, or None on failure.
         """
         try:
             corehub_url = _get_corehub_base()
@@ -335,6 +454,8 @@ class ChainExecutionService:
                 return None
 
             callback_url = "{{chronos_address}}/api/webhooks/notify"
+            correlation_key = str(event.id)
+            webhook_id = f"{_CHRONOS_WEBHOOK_PREFIX}{correlation_key}"
 
             # Map the chained event's task type to the specific webhook event(s)
             # that signal completion of the operation.
@@ -346,8 +467,8 @@ class ChainExecutionService:
             group_ids = _parse_json_list(event.group_ids)
 
             new_webhook = {
-                "id": f"{_CHRONOS_WEBHOOK_PREFIX}{task_guid}",
-                "name": f"chronos-sync-{task_guid[:8]}",
+                "id": webhook_id,
+                "name": f"chronos-event-{event.id}",
                 "webhookUrl": callback_url,
                 "enabled": True,
                 "enabledEvents": enabled_events,
@@ -355,7 +476,7 @@ class ChainExecutionService:
                 "entityFilter": entity_ids if entity_ids else [],
                 "groupFilter": group_ids if group_ids else [],
                 "customHeaders": {
-                    "X-Task-GUID": task_guid,
+                    "X-Event-ID": correlation_key,
                     "EXT_MODULE": "chronos",
                 },
                 "retryConfig": {
@@ -388,8 +509,11 @@ class ChainExecutionService:
                         except Exception:
                             existing = []
 
+                    # Remove any existing webhook with the same id (idempotent upsert)
+                    filtered = [w for w in existing if w.get("id") != webhook_id]
+
                     # PUT updated list
-                    updated = existing + [new_webhook]
+                    updated = filtered + [new_webhook]
                     put_resp = await loop.run_in_executor(
                         None,
                         lambda: requests.put(
@@ -401,8 +525,8 @@ class ChainExecutionService:
                         ),
                     )
                     if put_resp.status_code in (200, 201, 202, 204):
-                        logger.info("Registered corehub webhook %s for task_guid %s", new_webhook["id"], task_guid)
-                        return new_webhook["id"]
+                        logger.info("Registered corehub webhook %s for event %d", webhook_id, event.id)
+                        return webhook_id
 
                     self._last_webhook_error = (
                         f"HTTP {put_resp.status_code}: {put_resp.text[:200]}"
@@ -497,11 +621,13 @@ class ChainExecutionService:
 
     @classmethod
     async def cleanup_stale_webhooks(cls) -> int:
-        """Remove all leftover ``chronos-sync-*`` webhooks from CoreHub.
+        """Remove orphaned ``chronos-sync-*`` webhooks from CoreHub.
 
-        Called at startup to clean up any one-shot webhooks that were not
-        deleted because of a crash or timeout in a previous run.
-        Returns the number of webhooks removed.
+        Called at startup.  Compares the webhooks in CoreHub against the
+        ChainedJobEvent table:
+          - Webhooks whose event ID no longer exists in DB are removed (orphans).
+          - Webhooks whose event still exists are left in place (persistent).
+        Returns the number of orphaned webhooks removed.
         """
         removed = 0
         try:
@@ -509,6 +635,17 @@ class ChainExecutionService:
             if not corehub_url:
                 logger.warning("Cannot cleanup stale webhooks — corehub URL unknown")
                 return 0
+
+            # Fetch all SYNC event IDs from the DB
+            from gluesync_scheduler.db.database import SessionLocal
+            db = SessionLocal()
+            try:
+                valid_events = db.query(ChainedJobEvent).filter(
+                    ChainedJobEvent.execution_mode == ExecutionMode.SYNC
+                ).all()
+                valid_ids = {f"{_CHRONOS_WEBHOOK_PREFIX}{e.id}" for e in valid_events}
+            finally:
+                db.close()
 
             config_endpoint = f"{corehub_url}/global-config/webhooks"
             auth_headers = _get_corehub_auth_headers()
@@ -531,12 +668,16 @@ class ChainExecutionService:
                 except Exception:
                     return 0
 
-                stale = [w for w in existing if str(w.get("id", "")).startswith(_CHRONOS_WEBHOOK_PREFIX)]
-                if not stale:
-                    logger.info("No stale chronos webhooks found in corehub")
+                # Find chronos webhooks that are orphans (event no longer in DB)
+                chronos_webhooks = [w for w in existing if str(w.get("id", "")).startswith(_CHRONOS_WEBHOOK_PREFIX)]
+                orphans = [w for w in chronos_webhooks if w.get("id") not in valid_ids]
+
+                if not orphans:
+                    logger.info("No orphaned chronos webhooks found in corehub (%d valid)", len(chronos_webhooks))
                     return 0
 
-                updated = [w for w in existing if not str(w.get("id", "")).startswith(_CHRONOS_WEBHOOK_PREFIX)]
+                orphan_ids = {w.get("id") for w in orphans}
+                updated = [w for w in existing if w.get("id") not in orphan_ids]
                 put_resp = await loop.run_in_executor(
                     None,
                     lambda: requests.put(
@@ -548,11 +689,11 @@ class ChainExecutionService:
                     ),
                 )
                 if put_resp.status_code in (200, 201, 202, 204):
-                    removed = len(stale)
-                    logger.info("Cleaned up %d stale chronos webhook(s) from corehub", removed)
+                    removed = len(orphans)
+                    logger.info("Cleaned up %d orphaned chronos webhook(s) from corehub", removed)
                 else:
                     logger.error(
-                        "Failed to cleanup stale webhooks: HTTP %d — response: %s",
+                        "Failed to cleanup orphaned webhooks: HTTP %d — response: %s",
                         put_resp.status_code, put_resp.text[:300],
                     )
         except Exception as exc:
@@ -560,17 +701,17 @@ class ChainExecutionService:
 
         return removed
 
-    async def _wait_for_webhook(self, task_guid: str, timeout_seconds: int = 3600) -> bool:
-        """Block until ``notify_webhook_received`` signals this guid, or timeout."""
+    async def _wait_for_webhook(self, correlation_key: str, timeout_seconds: int = 3600) -> bool:
+        """Block until ``notify_webhook_received`` signals this key, or timeout."""
         ev = asyncio.Event()
-        self._pending[task_guid] = ev
+        self._pending[correlation_key] = ev
         try:
             await asyncio.wait_for(ev.wait(), timeout=float(timeout_seconds))
             return True
         except asyncio.TimeoutError:
             return False
         finally:
-            self._pending.pop(task_guid, None)
+            self._pending.pop(correlation_key, None)
 
 
 # ---------------------------------------------------------------------------

@@ -47,7 +47,7 @@ _EXPECTED_MODULE = "chronos"
 )
 async def webhook_notify(
     request: Request,
-    x_task_guid: Optional[str] = Header(None, alias="X-Task-GUID"),
+    x_event_id: Optional[str] = Header(None, alias="X-Event-ID"),
     ext_module: Optional[str] = Header(None, alias="EXT_MODULE"),
 ) -> JSONResponse:
     """Endpoint called by the Gluesync corehub when a sync chained event completes.
@@ -56,8 +56,8 @@ async def webhook_notify(
     ----------------
     ``EXT_MODULE``
         Must be ``chronos``.  Identifies the module that registered the webhook.
-    ``X-Task-GUID``
-        UUID registered when the sync chained event was set up.
+    ``X-Event-ID``
+        The chained event ID registered when the persistent webhook was set up.
 
     Optional body
     -------------
@@ -75,11 +75,11 @@ async def webhook_notify(
             detail=f"Invalid or missing EXT_MODULE header (expected '{_EXPECTED_MODULE}')",
         )
 
-    # Validate task GUID
-    if not x_task_guid:
+    # Validate event ID
+    if not x_event_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing X-Task-GUID header",
+            detail="Missing X-Event-ID header",
         )
 
     # Optionally parse body for audit/logging
@@ -91,21 +91,21 @@ async def webhook_notify(
         pass  # body is optional
 
     logger.info(
-        "webhook_notify: received callback guid=%s user=%s",
-        x_task_guid,
+        "webhook_notify: received callback event_id=%s user=%s",
+        x_event_id,
         user or "<not provided>",
     )
 
-    found = chain_execution_service.notify_webhook_received(x_task_guid)
+    found = chain_execution_service.notify_webhook_received(x_event_id)
     if not found:
         # Not an error — the webhook may have already timed out.
-        logger.warning("webhook_notify: no pending chain found for guid=%s", x_task_guid)
+        logger.warning("webhook_notify: no pending chain found for event_id=%s", x_event_id)
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content={"acknowledged": False, "reason": "no pending chain for this guid"},
+            content={"acknowledged": False, "reason": "no pending chain for this event_id"},
         )
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={"acknowledged": True, "guid": x_task_guid},
+        content={"acknowledged": True, "event_id": x_event_id},
     )

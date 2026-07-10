@@ -407,6 +407,7 @@ class JobService:
             
             # Persist chained events
             if job_data.chained_events:
+                created_events = []
                 for pos, ce in enumerate(job_data.chained_events):
                     chained = ChainedJobEvent(
                         parent_job_id=db_job.id,
@@ -421,6 +422,16 @@ class JobService:
                     )
                     self.db.add(chained)
                 self.db.commit()
+                # Refresh to get the auto-generated IDs
+                created_events = (
+                    self.db.query(ChainedJobEvent)
+                    .filter(ChainedJobEvent.parent_job_id == db_job.id)
+                    .order_by(ChainedJobEvent.position)
+                    .all()
+                )
+                # Register persistent webhooks for SYNC events
+                from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+                chain_execution_service.sync_register_webhooks_for_events(created_events)
 
             result = Job.from_orm(db_job)
             result.chained_events = _load_chained_events(self.db, db_job.id)
@@ -714,6 +725,17 @@ class JobService:
             
             # Replace chained events when the caller provides a list (even empty)
             if "chained_events" in job_data.dict(exclude_unset=True):
+                # Collect old event IDs for webhook cleanup
+                old_events = self.db.query(ChainedJobEvent).filter(
+                    ChainedJobEvent.parent_job_id == db_job.id
+                ).all()
+                old_event_ids = [e.id for e in old_events]
+
+                # Delete old webhooks from CoreHub
+                if old_event_ids:
+                    from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+                    chain_execution_service.sync_delete_webhooks_for_events(old_event_ids)
+
                 self.db.query(ChainedJobEvent).filter(
                     ChainedJobEvent.parent_job_id == db_job.id
                 ).delete()
@@ -733,6 +755,16 @@ class JobService:
                         )
                         self.db.add(chained)
                     self.db.commit()
+
+                    # Register persistent webhooks for new SYNC events
+                    new_events = (
+                        self.db.query(ChainedJobEvent)
+                        .filter(ChainedJobEvent.parent_job_id == db_job.id)
+                        .order_by(ChainedJobEvent.position)
+                        .all()
+                    )
+                    from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+                    chain_execution_service.sync_register_webhooks_for_events(new_events)
 
             result = Job.from_orm(db_job)
             result.chained_events = _load_chained_events(self.db, db_job.id)
@@ -1258,10 +1290,14 @@ class JobService:
             )
         
         try:
+            # Delete persistent webhooks from CoreHub before DB cascade
+            from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+            chain_execution_service.sync_delete_webhooks_for_job(db_job.id)
+
             # Delete the scheduled job first
             self.scheduler_service.remove_job(db_job.id)
             
-            # Then delete from database
+            # Then delete from database (chained events cascade-delete via FK)
             self.db.delete(db_job)
             self.db.commit()
         except Exception as e:
