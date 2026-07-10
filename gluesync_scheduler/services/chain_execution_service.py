@@ -115,15 +115,19 @@ class ChainExecutionService:
 
     Async mode  → fire-and-forget; the next event starts immediately after
                   the previous one has been *triggered* (not waited on).
-    Sync mode   → before firing, register a one-shot webhook inside the
-                  corehub.  Execution blocks until the corehub POSTs the
-                  callback to ``/api/webhooks/notify``, then the webhook is
-                  deleted and the next event fires.
+    Sync mode   → wait for the preceding step's completion webhook callback
+                  from the corehub, then fire the event.  The webhook is
+                  persistent (registered at job create/update time) and listens
+                  for the **preceding** step's completion event(s).
     """
 
     # Class-level registry so the webhook router can signal a waiting coroutine.
-    # key: task_guid  → value: asyncio.Event
+    # key: correlation_key (event ID) → value: asyncio.Event
     _pending: Dict[str, asyncio.Event] = {}
+
+    # Pre-arrival buffer: callbacks that arrive before _wait_for_webhook is
+    # called are stored here so the waiter can consume them immediately.
+    _pre_arrival: Dict[str, bool] = {}
 
     # Serializes all CoreHub webhook-list mutations (GET-then-PUT) to prevent
     # concurrent register/delete operations from overwriting each other.
@@ -166,7 +170,7 @@ class ChainExecutionService:
                 # Fire-and-forget: trigger the event but don't await its HTTP result
                 asyncio.ensure_future(self._execute_chained_event(event, db))
             else:
-                # Sync: register webhook, fire the event, wait for callback
+                # Sync: wait for preceding step's callback, then fire the event
                 success = await self._execute_sync_event(event, db)
                 if not success:
                     webhook_detail = getattr(self, '_last_webhook_error', None)
@@ -201,22 +205,26 @@ class ChainExecutionService:
 
         return {"started": True, "success": chain_success, "errors": errors}
 
-    def sync_register_webhooks_for_events(self, events: List[ChainedJobEvent]) -> None:
+    def sync_register_webhooks_for_events(
+        self, events: List[ChainedJobEvent], main_job_task_type: TaskType
+    ) -> None:
         """Sync wrapper to register persistent webhooks for SYNC chained events.
 
         Called from JobService.create_job / update_job (sync context).
         ASYNC events are skipped (they don't use webhooks).
+        ``main_job_task_type`` is the parent job's task type — used to determine
+        which completion event the first SYNC event should listen for.
         """
         sync_events = [e for e in events if e.execution_mode == ExecutionMode.SYNC]
         if not sync_events:
             return
         try:
-            asyncio.run(self._register_webhooks_batch(sync_events))
+            asyncio.run(self._register_webhooks_batch(sync_events, main_job_task_type))
         except RuntimeError:
             # Event loop already running — fall back to thread
             import threading
             def _run():
-                asyncio.run(self._register_webhooks_batch(sync_events))
+                asyncio.run(self._register_webhooks_batch(sync_events, main_job_task_type))
             t = threading.Thread(target=_run, daemon=True)
             t.start()
             t.join(timeout=30)
@@ -262,10 +270,23 @@ class ChainExecutionService:
         except Exception as exc:
             logger.error("Failed to delete webhooks for job %d: %s", job_id, exc)
 
-    async def _register_webhooks_batch(self, events: List[ChainedJobEvent]) -> None:
-        """Register persistent webhooks for multiple events sequentially."""
+    async def _register_webhooks_batch(
+        self, events: List[ChainedJobEvent], main_job_task_type: TaskType
+    ) -> None:
+        """Register persistent webhooks for multiple events sequentially.
+
+        For each SYNC event, the webhook listens for the **preceding** step's
+        completion event(s) — that's the signal that tells Chronos to proceed.
+        """
+        # Build a lookup of all events by position to find preceding siblings
+        all_events_by_pos = {e.position: e for e in events}
         for event in events:
-            webhook_id = await self._register_corehub_webhook(event)
+            if event.position == 0:
+                preceding_task_type = main_job_task_type
+            else:
+                prev = all_events_by_pos.get(event.position - 1)
+                preceding_task_type = prev.task_type if prev else main_job_task_type
+            webhook_id = await self._register_corehub_webhook(event, preceding_task_type)
             if not webhook_id:
                 detail = getattr(self, '_last_webhook_error', 'unknown error')
                 logger.error(
@@ -335,15 +356,18 @@ class ChainExecutionService:
     def notify_webhook_received(self, correlation_key: str) -> bool:
         """Called by the webhook receiver endpoint.
 
-        Returns True when the key was pending (i.e. a waiting coroutine was
-        unblocked), False when the key is unknown.
+        Returns True when the key was pending or buffered, False when unknown.
+        If no coroutine is waiting yet, the callback is buffered in
+        ``_pre_arrival`` so the waiter can consume it immediately.
         """
         event = self._pending.get(correlation_key)
-        if event is None:
-            logger.warning("notify_webhook_received: unknown correlation key %s", correlation_key)
-            return False
-        event.set()
-        logger.info("notify_webhook_received: signalled key %s", correlation_key)
+        if event is not None:
+            event.set()
+            logger.info("notify_webhook_received: signalled key %s", correlation_key)
+            return True
+        # Buffer for a waiter that hasn't started yet
+        self._pre_arrival[correlation_key] = True
+        logger.info("notify_webhook_received: buffered key %s (no waiter yet)", correlation_key)
         return True
 
     # ---------------------------------------------------------------------------
@@ -417,33 +441,45 @@ class ChainExecutionService:
             return False
 
     async def _execute_sync_event(self, event: ChainedJobEvent, db: Session) -> bool:
-        """Fire the event and wait for the persistent webhook callback.
+        """Wait for the preceding step's completion callback, then fire the event.
 
-        The webhook is registered at job creation/update time and persists
-        in CoreHub until the chained event is deleted.  Here we only fire
-        the operation and wait for the callback.
+        The webhook is persistent (registered at job create/update time) and
+        listens for the **preceding** step's completion event(s).  Here we
+        wait for that callback, then fire the actual operation.
         """
         correlation_key = str(event.id)
         try:
-            # Fire the actual task
+            # Wait for the preceding step's completion callback first
+            timeout = int(os.getenv("CHRONOS_SYNC_WEBHOOK_TIMEOUT_SECONDS", "3600"))
+            completed = await self._wait_for_webhook(correlation_key, timeout_seconds=timeout)
+            if not completed:
+                logger.warning(
+                    "Timed out waiting for preceding step callback for sync event %d",
+                    event.id,
+                )
+                return False
+
+            # Preceding step completed — now fire the actual task
             ok = await self._execute_chained_event(event, db)
             if not ok:
                 return False
 
-            # Wait for callback (default 1h timeout)
-            timeout = int(os.getenv("CHRONOS_SYNC_WEBHOOK_TIMEOUT_SECONDS", "3600"))
-            completed = await self._wait_for_webhook(correlation_key, timeout_seconds=timeout)
-            if not completed:
-                logger.warning("Timed out waiting for webhook callback for sync event %d", event.id)
-            return completed
+            return True
         finally:
             self._pending.pop(correlation_key, None)
+            self._pre_arrival.pop(correlation_key, None)
 
-    async def _register_corehub_webhook(self, event: ChainedJobEvent) -> Optional[str]:
+    async def _register_corehub_webhook(
+        self, event: ChainedJobEvent, preceding_task_type: TaskType
+    ) -> Optional[str]:
         """Register a persistent webhook configuration in the corehub.
 
         The webhook is keyed by the chained event's database ID and stays
         in CoreHub until the event is deleted or updated.
+        ``preceding_task_type`` determines which completion event(s) the webhook
+        listens for — this is the **preceding** step's task type, so the
+        callback signals that the preceding step is done and this event
+        can proceed.
         Returns the webhook id on success, or None on failure.
         """
         try:
@@ -457,9 +493,10 @@ class ChainExecutionService:
             correlation_key = str(event.id)
             webhook_id = f"{_CHRONOS_WEBHOOK_PREFIX}{correlation_key}"
 
-            # Map the chained event's task type to the specific webhook event(s)
-            # that signal completion of the operation.
-            enabled_events = _task_type_to_webhook_events(event.task_type)
+            # Map the **preceding** step's task type to the webhook event(s)
+            # that signal its completion.  This is what tells Chronos that
+            # the preceding step is done and this event can fire.
+            enabled_events = _task_type_to_webhook_events(preceding_task_type)
 
             # Build filters so the webhook only fires for the specific
             # pipeline / entity / group being targeted.
@@ -702,7 +739,16 @@ class ChainExecutionService:
         return removed
 
     async def _wait_for_webhook(self, correlation_key: str, timeout_seconds: int = 3600) -> bool:
-        """Block until ``notify_webhook_received`` signals this key, or timeout."""
+        """Block until ``notify_webhook_received`` signals this key, or timeout.
+
+        Checks the pre-arrival buffer first — if the callback already arrived
+        before this wait started, returns immediately.
+        """
+        # Check pre-arrival buffer first
+        if self._pre_arrival.pop(correlation_key, False):
+            logger.info("_wait_for_webhook: consumed pre-arrival callback for key %s", correlation_key)
+            return True
+
         ev = asyncio.Event()
         self._pending[correlation_key] = ev
         try:

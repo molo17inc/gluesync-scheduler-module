@@ -262,23 +262,21 @@ async def test_execute_chain_sync_waits_for_webhook(db_session):
 
     svc = ChainExecutionService()
     svc._pending = {}  # isolate from module-level singleton
+    svc._pre_arrival = {}
 
     async def fake_execute(event, db):
         return True
 
-    # Persistent webhook model: no register/delete at execution time.
-    # The webhook is registered at job create/update time and persists.
+    # Persistent webhook model: _execute_sync_event waits for the preceding
+    # step's callback first, then fires.  Pre-populate the _pre_arrival
+    # buffer so _wait_for_webhook returns immediately without timing out.
+    chained_event_id = str(db_session.query(ChainedJobEvent).first().id)
+    svc._pre_arrival[chained_event_id] = True
+
     with (
         patch.object(svc, "_execute_chained_event", side_effect=fake_execute),
     ):
-        # Schedule the chain, then notify after a brief delay
-        async def notify_after_delay():
-            await asyncio.sleep(0.05)
-            for guid in list(svc._pending.keys()):
-                svc.notify_webhook_received(guid)
-
         task = asyncio.create_task(svc.execute_chain(parent, db_session))
-        await notify_after_delay()
         await task  # should complete without timing out
 
 

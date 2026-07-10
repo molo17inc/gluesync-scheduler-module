@@ -431,7 +431,7 @@ class JobService:
                 )
                 # Register persistent webhooks for SYNC events
                 from gluesync_scheduler.services.chain_execution_service import chain_execution_service
-                chain_execution_service.sync_register_webhooks_for_events(created_events)
+                chain_execution_service.sync_register_webhooks_for_events(created_events, db_job.task_type)
 
             result = Job.from_orm(db_job)
             result.chained_events = _load_chained_events(self.db, db_job.id)
@@ -764,7 +764,7 @@ class JobService:
                         .all()
                     )
                     from gluesync_scheduler.services.chain_execution_service import chain_execution_service
-                    chain_execution_service.sync_register_webhooks_for_events(new_events)
+                    chain_execution_service.sync_register_webhooks_for_events(new_events, db_job.task_type)
 
             result = Job.from_orm(db_job)
             result.chained_events = _load_chained_events(self.db, db_job.id)
