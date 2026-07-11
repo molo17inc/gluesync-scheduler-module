@@ -81,8 +81,8 @@ def _get_corehub_ssl_verify() -> bool:
 
 
 def _task_type_to_webhook_events(task_type: TaskType) -> list:
-    """Map a chained event's TaskType to the WebhookEventType values
-    that signal completion of the operation.
+    """Map a TaskType to the WebhookEventType enum names that signal
+    completion of the operation.
 
     The values must match the enum names in WebhookEventType.kt
     (not the cloudEventType string).
@@ -219,12 +219,20 @@ class ChainExecutionService:
         if not sync_events:
             return
         try:
-            asyncio.run(self._register_webhooks_batch(sync_events, main_job_task_type))
+            coro = self._register_webhooks_batch(sync_events, main_job_task_type)
+            asyncio.run(coro)
         except RuntimeError:
-            # Event loop already running — fall back to thread
+            # Event loop already running — fall back to thread.
+            # The coroutine was already created above; close it to avoid
+            # "coroutine was never awaited" RuntimeWarning, then recreate
+            # inside the thread.
+            coro.close()
             import threading
             def _run():
-                asyncio.run(self._register_webhooks_batch(sync_events, main_job_task_type))
+                try:
+                    asyncio.run(self._register_webhooks_batch(sync_events, main_job_task_type))
+                except Exception as exc:
+                    logger.error("Failed to register webhooks in thread: %s", exc)
             t = threading.Thread(target=_run, daemon=True)
             t.start()
             t.join(timeout=30)
@@ -240,11 +248,16 @@ class ChainExecutionService:
             return
         webhook_ids = [f"{_CHRONOS_WEBHOOK_PREFIX}{eid}" for eid in event_ids]
         try:
-            asyncio.run(self._delete_webhooks_batch(webhook_ids))
+            coro = self._delete_webhooks_batch(webhook_ids)
+            asyncio.run(coro)
         except RuntimeError:
+            coro.close()
             import threading
             def _run():
-                asyncio.run(self._delete_webhooks_batch(webhook_ids))
+                try:
+                    asyncio.run(self._delete_webhooks_batch(webhook_ids))
+                except Exception as exc:
+                    logger.error("Failed to delete webhooks in thread: %s", exc)
             t = threading.Thread(target=_run, daemon=True)
             t.start()
             t.join(timeout=30)
