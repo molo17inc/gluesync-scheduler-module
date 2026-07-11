@@ -529,6 +529,7 @@ class ChainExecutionService:
                     "X-Event-ID": correlation_key,
                     "EXT_MODULE": "chronos",
                 },
+                "skipTlsVerification": True,
                 "retryConfig": {
                     "maxRetries": 0,
                     "initialDelayMs": 0,
