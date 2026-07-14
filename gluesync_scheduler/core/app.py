@@ -453,6 +453,18 @@ async def shutdown_event():
     """Clean up resources on shutdown"""
     logger.info("Shutting down Gluesync Scheduler Module...")
     
+    # Shutdown the CoreHub introspector httpx client (if it was ever
+    # materialised). Uses lazy import so the security module is not
+    # loaded on shutdown paths that never called it.
+    try:
+        from gluesync_scheduler.security.corehub_introspect import (
+            get_introspector,
+        )
+
+        await get_introspector().aclose()
+    except Exception as e:
+        logger.error(f"Error closing CoreHub introspector client: {e}")
+
     # Shutdown the Gluesync SDK client
     try:
         await gluesync_sdk_client.shutdown()

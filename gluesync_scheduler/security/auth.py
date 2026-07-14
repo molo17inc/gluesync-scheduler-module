@@ -116,6 +116,15 @@ async def current_user(request: Request) -> CurrentUser:
 
 
 def _forbid(user: CurrentUser, action: str) -> HTTPException:
+    # INFO-level so ops can grep for auth denials without turning on
+    # DEBUG. Username is safe to log; the token / cookie is never
+    # touched here.
+    logger.info(
+        "Chronos auth denied: user=%s role=%s action=%s",
+        user.username,
+        user.role.value,
+        action,
+    )
     return HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail=(

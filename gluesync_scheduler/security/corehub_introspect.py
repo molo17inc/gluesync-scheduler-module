@@ -121,6 +121,11 @@ class CoreHubIntrospector:
         self._verify_ssl = verify_ssl
         self._cache: dict[str, tuple[CurrentUser, float]] = {}
         self._cache_lock = asyncio.Lock()
+        # Lazily-materialised httpx client, reused across requests to
+        # amortise connection setup. Bound to the event loop of the
+        # first ``introspect()`` call.
+        self._client: Optional[httpx.AsyncClient] = None
+        self._client_lock = asyncio.Lock()
 
     # --- Public API ---------------------------------------------------
 
@@ -168,11 +173,9 @@ class CoreHubIntrospector:
         if cookie_header:
             headers["Cookie"] = cookie_header
 
+        client = await self._get_client()
         try:
-            async with httpx.AsyncClient(
-                timeout=self._timeout_seconds, verify=self._verify_ssl
-            ) as client:
-                response = await client.get(url, headers=headers)
+            response = await client.get(url, headers=headers)
         except httpx.HTTPError as exc:
             logger.warning("CoreHub introspection transport error: %s", exc)
             raise IntrospectionError(f"CoreHub /auth/me unreachable: {exc}") from exc
@@ -260,6 +263,29 @@ class CoreHubIntrospector:
         """Wipe the introspection cache. Intended for tests / ops tools."""
         async with self._cache_lock:
             self._cache.clear()
+
+    async def aclose(self) -> None:
+        """Shut down the underlying httpx client.
+
+        Called from the FastAPI shutdown hook. Safe to call multiple
+        times.
+        """
+        async with self._client_lock:
+            if self._client is not None:
+                await self._client.aclose()
+                self._client = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Return the reusable httpx client, constructing on first use."""
+        if self._client is not None:
+            return self._client
+        async with self._client_lock:
+            if self._client is None:
+                self._client = httpx.AsyncClient(
+                    timeout=self._timeout_seconds,
+                    verify=self._verify_ssl,
+                )
+            return self._client
 
 
 # --- Singleton ---------------------------------------------------------
