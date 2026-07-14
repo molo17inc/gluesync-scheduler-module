@@ -99,6 +99,39 @@ class ChainedJobEvent(Base):
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
 
+class TriggerFlow(Base):
+    __tablename__ = "trigger_flows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    secret_token = Column(String, nullable=False)
+    last_triggered = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_successful_trigger = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_error_message = Column(Text, nullable=True)
+    last_trigger_error_time = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+
+class TriggerFlowEvent(Base):
+    __tablename__ = "trigger_flow_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trigger_flow_id = Column(Integer, ForeignKey("trigger_flows.id", ondelete="CASCADE"), nullable=False, index=True)
+    position = Column(Integer, nullable=False)
+    task_type = Column(Enum(TaskType), nullable=False)
+    pipeline_id = Column(String, nullable=False)
+    entity_ids = Column(Text, nullable=True)    # JSON array
+    group_ids = Column(Text, nullable=True)     # JSON array
+    with_snapshot = Column(Boolean, default=False)
+    snapshot_write_method = Column(String, nullable=False, default="UPSERT")
+    execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+
 class Setting(Base):
     """Model for storing application settings as key-value pairs"""
     __tablename__ = "settings"

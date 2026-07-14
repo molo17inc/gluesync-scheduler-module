@@ -26,6 +26,8 @@ import json
 import logging
 import os
 import threading
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set
 
@@ -36,6 +38,39 @@ import requests
 from sqlalchemy.orm import Session
 
 from gluesync_scheduler.models.models import ChainedJobEvent, ExecutionMode, ScheduledJob, TaskType
+
+
+# ---------------------------------------------------------------------------
+# Shared execution unit — projection target for both ChainedJobEvent and
+# TriggerFlowEvent so the execution engine stays DRY.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ExecutableEvent:
+    """Minimal representation of a single action understood by the execution engine."""
+    id: int
+    position: int
+    task_type: TaskType
+    pipeline_id: str
+    entity_ids: Optional[str]        # raw JSON string, same as DB column
+    group_ids: Optional[str]
+    with_snapshot: bool
+    snapshot_write_method: str
+    execution_mode: ExecutionMode
+
+    @staticmethod
+    def from_chained(event: "ChainedJobEvent") -> "ExecutableEvent":
+        return ExecutableEvent(
+            id=event.id,
+            position=event.position,
+            task_type=event.task_type,
+            pipeline_id=event.pipeline_id,
+            entity_ids=event.entity_ids,
+            group_ids=event.group_ids,
+            with_snapshot=event.with_snapshot,
+            snapshot_write_method=event.snapshot_write_method,
+            execution_mode=event.execution_mode,
+        )
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +286,60 @@ class ChainExecutionService:
 
         return {"started": True, "success": chain_success, "errors": errors}
 
+    async def execute_trigger_flow(self, flow_id: int, events: list) -> bool:
+        """Execute a list of TriggerFlowEvent ORM objects as an ExecutableEvent chain.
+
+        Returns True when the chain completed without stopping early, False otherwise.
+        Imports TriggerFlowEvent lazily to avoid circular imports.
+        """
+        if not events:
+            logger.info("TriggerFlow %d has no events — nothing to execute", flow_id)
+            return True
+
+        logger.info("Executing TriggerFlow %d: %d event(s)", flow_id, len(events))
+
+        executables = [
+            ExecutableEvent(
+                id=e.id,
+                position=e.position,
+                task_type=e.task_type,
+                pipeline_id=e.pipeline_id,
+                entity_ids=e.entity_ids,
+                group_ids=e.group_ids,
+                with_snapshot=e.with_snapshot,
+                snapshot_write_method=e.snapshot_write_method,
+                execution_mode=e.execution_mode,
+            )
+            for e in events
+        ]
+        return await self._run_executable_list(executables)
+
+    async def _run_executable_list(self, events: List[ExecutableEvent]) -> bool:
+        """Core sequential executor for any list of ExecutableEvent items.
+
+        ASYNC events are fire-and-forget; SYNC events are fired sequentially
+        and the chain stops on the first failure.  Note: SYNC events here do
+        NOT use the persistent-webhook-wait mechanism (that path is exclusive
+        to scheduled chained events via execute_chain).  TriggerFlow sync
+        events fire one at a time and check the HTTP response only.
+        """
+        for event in events:
+            logger.info(
+                "Executing event pos=%d type=%s mode=%s pipeline=%s",
+                event.position, event.task_type, event.execution_mode, event.pipeline_id,
+            )
+            if event.execution_mode == ExecutionMode.ASYNC:
+                asyncio.ensure_future(self._execute_event(event))
+            else:
+                success = await self._execute_event(event)
+                if not success:
+                    logger.error(
+                        "Sync event pos=%d failed — stopping chain",
+                        event.position,
+                    )
+                    return False
+        return True
+
     def sync_register_webhooks_for_events(
         self, events: List[ChainedJobEvent], main_job_task_type: TaskType
     ) -> None:
@@ -443,8 +532,8 @@ class ChainExecutionService:
     # Internal helpers
     # ---------------------------------------------------------------------------
 
-    async def _execute_chained_event(self, event: ChainedJobEvent, db: Session) -> bool:
-        """Execute a single chained event by calling the Chronos internal pipeline API.
+    async def _execute_event(self, event: ExecutableEvent) -> bool:
+        """Execute a single ExecutableEvent by calling the Chronos internal pipeline API.
 
         Returns True on HTTP 2xx, False otherwise.
         """
@@ -457,7 +546,7 @@ class ChainExecutionService:
 
             action = _task_type_to_action(event.task_type)
             if action is None:
-                logger.error("Unknown task_type %s for chained event %d", event.task_type, event.id)
+                logger.error("Unknown task_type %s for event id=%d", event.task_type, event.id)
                 return False
 
             endpoint = f"{base_url}/pipelines/{event.pipeline_id}/{action}"
@@ -494,9 +583,7 @@ class ChainExecutionService:
                 ),
             )
             if response.status_code in (200, 201, 202):
-                logger.info(
-                    "Chained event %d executed OK (HTTP %d)", event.id, response.status_code
-                )
+                logger.info("Event id=%d executed OK (HTTP %d)", event.id, response.status_code)
                 return True
             else:
                 body_preview = response.text[:200] if response.text else ""
@@ -506,7 +593,7 @@ class ChainExecutionService:
                 )
                 return False
         except Exception as exc:
-            logger.error("Chained event %d raised exception: %s", event.id, exc)
+            logger.error("Event id=%d raised exception: %s", event.id, exc)
             return False
 
     async def _execute_sync_event(self, event: ChainedJobEvent, db: Session) -> bool:
