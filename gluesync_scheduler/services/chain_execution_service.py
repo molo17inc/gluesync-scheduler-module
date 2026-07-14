@@ -26,7 +26,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 # Prefix used for all one-shot webhooks created by Chronos.
 _CHRONOS_WEBHOOK_PREFIX = "chronos-sync-"
@@ -122,12 +122,20 @@ class ChainExecutionService:
     """
 
     # Class-level registry so the webhook router can signal a waiting coroutine.
-    # key: correlation_key (event ID) → value: asyncio.Event
+    # key: correlation_key (event ID) -> value: asyncio.Event
     _pending: Dict[str, asyncio.Event] = {}
 
     # Pre-arrival buffer: callbacks that arrive before _wait_for_webhook is
     # called are stored here so the waiter can consume them immediately.
+    # Only populated when the key is in _active_listeners.
     _pre_arrival: Dict[str, bool] = {}
+
+    # Active listening window: correlation keys for which a chain is currently
+    # executing and expecting a callback.  Callbacks for keys NOT in this set
+    # are rejected by notify_webhook_received so that stale events (e.g. a
+    # manual pipeline action that fires the same webhook outside the
+    # scheduled window) are not consumed by the next chain run.
+    _active_listeners: Set[str] = set()
 
     # Serializes all CoreHub webhook-list mutations (GET-then-PUT) to prevent
     # concurrent register/delete operations from overwriting each other.
@@ -159,34 +167,62 @@ class ChainExecutionService:
             job.id, job.name, len(events)
         )
 
+        # Determine which events are SYNC and set up the active listening window.
+        # Only SYNC events wait for webhook callbacks, so only their correlation
+        # keys are added to _active_listeners.  This ensures that callbacks
+        # arriving outside the scheduled execution window are rejected.
+        sync_event_keys: Set[str] = set()
+        for event in events:
+            if event.execution_mode == ExecutionMode.SYNC:
+                key = str(event.id)
+                sync_event_keys.add(key)
+                # Clean up any stale pre-arrival buffer from a previous run
+                self._pre_arrival.pop(key, None)
+
+        self._active_listeners.update(sync_event_keys)
+        logger.info(
+            "Active listening window opened for job %d: %d sync event(s) %s",
+            job.id, len(sync_event_keys), sorted(sync_event_keys) if sync_event_keys else "[]",
+        )
+
         errors: list[str] = []
 
-        for event in events:
+        try:
+            for event in events:
+                logger.info(
+                    "Chained event pos=%d type=%s mode=%s pipeline=%s",
+                    event.position, event.task_type, event.execution_mode, event.pipeline_id,
+                )
+                if event.execution_mode == ExecutionMode.ASYNC:
+                    # Fire-and-forget: trigger the event but don't await its HTTP result
+                    asyncio.ensure_future(self._execute_chained_event(event, db))
+                else:
+                    # Sync: wait for preceding step's callback, then fire the event
+                    success = await self._execute_sync_event(event, db)
+                    if not success:
+                        webhook_detail = getattr(self, '_last_webhook_error', None)
+                        if webhook_detail:
+                            err_msg = (
+                                f"Chained event pos={event.position} "
+                                f"({event.task_type}) failed: {webhook_detail}"
+                            )
+                        else:
+                            err_msg = (
+                                f"Chained event pos={event.position} "
+                                f"({event.task_type}) failed or timed out"
+                            )
+                        logger.error(err_msg)
+                        errors.append(err_msg)
+                        break
+        finally:
+            # Close the active listening window
+            self._active_listeners.difference_update(sync_event_keys)
+            # Clean up any remaining pre-arrival entries for these keys
+            for key in sync_event_keys:
+                self._pre_arrival.pop(key, None)
             logger.info(
-                "Chained event pos=%d type=%s mode=%s pipeline=%s",
-                event.position, event.task_type, event.execution_mode, event.pipeline_id,
+                "Active listening window closed for job %d", job.id,
             )
-            if event.execution_mode == ExecutionMode.ASYNC:
-                # Fire-and-forget: trigger the event but don't await its HTTP result
-                asyncio.ensure_future(self._execute_chained_event(event, db))
-            else:
-                # Sync: wait for preceding step's callback, then fire the event
-                success = await self._execute_sync_event(event, db)
-                if not success:
-                    webhook_detail = getattr(self, '_last_webhook_error', None)
-                    if webhook_detail:
-                        err_msg = (
-                            f"Chained event pos={event.position} "
-                            f"({event.task_type}) failed: {webhook_detail}"
-                        )
-                    else:
-                        err_msg = (
-                            f"Chained event pos={event.position} "
-                            f"({event.task_type}) failed or timed out"
-                        )
-                    logger.error(err_msg)
-                    errors.append(err_msg)
-                    break
 
         chain_success = len(errors) == 0
 
@@ -370,15 +406,25 @@ class ChainExecutionService:
         """Called by the webhook receiver endpoint.
 
         Returns True when the key was pending or buffered, False when unknown.
-        If no coroutine is waiting yet, the callback is buffered in
-        ``_pre_arrival`` so the waiter can consume it immediately.
+        Callbacks are only accepted when the correlation key is in the
+        ``_active_listeners`` set — i.e. when a chain is actively executing
+        and expecting this callback.  Callbacks outside the active window
+        are rejected so that stale events (e.g. manual pipeline actions)
+        are not consumed by the next scheduled chain run.
         """
+        if correlation_key not in self._active_listeners:
+            logger.info(
+                "notify_webhook_received: rejected key %s — not in active listening window",
+                correlation_key,
+            )
+            return False
+
         event = self._pending.get(correlation_key)
         if event is not None:
             event.set()
             logger.info("notify_webhook_received: signalled key %s", correlation_key)
             return True
-        # Buffer for a waiter that hasn't started yet
+        # Buffer for a waiter that hasn't started yet (within the active window)
         self._pre_arrival[correlation_key] = True
         logger.info("notify_webhook_received: buffered key %s (no waiter yet)", correlation_key)
         return True
@@ -459,11 +505,12 @@ class ChainExecutionService:
         The webhook is persistent (registered at job create/update time) and
         listens for the **preceding** step's completion event(s).  Here we
         wait for that callback, then fire the actual operation.
+        The active listening window is managed by ``execute_chain``.
         """
         correlation_key = str(event.id)
         try:
             # Wait for the preceding step's completion callback first
-            timeout = int(os.getenv("CHRONOS_SYNC_WEBHOOK_TIMEOUT_SECONDS", "3600"))
+            timeout = self._get_sync_webhook_timeout()
             completed = await self._wait_for_webhook(correlation_key, timeout_seconds=timeout)
             if not completed:
                 logger.warning(
@@ -751,6 +798,32 @@ class ChainExecutionService:
             logger.warning("Exception during stale webhook cleanup: %s", exc)
 
         return removed
+
+    def _get_sync_webhook_timeout(self) -> int:
+        """Return the sync webhook wait timeout in seconds.
+
+        Resolution order:
+        1. ``sync_webhook_timeout_seconds`` setting in the settings table
+        2. ``CHRONOS_SYNC_WEBHOOK_TIMEOUT_SECONDS`` environment variable
+        3. Default: 3600 (1 hour)
+        """
+        # Try settings table first
+        try:
+            from gluesync_scheduler.db.database import SessionLocal
+            db = SessionLocal()
+            try:
+                from gluesync_scheduler.models.models import Setting
+                setting = db.query(Setting).filter(
+                    Setting.key == "sync_webhook_timeout_seconds"
+                ).first()
+                if setting and setting.value:
+                    return int(setting.value)
+            finally:
+                db.close()
+        except Exception:
+            pass
+        # Fall back to env var, then default
+        return int(os.getenv("CHRONOS_SYNC_WEBHOOK_TIMEOUT_SECONDS", "3600"))
 
     async def _wait_for_webhook(self, correlation_key: str, timeout_seconds: int = 3600) -> bool:
         """Block until ``notify_webhook_received`` signals this key, or timeout.

@@ -222,6 +222,10 @@ class SettingsService:
             "timezone": {
                 "value": get_env_timezone('UTC'),
                 "description": "Timezone used for scheduling jobs"
+            },
+            "sync_webhook_timeout_seconds": {
+                "value": os.getenv("CHRONOS_SYNC_WEBHOOK_TIMEOUT_SECONDS", "3600"),
+                "description": "Timeout in seconds for waiting on sync chained event webhook callbacks (default: 3600 = 1 hour)"
             }
         }
         

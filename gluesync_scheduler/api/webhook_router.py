@@ -98,11 +98,13 @@ async def webhook_notify(
 
     found = chain_execution_service.notify_webhook_received(x_event_id)
     if not found:
-        # Not an error — the webhook may have already timed out.
-        logger.warning("webhook_notify: no pending chain found for event_id=%s", x_event_id)
+        # Not an error — the callback arrived outside the active listening window
+        # (e.g. a manual pipeline action between scheduled runs) or the chain
+        # already timed out.  Either way, we acknowledge so CoreHub doesn't retry.
+        logger.info("webhook_notify: no active listener for event_id=%s (outside scheduled window)", x_event_id)
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content={"acknowledged": False, "reason": "no pending chain for this event_id"},
+            content={"acknowledged": False, "reason": "no active listener for this event_id (outside scheduled window)"},
         )
 
     return JSONResponse(
