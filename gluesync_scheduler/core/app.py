@@ -462,8 +462,8 @@ async def shutdown_event():
         )
 
         await get_introspector().aclose()
-    except Exception as e:
-        logger.error(f"Error closing CoreHub introspector client: {e}")
+    except Exception:
+        logger.exception("Error closing CoreHub introspector client")
 
     # Shutdown the Gluesync SDK client
     try:

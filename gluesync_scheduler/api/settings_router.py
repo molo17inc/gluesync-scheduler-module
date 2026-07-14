@@ -22,7 +22,7 @@
 """
 
 import logging
-from typing import Optional, List
+from typing import Annotated, Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Body
 from sqlalchemy.orm import Session
 
@@ -59,10 +59,10 @@ router = APIRouter(
 
 @router.get("/", response_model=SettingsList, summary="Get all settings")
 async def get_settings(
-    skip: int = Query(0, ge=0, description="Number of records to skip for pagination"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    db: Session = Depends(get_db),
-    user: CurrentUser = Depends(current_user),
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[CurrentUser, Depends(current_user)],
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip for pagination")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ):
     """
     Get a list of all application settings.
@@ -102,9 +102,9 @@ async def get_settings(
     status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Setting not found"}
 }, summary="Get a specific setting")
 async def get_setting(
-    key: str = Path(..., description="The key of the setting to retrieve"),
-    db: Session = Depends(get_db),
-    user: CurrentUser = Depends(current_user),
+    key: Annotated[str, Path(description="The key of the setting to retrieve")],
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[CurrentUser, Depends(current_user)],
 ):
     """
     Get a specific setting by key.
@@ -145,13 +145,13 @@ async def get_setting(
     status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse, "description": "Invalid setting value"}
 }, summary="Update a setting")
 async def update_setting(
-    key: str = Path(..., description="The key of the setting to update"),
-    setting_data: SettingUpdate = Body(..., description="Setting data to update", example={
+    key: Annotated[str, Path(description="The key of the setting to update")],
+    setting_data: Annotated[SettingUpdate, Body(description="Setting data to update", example={
         "value": "America/New_York",
         "description": "Updated timezone description"
-    }),
-    db: Session = Depends(get_db),
-    user: CurrentUser = Depends(require_config),
+    })],
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[CurrentUser, Depends(require_config)],
 ):
     """
     Update an existing setting.
@@ -239,13 +239,13 @@ async def update_setting(
     status.HTTP_409_CONFLICT: {"model": ErrorResponse, "description": "Setting already exists"}
 }, summary="Create a new setting")
 async def create_setting(
-    setting_data: SettingCreate = Body(..., description="Setting data to create", example={
+    setting_data: Annotated[SettingCreate, Body(description="Setting data to create", example={
         "key": "custom_setting",
         "value": "custom_value",
         "description": "A custom application setting"
-    }),
-    db: Session = Depends(get_db),
-    user: CurrentUser = Depends(require_config),
+    })],
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[CurrentUser, Depends(require_config)],
 ):
     """
     Create a new setting.
