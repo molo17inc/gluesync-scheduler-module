@@ -398,12 +398,22 @@ regardless of role.
 | `PUT`    | `/settings/timezone`       | `require_config`| |
 | `GET`    | `/settings/*` (other)      | `current_user`  | read |
 | `PUT/POST/DELETE` `/settings/*` | `require_config` | writes |
-| `*`      | `/pipeline/*`              | TBD — audit `pipeline_router.py` (§7.2) |
-| `*`      | `/webhooks/*`              | TBD — internal-only? See §7.3 |
-| `POST`   | `/jobs/chained/*`          | `require_manage`| chained events management |
+| `*`      | `/pipelines/*`             | **`verify_localhost` only** (chronos-internal, cron-triggered; see below) |
+| `*`      | `/webhooks/*`              | Not present on `main`; ships with `feature/chained-events`. Auth model deferred to that MR. |
+| `POST`   | `/jobs/chained/*`          | Deferred with `feature/chained-events`. |
 
-Exact per-route wiring will be enumerated during implementation
-(iteration 2).
+Exact per-route wiring implemented in iteration 2 (this MR).
+
+**Note on `pipeline_router.py`.** The pipeline actions
+(`/pipelines/{id}/play|pause|redo|one-time-snapshot|enter-maintenance|exit-maintenance`)
+are marked **INTERNAL USE ONLY** in their docstrings and already have a
+`verify_localhost` router-level dependency. They are invoked by
+chronos's own cron jobs, which cannot present an end-user JWT, so the
+user-role guard model does not apply here. They remain protected by
+the existing localhost check. This is the same architectural pattern
+as the deferred webhook receiver: the CoreHub-internal caller
+(chronos cron in this case) authenticates itself by network origin
+rather than by user identity.
 
 ---
 

@@ -28,6 +28,11 @@ from sqlalchemy.orm import Session
 
 from gluesync_scheduler.db.database import get_db
 from gluesync_scheduler.models.schemas import Setting, SettingsList, SettingUpdate, SettingCreate, ErrorResponse, OperationResponse
+from gluesync_scheduler.security import (
+    CurrentUser,
+    current_user,
+    require_config,
+)
 from gluesync_scheduler.services.settings_service import SettingsService
 from gluesync_scheduler.config.settings import settings
 
@@ -56,7 +61,8 @@ router = APIRouter(
 async def get_settings(
     skip: int = Query(0, ge=0, description="Number of records to skip for pagination"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(current_user),
 ):
     """
     Get a list of all application settings.
@@ -95,7 +101,11 @@ async def get_settings(
 @router.get("/{key}", response_model=Setting, responses={
     status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Setting not found"}
 }, summary="Get a specific setting")
-async def get_setting(key: str = Path(..., description="The key of the setting to retrieve"), db: Session = Depends(get_db)):
+async def get_setting(
+    key: str = Path(..., description="The key of the setting to retrieve"),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(current_user),
+):
     """
     Get a specific setting by key.
     
@@ -140,7 +150,8 @@ async def update_setting(
         "value": "America/New_York",
         "description": "Updated timezone description"
     }),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_config),
 ):
     """
     Update an existing setting.
@@ -233,7 +244,8 @@ async def create_setting(
         "value": "custom_value",
         "description": "A custom application setting"
     }),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_config),
 ):
     """
     Create a new setting.
