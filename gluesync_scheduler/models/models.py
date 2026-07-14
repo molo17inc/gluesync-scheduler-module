@@ -94,6 +94,7 @@ class ChainedJobEvent(Base):
     with_snapshot = Column(Boolean, default=False)
     snapshot_write_method = Column(String, nullable=False, default="UPSERT")
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
+    webhook_timeout_seconds = Column(Integer, nullable=False, default=3600)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 

@@ -48,6 +48,7 @@ class ChainedEventBase(BaseModel):
     with_snapshot: bool = Field(False, description="Whether to include a snapshot")
     snapshot_write_method: str = Field("UPSERT", description="Snapshot write method: UPSERT or INSERT", pattern="^(UPSERT|INSERT)$")
     execution_mode: ChainedEventMode = Field(ChainedEventMode.ASYNC, description="async: fire-and-forget; sync: wait for corehub webhook callback before next event")
+    webhook_timeout_seconds: int = Field(3600, description="Timeout in seconds for waiting on webhook callback in sync mode (default: 3600 = 1 hour)", ge=1)
 
 
 class ChainedEventCreate(ChainedEventBase):

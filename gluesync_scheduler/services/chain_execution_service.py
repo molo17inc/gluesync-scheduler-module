@@ -510,7 +510,7 @@ class ChainExecutionService:
         correlation_key = str(event.id)
         try:
             # Wait for the preceding step's completion callback first
-            timeout = self._get_sync_webhook_timeout()
+            timeout = event.webhook_timeout_seconds if event.webhook_timeout_seconds else 3600
             completed = await self._wait_for_webhook(correlation_key, timeout_seconds=timeout)
             if not completed:
                 logger.warning(
@@ -798,32 +798,6 @@ class ChainExecutionService:
             logger.warning("Exception during stale webhook cleanup: %s", exc)
 
         return removed
-
-    def _get_sync_webhook_timeout(self) -> int:
-        """Return the sync webhook wait timeout in seconds.
-
-        Resolution order:
-        1. ``sync_webhook_timeout_seconds`` setting in the settings table
-        2. ``CHRONOS_SYNC_WEBHOOK_TIMEOUT_SECONDS`` environment variable
-        3. Default: 3600 (1 hour)
-        """
-        # Try settings table first
-        try:
-            from gluesync_scheduler.db.database import SessionLocal
-            db = SessionLocal()
-            try:
-                from gluesync_scheduler.models.models import Setting
-                setting = db.query(Setting).filter(
-                    Setting.key == "sync_webhook_timeout_seconds"
-                ).first()
-                if setting and setting.value:
-                    return int(setting.value)
-            finally:
-                db.close()
-        except Exception:
-            pass
-        # Fall back to env var, then default
-        return int(os.getenv("CHRONOS_SYNC_WEBHOOK_TIMEOUT_SECONDS", "3600"))
 
     async def _wait_for_webhook(self, correlation_key: str, timeout_seconds: int = 3600) -> bool:
         """Block until ``notify_webhook_received`` signals this key, or timeout.

@@ -419,6 +419,7 @@ class JobService:
                         with_snapshot=ce.with_snapshot,
                         snapshot_write_method=ce.snapshot_write_method,
                         execution_mode=ExecutionMode(ce.execution_mode.value),
+                        webhook_timeout_seconds=ce.webhook_timeout_seconds,
                     )
                     self.db.add(chained)
                 self.db.commit()
@@ -752,6 +753,7 @@ class JobService:
                             with_snapshot=ce.with_snapshot,
                             snapshot_write_method=ce.snapshot_write_method,
                             execution_mode=ExecutionMode(ce.execution_mode.value),
+                            webhook_timeout_seconds=ce.webhook_timeout_seconds,
                         )
                         self.db.add(chained)
                     self.db.commit()
