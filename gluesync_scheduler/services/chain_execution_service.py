@@ -929,6 +929,15 @@ class ChainExecutionService:
             self._pending.pop(correlation_key, None)
 
 
+    # Backward-compat alias used by existing tests and any callers that
+    # reference the old name directly.
+    async def _execute_chained_event(self, event, db=None) -> bool:  # type: ignore[override]
+        """Deprecated alias for _execute_event; db parameter is ignored."""
+        if isinstance(event, ExecutableEvent):
+            return await self._execute_event(event)
+        return await self._execute_event(ExecutableEvent.from_chained(event))
+
+
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------

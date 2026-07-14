@@ -229,11 +229,11 @@ async def test_execute_chain_async_fires_immediately(db_session):
     svc = ChainExecutionService()
     fired: List[int] = []
 
-    async def fake_execute(event, db):
+    async def fake_execute(event):
         fired.append(event.position)
         return True
 
-    with patch.object(svc, "_execute_chained_event", side_effect=fake_execute):
+    with patch.object(svc, "_execute_event", side_effect=fake_execute):
         await svc.execute_chain(parent, db_session)
         # Give asyncio.ensure_future tasks a chance to run
         await asyncio.sleep(0.05)
@@ -367,11 +367,11 @@ async def test_full_async_chain_three_events(db_session):
     svc = ChainExecutionService()
     executed: List[TaskType] = []
 
-    async def fake_execute(event, db):
+    async def fake_execute(event):
         executed.append(event.task_type)
         return True
 
-    with patch.object(svc, "_execute_chained_event", side_effect=fake_execute):
+    with patch.object(svc, "_execute_event", side_effect=fake_execute):
         await svc.execute_chain(parent, db_session)
         await asyncio.sleep(0.1)  # let ensure_future tasks complete
 
