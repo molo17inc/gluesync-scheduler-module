@@ -1,0 +1,23 @@
+{
+  "folders": [
+	{
+		"path": "../../../gluesync-connect"
+	},
+	{
+		"path": "../../../gluesync-kotlin"
+	},
+	{
+		"path": "../../../gluesync-nodejs-monorepo"
+	},
+	{
+		"path": "../../../gluesync-docs-contents"
+	},
+	{
+		"path": "../.."
+	},
+	{
+		"path": "../../../container-mate"
+	}
+],
+  "settings": {}
+}
