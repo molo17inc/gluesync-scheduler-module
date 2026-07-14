@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set
 
@@ -122,8 +123,10 @@ class ChainExecutionService:
     """
 
     # Class-level registry so the webhook router can signal a waiting coroutine.
-    # key: correlation_key (event ID) -> value: asyncio.Event
-    _pending: Dict[str, asyncio.Event] = {}
+    # Uses threading.Event because the chain runs in a separate thread with its
+    # own event loop, while notify_webhook_received is called from the main
+    # FastAPI event loop. asyncio.Event does NOT work across event loops.
+    _pending: Dict[str, threading.Event] = {}
 
     # Pre-arrival buffer: callbacks that arrive before _wait_for_webhook is
     # called are stored here so the waiter can consume them immediately.
@@ -139,7 +142,14 @@ class ChainExecutionService:
 
     # Serializes all CoreHub webhook-list mutations (GET-then-PUT) to prevent
     # concurrent register/delete operations from overwriting each other.
-    _webhook_list_lock: asyncio.Lock = asyncio.Lock()
+    # Created lazily per-event-loop because the chain runs in a separate thread.
+    _webhook_list_lock: Optional[asyncio.Lock] = None
+
+    def _get_webhook_list_lock(self) -> asyncio.Lock:
+        """Get or create the asyncio.Lock for the current event loop."""
+        if self._webhook_list_lock is None:
+            self._webhook_list_lock = asyncio.Lock()
+        return self._webhook_list_lock
 
     # ---------------------------------------------------------------------------
     # Public entry points
@@ -360,7 +370,7 @@ class ChainExecutionService:
 
             ids_to_remove = set(webhook_ids)
 
-            async with self._webhook_list_lock:
+            async with self._get_webhook_list_lock():
                 get_resp = await loop.run_in_executor(
                     None,
                     lambda: requests.get(config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify),
@@ -592,7 +602,7 @@ class ChainExecutionService:
 
             max_attempts = 3
             for attempt in range(1, max_attempts + 1):
-                async with self._webhook_list_lock:
+                async with self._get_webhook_list_lock():
                     # GET existing list
                     get_resp = await loop.run_in_executor(
                         None,
@@ -662,7 +672,7 @@ class ChainExecutionService:
                 ssl_verify = _get_corehub_ssl_verify()
                 loop = asyncio.get_event_loop()
 
-                async with self._webhook_list_lock:
+                async with self._get_webhook_list_lock():
                     get_resp = await loop.run_in_executor(
                         None,
                         lambda: requests.get(config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify),
@@ -750,7 +760,7 @@ class ChainExecutionService:
             ssl_verify = _get_corehub_ssl_verify()
             loop = asyncio.get_event_loop()
 
-            async with cls._webhook_list_lock:
+            async with chain_execution_service._get_webhook_list_lock():
                 get_resp = await loop.run_in_executor(
                     None,
                     lambda: requests.get(config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify),
@@ -804,19 +814,30 @@ class ChainExecutionService:
 
         Checks the pre-arrival buffer first — if the callback already arrived
         before this wait started, returns immediately.
+        Uses threading.Event because the chain runs in a separate thread with
+        its own event loop, while notify_webhook_received is called from the
+        main FastAPI event loop.
         """
         # Check pre-arrival buffer first
         if self._pre_arrival.pop(correlation_key, False):
             logger.info("_wait_for_webhook: consumed pre-arrival callback for key %s", correlation_key)
             return True
 
-        ev = asyncio.Event()
+        ev = threading.Event()
         self._pending[correlation_key] = ev
         try:
-            await asyncio.wait_for(ev.wait(), timeout=float(timeout_seconds))
-            return True
-        except asyncio.TimeoutError:
-            return False
+            # Poll the threading.Event in a non-blocking way via run_in_executor
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: ev.wait(timeout=float(timeout_seconds)),
+            )
+            if result:
+                logger.info("_wait_for_webhook: received signal for key %s", correlation_key)
+                return True
+            else:
+                logger.warning("_wait_for_webhook: timed out waiting for key %s", correlation_key)
+                return False
         finally:
             self._pending.pop(correlation_key, None)
 
