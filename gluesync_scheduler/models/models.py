@@ -106,6 +106,7 @@ class TriggerFlow(Base):
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     enabled = Column(Boolean, default=True, nullable=False)
+    platform_event = Column(String, nullable=True)
     secret_token = Column(String, nullable=False)
     last_triggered = Column(TIMESTAMP(timezone=True), nullable=True)
     last_successful_trigger = Column(TIMESTAMP(timezone=True), nullable=True)
@@ -141,4 +142,17 @@ class Setting(Base):
     value = Column(String, nullable=True)
     description = Column(String, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+
+class TriggerFlowExecutionLog(Base):
+    """Stores the last few execution logs for a trigger flow."""
+    __tablename__ = "trigger_flow_execution_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trigger_flow_id = Column(Integer, ForeignKey("trigger_flows.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String, nullable=False)  # "success" | "failed" | "queued"
+    source = Column(String, nullable=True)   # "manual" | "platform_event" | "webhook"
+    error_message = Column(Text, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    triggered_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))

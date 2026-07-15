@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from gluesync_scheduler.db.database import get_db
 from gluesync_scheduler.models.trigger_schemas import (
+    ExecutionLogResponse,
     FireResponse,
     FireStatus,
     TriggerFlowCreate,
@@ -284,7 +285,7 @@ async def fire_trigger_flow(
         # Synchronous path: run the chain inline and wait up to wait_timeout_seconds
         try:
             success, err = await asyncio.wait_for(
-                svc.fire(flow_id),
+                svc.fire(flow_id, source="webhook"),
                 timeout=float(wait_timeout_seconds),
             )
         except asyncio.TimeoutError:
@@ -322,7 +323,7 @@ async def fire_trigger_flow(
             bg_db = SessionLocal()
             try:
                 bg_svc = TriggerFlowService(bg_db)
-                await bg_svc.fire(fid)
+                await bg_svc.fire(fid, source="webhook")
             except Exception as exc:
                 logger.error("Background fire of TriggerFlow %d failed: %s", fid, exc)
             finally:
@@ -340,3 +341,29 @@ async def fire_trigger_flow(
                 message=f"TriggerFlow '{flow.name}' queued for execution",
             ).model_dump(),
         )
+
+
+@router.get(
+    "/{flow_id}/logs",
+    summary="Get recent execution logs for a trigger flow",
+    response_model=list[ExecutionLogResponse],
+    responses={
+        200: {"description": "List of recent execution logs"},
+        404: {"description": "TriggerFlow not found"},
+    },
+)
+async def get_trigger_flow_logs(
+    flow_id: int = Path(..., description="TriggerFlow ID"),
+    limit: int = Query(20, ge=1, le=100, description="Max logs to return"),
+    db: Session = Depends(get_db),
+) -> list[ExecutionLogResponse]:
+    """Return the most recent execution logs for a trigger flow."""
+    svc = TriggerFlowService(db)
+    flow = svc.get_flow(flow_id)
+    if flow is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"TriggerFlow {flow_id} not found",
+        )
+    logs = svc.get_execution_logs(flow_id, limit=limit)
+    return [ExecutionLogResponse.model_validate(log) for log in logs]

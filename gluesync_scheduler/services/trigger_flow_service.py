@@ -32,7 +32,7 @@ from typing import List, Optional, Tuple
 import pytz
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ExecutionMode, TaskType, TriggerFlow, TriggerFlowEvent
+from gluesync_scheduler.models.models import ExecutionMode, TaskType, TriggerFlow, TriggerFlowEvent, TriggerFlowExecutionLog
 from gluesync_scheduler.models.trigger_schemas import (
     TriggerEventCreate,
     TriggerFlowCreate,
@@ -132,6 +132,7 @@ class TriggerFlowService:
             name=data.name,
             description=data.description,
             enabled=data.enabled,
+            platform_event=data.platform_event,
             secret_token=token,
         )
         self.db.add(flow)
@@ -145,6 +146,16 @@ class TriggerFlowService:
         self.db.refresh(flow)
         flow.events = orm_events  # type: ignore[attr-defined]
         _attach_trigger_url(flow)
+
+        # Register a webhook in CoreHub for platform event trigger flows
+        if data.platform_event:
+            try:
+                chain_execution_service.sync_register_platform_event_webhook(
+                    flow.id, data.platform_event
+                )
+            except Exception as exc:
+                logger.error("Failed to register platform event webhook for flow %d: %s", flow.id, exc)
+
         return flow, token
 
     def update_flow(self, flow_id: int, data: TriggerFlowUpdate) -> Optional[TriggerFlow]:
@@ -152,12 +163,16 @@ class TriggerFlowService:
         if flow is None:
             return None
 
+        old_platform_event = flow.platform_event
+
         if data.name is not None:
             flow.name = data.name
         if data.description is not None:
             flow.description = data.description
         if data.enabled is not None:
             flow.enabled = data.enabled
+        if data.platform_event is not None:
+            flow.platform_event = data.platform_event
 
         if data.events is not None:
             # Replace events atomically
@@ -169,6 +184,21 @@ class TriggerFlowService:
 
         self.db.commit()
         self.db.refresh(flow)
+
+        # Re-register webhook if platform_event changed
+        new_platform_event = flow.platform_event
+        if data.platform_event is not None and new_platform_event != old_platform_event:
+            if old_platform_event:
+                try:
+                    chain_execution_service.sync_delete_platform_event_webhook(flow_id)
+                except Exception as exc:
+                    logger.error("Failed to delete old platform event webhook for flow %d: %s", flow_id, exc)
+            if new_platform_event:
+                try:
+                    chain_execution_service.sync_register_platform_event_webhook(flow_id, new_platform_event)
+                except Exception as exc:
+                    logger.error("Failed to register new platform event webhook for flow %d: %s", flow_id, exc)
+
         return self.get_flow(flow_id)
 
     def toggle_enabled(self, flow_id: int, enabled: bool) -> Optional[TriggerFlow]:
@@ -184,6 +214,14 @@ class TriggerFlowService:
         flow = self.db.query(TriggerFlow).filter(TriggerFlow.id == flow_id).first()
         if flow is None:
             return False
+
+        # Clean up the webhook from CoreHub for platform event trigger flows
+        if flow.platform_event:
+            try:
+                chain_execution_service.sync_delete_platform_event_webhook(flow_id)
+            except Exception as exc:
+                logger.error("Failed to delete platform event webhook for flow %d: %s", flow_id, exc)
+
         self.db.delete(flow)
         self.db.commit()
         return True
@@ -216,7 +254,7 @@ class TriggerFlowService:
     # Fire
     # ------------------------------------------------------------------
 
-    async def fire(self, flow_id: int) -> Tuple[bool, str]:
+    async def fire(self, flow_id: int, source: str = "manual") -> Tuple[bool, str]:
         """Execute the TriggerFlow chain.
 
         Updates last_triggered on the flow record.
@@ -237,12 +275,14 @@ class TriggerFlowService:
         flow.last_triggered = now
         self.db.commit()
 
+        start_time = now.timestamp()
         try:
             success = await chain_execution_service.execute_trigger_flow(flow_id, events)
         except Exception as exc:
             logger.error("TriggerFlow %d raised an unhandled exception: %s", flow_id, exc)
             success = False
             self._record_error(flow_id, str(exc))
+            self._record_execution_log(flow_id, "failed", source, str(exc), start_time)
             return False, str(exc)
 
         if success:
@@ -251,8 +291,10 @@ class TriggerFlowService:
                 flow.last_successful_trigger = datetime.now(tz=timezone.utc)
                 flow.last_error_message = None
                 self.db.commit()
+            self._record_execution_log(flow_id, "success", source, None, start_time)
         else:
             self._record_error(flow_id, "Chain stopped early — one or more sync events failed or timed out")
+            self._record_execution_log(flow_id, "failed", source, "Chain stopped early — one or more sync events failed or timed out", start_time)
 
         return success, "" if success else "Chain stopped early"
 
@@ -262,3 +304,44 @@ class TriggerFlowService:
             flow.last_error_message = message
             flow.last_trigger_error_time = datetime.now(tz=timezone.utc)
             self.db.commit()
+
+    def _record_execution_log(
+        self, flow_id: int, status: str, source: str, error_message: Optional[str], start_time: float
+    ) -> None:
+        """Record an execution log entry and prune old entries (keep last 20)."""
+        duration_ms = int((datetime.now(tz=timezone.utc).timestamp() - start_time) * 1000)
+        log = TriggerFlowExecutionLog(
+            trigger_flow_id=flow_id,
+            status=status,
+            source=source,
+            error_message=error_message,
+            duration_ms=duration_ms,
+        )
+        self.db.add(log)
+        self.db.commit()
+
+        # Prune: keep only the most recent 20 entries per flow
+        total = self.db.query(TriggerFlowExecutionLog).filter(
+            TriggerFlowExecutionLog.trigger_flow_id == flow_id
+        ).count()
+        if total > 20:
+            old_logs = (
+                self.db.query(TriggerFlowExecutionLog)
+                .filter(TriggerFlowExecutionLog.trigger_flow_id == flow_id)
+                .order_by(TriggerFlowExecutionLog.triggered_at.desc())
+                .offset(20)
+                .all()
+            )
+            for old in old_logs:
+                self.db.delete(old)
+            self.db.commit()
+
+    def get_execution_logs(self, flow_id: int, limit: int = 20) -> List[TriggerFlowExecutionLog]:
+        """Return recent execution logs for a trigger flow, newest first."""
+        return (
+            self.db.query(TriggerFlowExecutionLog)
+            .filter(TriggerFlowExecutionLog.trigger_flow_id == flow_id)
+            .order_by(TriggerFlowExecutionLog.triggered_at.desc())
+            .limit(limit)
+            .all()
+        )

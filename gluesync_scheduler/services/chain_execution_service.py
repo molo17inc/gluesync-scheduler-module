@@ -33,6 +33,8 @@ from typing import Dict, List, Optional, Set
 
 # Prefix used for all one-shot webhooks created by Chronos.
 _CHRONOS_WEBHOOK_PREFIX = "chronos-sync-"
+# Prefix used for platform event trigger flow webhooks.
+_CHRONOS_PLATFORM_WEBHOOK_PREFIX = "chronos-platform-"
 
 import requests
 from sqlalchemy.orm import Session
@@ -417,6 +419,146 @@ class ChainExecutionService:
             self.sync_delete_webhooks_for_events(event_ids)
         except Exception as exc:
             logger.error("Failed to delete webhooks for job %d: %s", job_id, exc)
+
+    # ------------------------------------------------------------------
+    # Platform event trigger flow webhook management
+    # ------------------------------------------------------------------
+
+    def sync_register_platform_event_webhook(
+        self, flow_id: int, platform_event: str
+    ) -> None:
+        """Register a persistent webhook in CoreHub for a platform event trigger flow.
+
+        When the specified platform event fires in CoreHub, the webhook callback
+        triggers Chronos to execute the flow's chained actions.
+        """
+        if not platform_event:
+            return
+        try:
+            coro = self._register_platform_event_webhook(flow_id, platform_event)
+            asyncio.run(coro)
+        except RuntimeError:
+            coro.close()
+            import threading
+            def _run():
+                try:
+                    asyncio.run(self._register_platform_event_webhook(flow_id, platform_event))
+                except Exception as exc:
+                    logger.error("Failed to register platform event webhook in thread: %s", exc)
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            t.join(timeout=30)
+        except Exception as exc:
+            logger.error("Failed to register platform event webhook for flow %d: %s", flow_id, exc)
+
+    def sync_delete_platform_event_webhook(self, flow_id: int) -> None:
+        """Delete the persistent webhook from CoreHub for a platform event trigger flow."""
+        webhook_id = f"{_CHRONOS_PLATFORM_WEBHOOK_PREFIX}{flow_id}"
+        try:
+            coro = self._delete_webhooks_batch([webhook_id])
+            asyncio.run(coro)
+        except RuntimeError:
+            coro.close()
+            import threading
+            def _run():
+                try:
+                    asyncio.run(self._delete_webhooks_batch([webhook_id]))
+                except Exception as exc:
+                    logger.error("Failed to delete platform event webhook in thread: %s", exc)
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            t.join(timeout=30)
+        except Exception as exc:
+            logger.error("Failed to delete platform event webhook for flow %d: %s", flow_id, exc)
+
+    async def _register_platform_event_webhook(
+        self, flow_id: int, platform_event: str
+    ) -> Optional[str]:
+        """Register a persistent webhook in CoreHub that listens for a platform event.
+
+        When the event fires, CoreHub calls back to Chronos which then executes
+        the trigger flow's chained actions.
+        """
+        try:
+            corehub_url = _get_corehub_base()
+            if not corehub_url:
+                logger.error("Cannot register platform event webhook — corehub URL unknown")
+                return None
+
+            callback_url = "{{chronos_address}}/api/webhooks/platform-event"
+            webhook_id = f"{_CHRONOS_PLATFORM_WEBHOOK_PREFIX}{flow_id}"
+
+            new_webhook = {
+                "id": webhook_id,
+                "name": f"chronos-platform-event-{flow_id}",
+                "webhookUrl": callback_url,
+                "enabled": True,
+                "enabledEvents": [platform_event],
+                "pipelineFilter": [],
+                "entityFilter": [],
+                "groupFilter": [],
+                "customHeaders": {
+                    "X-Trigger-Flow-ID": str(flow_id),
+                    "EXT_MODULE": "chronos",
+                },
+                "skipTlsVerification": True,
+                "retryConfig": {
+                    "maxRetries": 0,
+                    "initialDelayMs": 0,
+                    "backoffMultiplier": 1.0,
+                    "maxDelayMs": 0,
+                },
+            }
+
+            config_endpoint = f"{corehub_url}/global-config/webhooks"
+            auth_headers = _get_corehub_auth_headers()
+            ssl_verify = _get_corehub_ssl_verify()
+            loop = asyncio.get_event_loop()
+
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                async with self._get_webhook_list_lock():
+                    get_resp = await loop.run_in_executor(
+                        None,
+                        lambda: requests.get(config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify),
+                    )
+                    existing: list = []
+                    if get_resp.status_code == 200:
+                        try:
+                            existing = get_resp.json()
+                            if not isinstance(existing, list):
+                                existing = []
+                        except Exception:
+                            existing = []
+
+                    filtered = [w for w in existing if w.get("id") != webhook_id]
+                    updated = filtered + [new_webhook]
+                    put_resp = await loop.run_in_executor(
+                        None,
+                        lambda: requests.put(
+                            config_endpoint,
+                            json=updated,
+                            headers=auth_headers,
+                            timeout=10,
+                            verify=ssl_verify,
+                        ),
+                    )
+                    if put_resp.status_code in (200, 201, 202, 204):
+                        logger.info("Registered platform event webhook %s for flow %d (event=%s)", webhook_id, flow_id, platform_event)
+                        return webhook_id
+
+                    logger.error(
+                        "Failed to register platform event webhook (attempt %d/%d): HTTP %d — response: %s",
+                        attempt, max_attempts, put_resp.status_code, put_resp.text[:300],
+                    )
+
+                if attempt < max_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+
+            return None
+        except Exception as exc:
+            logger.error("Exception registering platform event webhook: %s", exc)
+            return None
 
     async def _register_webhooks_batch(
         self, events: List[ChainedJobEvent], main_job_task_type: TaskType
@@ -833,12 +975,21 @@ class ChainExecutionService:
 
             # Fetch all SYNC event IDs from the DB
             from gluesync_scheduler.db.database import SessionLocal
+            from gluesync_scheduler.models.models import TriggerFlow
             db = SessionLocal()
             try:
                 valid_events = db.query(ChainedJobEvent).filter(
                     ChainedJobEvent.execution_mode == ExecutionMode.SYNC
                 ).all()
                 valid_ids = {f"{_CHRONOS_WEBHOOK_PREFIX}{e.id}" for e in valid_events}
+
+                # Also collect valid platform event webhook IDs
+                valid_flows = db.query(TriggerFlow).filter(
+                    TriggerFlow.platform_event.isnot(None)
+                ).all()
+                valid_ids.update(
+                    {f"{_CHRONOS_PLATFORM_WEBHOOK_PREFIX}{f.id}" for f in valid_flows}
+                )
             finally:
                 db.close()
 
@@ -863,8 +1014,12 @@ class ChainExecutionService:
                 except Exception:
                     return 0
 
-                # Find chronos webhooks that are orphans (event no longer in DB)
-                chronos_webhooks = [w for w in existing if str(w.get("id", "")).startswith(_CHRONOS_WEBHOOK_PREFIX)]
+                # Find chronos webhooks that are orphans (event/flow no longer in DB)
+                chronos_prefixes = (_CHRONOS_WEBHOOK_PREFIX, _CHRONOS_PLATFORM_WEBHOOK_PREFIX)
+                chronos_webhooks = [
+                    w for w in existing
+                    if str(w.get("id", "")).startswith(chronos_prefixes)
+                ]
                 orphans = [w for w in chronos_webhooks if w.get("id") not in valid_ids]
 
                 if not orphans:

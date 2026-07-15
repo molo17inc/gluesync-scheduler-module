@@ -102,6 +102,7 @@ class TriggerFlowBase(BaseModel):
 
 
 class TriggerFlowCreate(TriggerFlowBase):
+    platform_event: Optional[str] = Field(None, description="Platform event type that triggers this flow (e.g. ENTITY_CDC_STARTED). If set, a webhook is registered in CoreHub to listen for this event.")
     events: List[TriggerEventCreate] = Field(
         ...,
         min_length=1,
@@ -143,6 +144,7 @@ class TriggerFlowUpdate(BaseModel):
     name: Optional[str] = Field(None, description="Updated name")
     description: Optional[str] = Field(None, description="Updated description")
     enabled: Optional[bool] = Field(None, description="Enable or disable the flow")
+    platform_event: Optional[str] = Field(None, description="Platform event type that triggers this flow")
     events: Optional[List[TriggerEventCreate]] = Field(
         None,
         description="Replace all events with this list (pass empty list to clear — at least 1 required on create)",
@@ -152,6 +154,7 @@ class TriggerFlowUpdate(BaseModel):
 class TriggerFlowResponse(TriggerFlowBase):
     """Full TriggerFlow returned by the API."""
     id: int
+    platform_event: Optional[str] = None
     # secret_token is intentionally omitted here — only returned on create/regenerate
     trigger_url: str = Field(..., description="Stable URL to POST for firing this flow")
     events: List[TriggerEventResponse] = Field(default_factory=list)
@@ -208,3 +211,19 @@ class FireResponse(BaseModel):
     events_count: int
     message: str
     detail: Optional[Dict[str, Any]] = None
+
+
+# ---------------------------------------------------------------------------
+# Execution log schemas
+# ---------------------------------------------------------------------------
+
+class ExecutionLogResponse(BaseModel):
+    id: int
+    trigger_flow_id: int
+    status: str
+    source: Optional[str] = None
+    error_message: Optional[str] = None
+    duration_ms: Optional[int] = None
+    triggered_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

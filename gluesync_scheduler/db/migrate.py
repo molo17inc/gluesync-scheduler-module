@@ -63,6 +63,7 @@ def run_migrations():
             ("migrate_add_webhook_timeout_seconds", "add_webhook_timeout_seconds_column"),
             ("migrate_add_chained_events", "create_chained_job_events_table"),
             ("migrate_add_trigger_flows", "migrate_add_trigger_flows"),
+            ("migrate_add_execution_logs", "create_execution_logs_table"),
         ]
 
         # Import the database engine from the main app

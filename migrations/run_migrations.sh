@@ -28,4 +28,12 @@ python3 "$SCRIPT_DIR/migrate_add_group_ids_field.py" "$PROJECT_ROOT/data/schedul
 echo "Running migration: migrate_add_chained_events.py"
 python3 "$SCRIPT_DIR/migrate_add_chained_events.py" "$@"
 
+# Add platform_event column to trigger_flows table
+echo "Running migration: migrate_add_platform_event.py"
+python3 "$SCRIPT_DIR/migrate_add_platform_event.py" "$@"
+
+# Add trigger_flow_execution_logs table
+echo "Running migration: migrate_add_execution_logs.py"
+python3 "$SCRIPT_DIR/migrate_add_execution_logs.py" "$@"
+
 echo "All migrations completed."

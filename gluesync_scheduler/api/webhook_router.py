@@ -111,3 +111,80 @@ async def webhook_notify(
         status_code=status.HTTP_200_OK,
         content={"acknowledged": True, "event_id": x_event_id},
     )
+
+
+@router.post(
+    "/platform-event",
+    summary="Receive a corehub webhook callback for a platform event trigger flow",
+    response_description="Acknowledged",
+    status_code=status.HTTP_200_OK,
+)
+async def platform_event_notify(
+    request: Request,
+    x_trigger_flow_id: Optional[str] = Header(None, alias="X-Trigger-Flow-ID"),
+    ext_module: Optional[str] = Header(None, alias="EXT_MODULE"),
+) -> JSONResponse:
+    """Endpoint called by the Gluesync corehub when a platform event fires.
+
+    Required headers
+    ----------------
+    ``EXT_MODULE``
+        Must be ``chronos``.
+    ``X-Trigger-Flow-ID``
+        The trigger flow ID to fire.
+    """
+    if not ext_module or ext_module.strip() != _EXPECTED_MODULE:
+        logger.warning(
+            "platform_event_notify: rejected request — EXT_MODULE='%s' (expected '%s')",
+            ext_module,
+            _EXPECTED_MODULE,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid or missing EXT_MODULE header (expected '{_EXPECTED_MODULE}')",
+        )
+
+    if not x_trigger_flow_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing X-Trigger-Flow-ID header",
+        )
+
+    try:
+        flow_id = int(x_trigger_flow_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid X-Trigger-Flow-ID header: {x_trigger_flow_id}",
+        )
+
+    logger.info("platform_event_notify: received callback for flow_id=%d", flow_id)
+
+    # Fire the trigger flow in the background
+    import asyncio
+    from gluesync_scheduler.db.database import SessionLocal
+    from gluesync_scheduler.services.trigger_flow_service import TriggerFlowService
+
+    async def _fire_flow():
+        db = SessionLocal()
+        try:
+            svc = TriggerFlowService(db)
+            flow = svc.get_flow(flow_id)
+            if flow is None:
+                logger.warning("platform_event_notify: flow %d not found", flow_id)
+                return
+            if not flow.enabled:
+                logger.info("platform_event_notify: flow %d is disabled — skipping", flow_id)
+                return
+            success, err = await svc.fire(flow_id, source="platform_event")
+            if not success:
+                logger.error("platform_event_notify: flow %d execution failed: %s", flow_id, err)
+        finally:
+            db.close()
+
+    asyncio.ensure_future(_fire_flow())
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"acknowledged": True, "flow_id": flow_id},
+    )
