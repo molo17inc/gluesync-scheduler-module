@@ -59,7 +59,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   SSL_SKIP_VERIFY=true `
   TEMP=C:\temp `
   TMP=C:\temp `
-  TIMEZONE=UTC `
+  TZ=UTC `
   FIRE_ONCE=false
 
 # Copy SDK
@@ -113,7 +113,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 `
   SSL_SKIP_VERIFY=true `
   TEMP=C:\temp `
   TMP=C:\temp `
-  TIMEZONE=UTC `
+  TZ=UTC `
   FIRE_ONCE=false
 
 # Copy only the generated exe

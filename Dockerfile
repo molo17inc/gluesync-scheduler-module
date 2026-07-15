@@ -94,7 +94,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CRONTAB_USER=root \
     SSL_ENABLED=false \
     SSL_SKIP_VERIFY=true \
-    TIMEZONE=UTC \
+    TZ=UTC \
     FIRE_ONCE=false
 
 # Copy VERSION file to the final image

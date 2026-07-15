@@ -3,17 +3,14 @@ set -e
 
 # Display environment variables for debugging
 echo "Environment variables at startup:"
-echo "TIMEZONE=${TIMEZONE}"
 echo "TZ=${TZ}"
 
 # Set the timezone in the container (this affects Python's time functions)
-if [ -n "$TIMEZONE" ]; then
-  echo "Setting timezone to $TIMEZONE"
-  # Set the TZ environment variable which is used by Python's time functions
-  export TZ="$TIMEZONE"
+if [ -n "$TZ" ]; then
+  echo "Setting timezone to $TZ"
   # Also set it for the container's system time
-  ln -snf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
-  echo "$TIMEZONE" > /etc/timezone
+  ln -snf /usr/share/zoneinfo/$TZ /etc/localtime
+  echo "$TZ" > /etc/timezone
 fi
 
 # Start the application

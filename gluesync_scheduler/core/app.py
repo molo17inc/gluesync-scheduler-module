@@ -327,7 +327,7 @@ async def startup_event():
                 if timezone_setting and timezone_setting.value:
                     logger.info(f"SSL_ENABLED before timezone update: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
                     timezone_value = timezone_setting.value
-                    logger.info(f"Updated TIMEZONE to: {timezone_value}")
+                    logger.info(f"Updated TZ to: {timezone_value}")
                     logger.info(f"SSL_ENABLED after timezone update: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
                     logger.info(f"Loaded timezone from database: {timezone_value}")
                     

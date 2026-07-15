@@ -58,7 +58,7 @@ services:
     environment:
       - SSL_ENABLED=true
       - SSL_SKIP_VERIFY=true
-      - TIMEZONE=UTC
+      - TZ=UTC
       - GLUESYNC_HOST=https://gluesync-core-hub:1717
     volumes:
       - ./shared:/opt/gluesync/shared:ro

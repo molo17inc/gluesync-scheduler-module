@@ -105,7 +105,7 @@ services:
     environment:
       - SSL_ENABLED=true
       - SSL_SKIP_VERIFY=true
-      - TIMEZONE=UTC # optionally hardcode timezone value in IANA format (es. Europe/Rome, from IANA database)
+      - TZ=UTC # optionally hardcode timezone value in IANA format (es. Europe/Rome, from IANA database)
     volumes:
       - ./shared:/opt/gluesync/shared:ro
       - ./data/chronos:/app/data
