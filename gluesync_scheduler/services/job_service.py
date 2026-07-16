@@ -27,6 +27,7 @@ import os
 import requests
 import uuid
 import pytz
+from croniter import croniter
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any, Union
 
@@ -224,15 +225,72 @@ class JobService:
         else:
             events_by_job = {}
 
+        # Resolve the configured timezone once per request (avoids per-job lookups)
+        tz_name = self._get_configured_timezone()
+        try:
+            tz = pytz.timezone(tz_name)
+        except Exception:
+            tz = pytz.UTC
+        now = datetime.now(tz)
+
+        # Request-scoped caches keyed by cron expression (many jobs share expressions)
+        schedule_days_cache: Dict[str, List[str]] = {}
+        next_run_cache: Dict[str, Optional[datetime]] = {}
+
         # Convert to Pydantic models with timezone handling
         job_responses = []
+        backfilled = False
         for job in jobs:
             job_model = Job.from_orm(job)
-            job_model = self._apply_timezone_to_job(job_model, job)
+
+            cron = job.cron_expression
+            # schedule_days: compute once per unique cron expression
+            if cron not in schedule_days_cache:
+                schedule_days_cache[cron] = self._extract_days_from_cron(cron)
+            job_model.schedule_days = schedule_days_cache[cron]
+
+            # next_run: prefer the persisted DB value; only compute (and backfill)
+            # legacy rows where it was never stored.
+            if job.next_run is None and cron:
+                if cron not in next_run_cache:
+                    next_run_cache[cron] = self._compute_next_run(cron, tz, now)
+                computed = next_run_cache[cron]
+                if computed is not None:
+                    job_model.next_run = computed
+                    job.next_run = computed  # backfill so future reads are cheap
+                    backfilled = True
+
             job_model.chained_events = _rows_to_chained_responses(events_by_job.get(job.id, []))
             job_responses.append(job_model)
 
+        # Persist any lazily backfilled next_run values in a single commit
+        if backfilled:
+            try:
+                self.db.commit()
+            except Exception as e:
+                logger.warning(f"Failed to backfill next_run values: {e}")
+                self.db.rollback()
+
         return job_responses, total
+
+    def _compute_next_run(
+        self,
+        cron_expression: str,
+        tz: "pytz.BaseTzInfo",
+        now: datetime,
+    ) -> Optional[datetime]:
+        """Compute the next run datetime for a cron expression in the given timezone."""
+        try:
+            cron_iter = croniter(cron_expression, now)
+            nxt = cron_iter.get_next(datetime)
+            if nxt.tzinfo is None:
+                nxt = tz.localize(nxt)
+            elif str(nxt.tzinfo) != str(tz):
+                nxt = nxt.astimezone(tz)
+            return nxt
+        except Exception as e:
+            logger.warning(f"Failed to compute next_run for '{cron_expression}': {e}")
+            return None
 
     def get_job_by_id(self, job_id: int) -> Job:
         """
@@ -337,6 +395,7 @@ class JobService:
                     )
             # Calculate the next run time based on cron expression for start_time
             next_run_time = None
+            next_run_dt = None
             if job_data.cron_expression:
                 try:
                     from croniter import croniter
@@ -360,6 +419,8 @@ class JobService:
                     
                     # Format the start_time in the required format with explicit timezone info
                     next_run_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
+                    # Keep the tz-aware datetime to persist into the next_run DB column
+                    next_run_dt = next_run_datetime
                     # Store the timezone name as well for reference
                     next_run_tz = current_timezone
                     logger.info(f"Calculated next run time: {next_run_time} in timezone {next_run_tz}")
@@ -397,6 +458,8 @@ class JobService:
                 command="pending",
                 # Set start_time to the calculated next run time
                 start_time=next_run_time,
+                # Persist the next run time so list views don't recompute it per request
+                next_run=next_run_dt,
                 # Always store the configured timezone name
                 timezone_name=self._get_configured_timezone(),
                 # Set the flag to track if job was created with cron expression
@@ -709,6 +772,8 @@ class JobService:
                     
                     # Format the start_time in the required format with explicit timezone info
                     db_job.start_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
+                    # Persist the tz-aware next run time so list views don't recompute it
+                    db_job.next_run = next_run_datetime
                     # Store the timezone name as well
                     db_job.timezone_name = current_timezone
                     logger.info(f"Recalculated next run time for job {job_id}: {db_job.start_time} in timezone {db_job.timezone_name}")

@@ -142,6 +142,7 @@ class Setting(Base):
     value = Column(String, nullable=True)
     description = Column(String, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
 
 class TriggerFlowExecutionLog(Base):

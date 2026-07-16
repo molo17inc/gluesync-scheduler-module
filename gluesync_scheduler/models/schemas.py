@@ -22,11 +22,12 @@
 """
 
 from typing import List, Optional, Dict, Any, Union
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import pytz
 import json
 import os
 from enum import Enum
+from croniter import croniter
 from pydantic import BaseModel, Field, validator, field_serializer, ConfigDict
 
 from gluesync_scheduler.models.models import TaskType, ExecutionMode
@@ -279,10 +280,6 @@ class Job(JobBase):
             return None  # No cron, no next_run
             
         try:
-            from datetime import datetime, timezone
-            import pytz
-            from croniter import croniter
-            
             # Get current time in the configured timezone
             tz = pytz.timezone(get_env_timezone('UTC'))
             now = datetime.now(tz)
@@ -300,9 +297,8 @@ class Job(JobBase):
             
             return next_datetime
         except Exception:
-            # If croniter is not available or other error, return current time + 1 day as fallback
+            # If croniter fails, return current time + 1 day as fallback
             # This ensures we at least have a value for next_run
-            from datetime import datetime, timezone, timedelta
             return datetime.now(timezone.utc) + timedelta(days=1)
     start_time: Optional[str] = Field(None, description="Scheduled start time for the job in the job's timezone", example="2025-04-14T23:19:46+02:00")
     timezone_name: Optional[str] = Field(None, description="Name of the timezone used for scheduling", example="Asia/Tokyo")

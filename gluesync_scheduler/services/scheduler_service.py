@@ -320,7 +320,18 @@ class SchedulerService:
                 # Create job service and run the job directly
                 job_service = JobService(db)
                 result = job_service.run_job(job_id)
-                
+
+                # Persist the next scheduled fire time so list views stay accurate
+                try:
+                    sched_job = self.scheduler.get_job(f"job_{job_id}")
+                    if sched_job and sched_job.next_run_time:
+                        job_row = db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+                        if job_row:
+                            job_row.next_run = sched_job.next_run_time
+                            db.commit()
+                except Exception as refresh_error:
+                    logger.warning(f"Failed to refresh next_run for job {job_id}: {refresh_error}")
+
                 # Extract values from the result dictionary
                 success = result.get('success', False)
                 message = result.get('message', 'Unknown result')
