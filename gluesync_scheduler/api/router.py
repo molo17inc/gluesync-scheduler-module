@@ -21,7 +21,7 @@
  * Copyright (C) 2025 MOLO17. All rights reserved.
 """
 
-from typing import Optional
+from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Body
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -29,6 +29,12 @@ from sqlalchemy.orm import Session
 from gluesync_scheduler.db.database import get_db
 from gluesync_scheduler.models.models import TaskType, ScheduledJob, ChainedJobEvent
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, JobList, ErrorResponse
+from gluesync_scheduler.security import (
+    CurrentUser,
+    current_user,
+    require_control,
+    require_manage,
+)
 from gluesync_scheduler.services.job_service import JobService
 
 router = APIRouter(
@@ -52,11 +58,12 @@ router = APIRouter(
 
 @router.get("/", response_model=JobList, summary="List all scheduled jobs")
 async def list_jobs(
-    skip: int = Query(0, ge=0, description="Number of records to skip for pagination"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    task_type: Optional[TaskType] = Query(None, description="Filter by task type (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups"),
-    enabled: Optional[bool] = Query(None, description="Filter by enabled status (true/false)"),
-    db: Session = Depends(get_db)
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[CurrentUser, Depends(current_user)],
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip for pagination")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+    task_type: Annotated[Optional[TaskType], Query(description="Filter by task type (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups")] = None,
+    enabled: Annotated[Optional[bool], Query(description="Filter by enabled status (true/false)")] = None,
 ):
     """
     Get a list of all scheduled jobs with optional filtering.
@@ -104,7 +111,11 @@ async def list_jobs(
 @router.get("/{job_id}", response_model=Job, responses={
     status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Job not found"}
 }, summary="Get a specific scheduled job")
-async def get_job(job_id: int = Path(..., description="The ID of the scheduled job to retrieve"), db: Session = Depends(get_db)):
+async def get_job(
+    job_id: Annotated[int, Path(description="The ID of the scheduled job to retrieve")],
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[CurrentUser, Depends(current_user)],
+):
     """
     Get a specific scheduled job by ID.
     
@@ -153,7 +164,7 @@ async def get_job(job_id: int = Path(..., description="The ID of the scheduled j
     status.HTTP_409_CONFLICT: {"model": ErrorResponse, "description": "Conflict with existing job"},
     status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse, "description": "Server error during job creation"}
 }, summary="Create a new scheduled job")
-async def create_job(job_data: JobCreate = Body(..., description="Job data to create", example={
+async def create_job(job_data: Annotated[JobCreate, Body(description="Job data to create", example={
     "name": "Monday-Wednesday-Friday Job",
     "description": "Runs on specific days at 8:30 AM",
     "task_type": "ENTITY_SNAPSHOT",
@@ -167,7 +178,8 @@ async def create_job(job_data: JobCreate = Body(..., description="Job data to cr
     "with_snapshot": True,
     "snapshot_write_method": "UPSERT",
     "enabled": True
-}), db: Session = Depends(get_db)):
+})], db: Annotated[Session, Depends(get_db)],
+   user: Annotated[CurrentUser, Depends(require_manage)]):
     """
     Create a new scheduled job.
     
@@ -275,8 +287,8 @@ async def create_job(job_data: JobCreate = Body(..., description="Job data to cr
     status.HTTP_409_CONFLICT: {"model": ErrorResponse, "description": "Conflict with existing job"},
     status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse, "description": "Server error during job update"}
 }, summary="Update an existing scheduled job")
-async def update_job(job_id: int = Path(..., description="The ID of the job to update"), 
-              job_data: JobUpdate = Body(..., description="Job data to update", example={
+async def update_job(job_id: Annotated[int, Path(description="The ID of the job to update")],
+              job_data: Annotated[JobUpdate, Body(description="Job data to update", example={
                   "name": "Updated job schedule",
                   "description": "Now runs on weekends at midnight",
                   "task_type": "pipeline_stop",
@@ -287,8 +299,9 @@ async def update_job(job_id: int = Path(..., description="The ID of the job to u
                   },
                   "snapshot_write_method": "INSERT",
                   "enabled": True
-              }), 
-              db: Session = Depends(get_db)):
+              })],
+              db: Annotated[Session, Depends(get_db)],
+              user: Annotated[CurrentUser, Depends(require_manage)]):
     """
     Update an existing scheduled job.
     
@@ -416,8 +429,9 @@ async def update_job(job_id: int = Path(..., description="The ID of the job to u
     }
 })
 def run_job(
-    job_id: int = Path(..., description="The ID of the job to run"),
-    db: Session = Depends(get_db)
+    job_id: Annotated[int, Path(description="The ID of the job to run")],
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[CurrentUser, Depends(require_control)],
 ):
     """
     Run a job.
@@ -508,9 +522,10 @@ def get_chain_status(
     }
 })
 def toggle_job_status(
-    job_id: int = Path(..., description="The ID of the job to update"),
-    enabled: bool = Body(..., description="True to enable, False to disable the job", embed=True),
-    db: Session = Depends(get_db)
+    job_id: Annotated[int, Path(description="The ID of the job to update")],
+    enabled: Annotated[bool, Body(description="True to enable, False to disable the job", embed=True)],
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[CurrentUser, Depends(require_control)],
 ):
     """
     Enable or disable a scheduled job.
@@ -547,7 +562,11 @@ def toggle_job_status(
         "description": "Error deleting job"
     }
 })
-def delete_job(job_id: int = Path(..., description="The ID of the job to delete"), db: Session = Depends(get_db)):
+def delete_job(
+    job_id: Annotated[int, Path(description="The ID of the job to delete")],
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[CurrentUser, Depends(require_manage)],
+):
     """
     Delete a scheduled job.
     

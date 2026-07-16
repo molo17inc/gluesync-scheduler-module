@@ -172,6 +172,38 @@ Additional environment variables for the Gluesync SDK integration:
 
 > **Note**: The module identifier (`GLUESYNC_MODULE_TAG`) is hardcoded as `chronos` and cannot be changed externally.
 
+### Authorization / user role enforcement
+
+Chronos protects its `/api/jobs/*` and `/api/settings/*` endpoints by
+resolving the caller's identity via CoreHub's `GET /auth/me` on each
+request (with a short-lived cache) and rejecting requests that do not
+carry a valid `gs-auth` session cookie or `Authorization: Bearer` JWT.
+See [`docs/auth-plan.md`](docs/auth-plan.md) for the full design.
+
+Browsers reach chronos through the same origin as CoreHub (Traefik),
+so the `gs-auth` cookie set at login is forwarded automatically.
+CLI / script callers must send `Authorization: Bearer <jwt>` themselves.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CHRONOS_AUTH_CACHE_TTL` | TTL (seconds) for cached `/auth/me` lookups. Revoke-latency ≤ this value. | `30` |
+| `CHRONOS_AUTH_TIMEOUT_MS` | httpx timeout for outbound `/auth/me` calls. | `5000` |
+| `CHRONOS_COREHUB_URL_OVERRIDE` | Force the base URL used for `/auth/me` instead of relying on SDK discovery. | *(unset)* |
+| `CHRONOS_AUTH_FAIL_OPEN` | **DEBUG ONLY.** When `true`, every request is accepted as SUPER_ADMIN. Logs a warning on every request. Never enable in production. | `false` |
+
+Permission matrix (mirrors CoreHub `UserRole` + gluesync-nodejs-monorepo UI):
+
+| Guard | SUPER_ADMIN | MANAGER | MONITOR | VIEWER | EXTERNAL_MODULE |
+|-------|-------------|---------|---------|--------|-----------------|
+| Read jobs / read settings (`current_user`) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Run / enable / disable schedule (`require_control`) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Create / edit / delete schedule (`require_manage`) | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Change chronos configuration (`require_config`) | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+The legacy `/api/pipelines/*` routes are chronos-internal (invoked by
+cron jobs) and remain protected by the existing `verify_localhost`
+dependency, not by user roles.
+
 You can set these in a `.env` file in the project root.
 
 ## Running Locally and Testing with Postman
