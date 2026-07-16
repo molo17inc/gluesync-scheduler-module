@@ -2,7 +2,7 @@ name: gluesync
 services:
   gluesync-core-hub:
     restart: unless-stopped
-    image: molo17/gluesync-core-hub:2.2.10.0.b1b1d4d591
+    image: molo17/gluesync-core-hub:2.2.10.0.d92bd993c8
     sysctls:
       - net.core.somaxconn=65535
       - net.ipv4.tcp_max_syn_backlog=65535

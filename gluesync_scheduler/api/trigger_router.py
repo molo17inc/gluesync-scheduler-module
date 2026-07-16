@@ -41,6 +41,7 @@ from gluesync_scheduler.models.trigger_schemas import (
     TriggerFlowResponse,
     TriggerFlowUpdate,
 )
+from gluesync_scheduler.security import require_manage, CurrentUser
 from gluesync_scheduler.services.trigger_flow_service import TriggerFlowService
 
 logger = logging.getLogger(__name__)
@@ -242,7 +243,8 @@ async def fire_trigger_flow(
 ):
     """Fire a TriggerFlow by ID.
 
-    **Authentication**: pass the secret token in the ``X-Trigger-Token`` header.
+    **Authentication**: external callers must pass the secret token in the
+    ``X-Trigger-Token`` header.
 
     **Sync vs async execution**:
     - Default (``wait=false``): returns ``202 Accepted`` immediately; the chain
@@ -324,6 +326,124 @@ async def fire_trigger_flow(
             try:
                 bg_svc = TriggerFlowService(bg_db)
                 await bg_svc.fire(fid, source="webhook")
+            except Exception as exc:
+                logger.error("Background fire of TriggerFlow %d failed: %s", fid, exc)
+            finally:
+                bg_db.close()
+
+        asyncio.ensure_future(_bg_fire(flow_id))
+
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=FireResponse(
+                trigger_flow_id=flow_id,
+                triggered_at=triggered_at,
+                status=FireStatus.QUEUED,
+                events_count=events_count,
+                message=f"TriggerFlow '{flow.name}' queued for execution",
+            ).model_dump(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Internal fire endpoint (UI "Fire now" button — no trigger token needed)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/{flow_id}/fire-internal",
+    summary="Fire a trigger flow from the admin UI (no trigger token required)",
+    responses={
+        202: {"description": "Flow queued for background execution"},
+        200: {"description": "Flow completed synchronously (wait=true)"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role or TriggerFlow is disabled"},
+        404: {"description": "TriggerFlow not found"},
+        500: {"description": "Execution error"},
+    },
+)
+async def fire_trigger_flow_internal(
+    flow_id: int = Path(..., description="TriggerFlow ID"),
+    wait: bool = Query(
+        False,
+        description="Block until the chain finishes.",
+    ),
+    wait_timeout_seconds: int = Query(
+        120,
+        ge=1,
+        le=3600,
+        description="Max seconds to wait when wait=true (default 120)",
+    ),
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_manage),
+):
+    """Fire a TriggerFlow from the admin UI.
+
+    Authentication is handled via the caller's CoreHub JWT (validated through
+    the ``require_manage`` dependency).  Only SUPER_ADMIN and MANAGER roles
+    are allowed.  No ``X-Trigger-Token`` is required.
+    """
+    svc = TriggerFlowService(db)
+    flow = svc.get_flow(flow_id)
+    if flow is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"TriggerFlow {flow_id} not found",
+        )
+
+    if not flow.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"TriggerFlow {flow_id} is disabled",
+        )
+
+    triggered_at = datetime.now(tz=timezone.utc).isoformat()
+    events_count = (
+        db.query(__import__("gluesync_scheduler.models.models", fromlist=["TriggerFlowEvent"]).TriggerFlowEvent)
+        .filter_by(trigger_flow_id=flow_id)
+        .count()
+    )
+
+    if wait:
+        try:
+            success, err = await asyncio.wait_for(
+                svc.fire(flow_id, source="manual"),
+                timeout=float(wait_timeout_seconds),
+            )
+        except asyncio.TimeoutError:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=FireResponse(
+                    trigger_flow_id=flow_id,
+                    triggered_at=triggered_at,
+                    status=FireStatus.FAILED,
+                    events_count=events_count,
+                    message=f"Timed out after {wait_timeout_seconds}s waiting for chain to finish",
+                ).model_dump(),
+            )
+
+        http_status = status.HTTP_200_OK
+        fire_status = FireStatus.COMPLETED if success else FireStatus.FAILED
+        msg = f"TriggerFlow '{flow.name}' completed" if success else f"TriggerFlow '{flow.name}' failed: {err}"
+        return JSONResponse(
+            status_code=http_status,
+            content=FireResponse(
+                trigger_flow_id=flow_id,
+                triggered_at=triggered_at,
+                status=fire_status,
+                events_count=events_count,
+                message=msg,
+            ).model_dump(),
+        )
+
+    else:
+        from gluesync_scheduler.db.database import SessionLocal
+
+        async def _bg_fire(fid: int) -> None:
+            bg_db = SessionLocal()
+            try:
+                bg_svc = TriggerFlowService(bg_db)
+                await bg_svc.fire(fid, source="manual")
             except Exception as exc:
                 logger.error("Background fire of TriggerFlow %d failed: %s", fid, exc)
             finally:

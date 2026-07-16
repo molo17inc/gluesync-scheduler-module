@@ -80,7 +80,7 @@ class CoreHubIntrospector:
     """
 
     #: CoreHub path fragment appended to the discovered base URL.
-    AUTH_ME_PATH = "/auth/me"
+    AUTH_ME_PATH = "/authentication/me"
 
     #: Cookie name used by CoreHub for the HttpOnly JWT cookie.
     AUTH_COOKIE_NAME = "gs-auth"
@@ -329,6 +329,10 @@ def _build_default_introspector() -> CoreHubIntrospector:
         return getattr(gluesync_sdk_client, "corehub_url", None)
 
     verify_ssl = os.getenv("SKIP_TLS_VERIFICATION", "").lower() not in (
+        "1",
+        "true",
+        "yes",
+    ) and os.getenv("SSL_SKIP_VERIFY", "").lower() not in (
         "1",
         "true",
         "yes",

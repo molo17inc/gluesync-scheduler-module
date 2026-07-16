@@ -29,7 +29,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 # Prefix used for all one-shot webhooks created by Chronos.
 _CHRONOS_WEBHOOK_PREFIX = "chronos-sync-"
