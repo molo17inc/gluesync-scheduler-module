@@ -208,15 +208,30 @@ class JobService:
         
         # Apply pagination
         jobs = query.offset(skip).limit(limit).all()
-        
+
+        # Batch-load chained events for all jobs in a single query (avoids N+1)
+        job_ids = [job.id for job in jobs]
+        if job_ids:
+            all_events = (
+                self.db.query(ChainedJobEvent)
+                .filter(ChainedJobEvent.parent_job_id.in_(job_ids))
+                .order_by(ChainedJobEvent.parent_job_id, ChainedJobEvent.position)
+                .all()
+            )
+            events_by_job: Dict[int, list] = {}
+            for row in all_events:
+                events_by_job.setdefault(row.parent_job_id, []).append(row)
+        else:
+            events_by_job = {}
+
         # Convert to Pydantic models with timezone handling
         job_responses = []
         for job in jobs:
             job_model = Job.from_orm(job)
             job_model = self._apply_timezone_to_job(job_model, job)
-            job_model.chained_events = _load_chained_events(self.db, job.id)
+            job_model.chained_events = _rows_to_chained_responses(events_by_job.get(job.id, []))
             job_responses.append(job_model)
-            
+
         return job_responses, total
 
     def get_job_by_id(self, job_id: int) -> Job:
@@ -1315,14 +1330,8 @@ class JobService:
 # Module-level helper (not a method — avoids duplication across get_* methods)
 # ---------------------------------------------------------------------------
 
-def _load_chained_events(db, parent_job_id: int) -> list:
-    """Query and return ChainedEventResponse objects for a given job."""
-    rows = (
-        db.query(ChainedJobEvent)
-        .filter(ChainedJobEvent.parent_job_id == parent_job_id)
-        .order_by(ChainedJobEvent.position)
-        .all()
-    )
+def _rows_to_chained_responses(rows: list) -> list:
+    """Convert ChainedJobEvent ORM rows to ChainedEventResponse objects."""
     result = []
     for row in rows:
         resp = ChainedEventResponse(
@@ -1339,3 +1348,14 @@ def _load_chained_events(db, parent_job_id: int) -> list:
         )
         result.append(resp)
     return result
+
+
+def _load_chained_events(db, parent_job_id: int) -> list:
+    """Query and return ChainedEventResponse objects for a given job."""
+    rows = (
+        db.query(ChainedJobEvent)
+        .filter(ChainedJobEvent.parent_job_id == parent_job_id)
+        .order_by(ChainedJobEvent.position)
+        .all()
+    )
+    return _rows_to_chained_responses(rows)
