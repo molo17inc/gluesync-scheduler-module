@@ -48,7 +48,11 @@ def _generate_token() -> str:
 
 
 def _build_trigger_url(flow_id: int) -> str:
-    """Construct the public-facing fire URL for a TriggerFlow."""
+    """Construct the fire URL for a TriggerFlow.
+
+    This is a best-effort backend default. The frontend overrides it
+    with the actual external proxy URL (window.location.origin + /chronos).
+    """
     base = os.getenv("CHRONOS_CALLBACK_URL", "").rstrip("/")
     if not base:
         ssl_enabled = os.getenv("SSL_ENABLED", "False").lower() in ("true", "1", "t")

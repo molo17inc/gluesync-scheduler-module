@@ -485,7 +485,7 @@ class ChainExecutionService:
                 logger.error("Cannot register platform event webhook — corehub URL unknown")
                 return None
 
-            callback_url = "{{chronos_address}}/api/webhooks/platform-event"
+            callback_url = f"{_get_chronos_callback_base()}/api/webhooks/platform-event"
             webhook_id = f"{_CHRONOS_PLATFORM_WEBHOOK_PREFIX}{flow_id}"
 
             new_webhook = {
@@ -788,7 +788,7 @@ class ChainExecutionService:
                 logger.error("Cannot register webhook — corehub URL unknown")
                 return None
 
-            callback_url = "{{chronos_address}}/api/webhooks/notify"
+            callback_url = f"{_get_chronos_callback_base()}/api/webhooks/notify"
             correlation_key = str(event.id)
             webhook_id = f"{_CHRONOS_WEBHOOK_PREFIX}{correlation_key}"
 
