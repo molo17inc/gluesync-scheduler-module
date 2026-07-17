@@ -17,6 +17,9 @@
 	},
 	{
 		"path": "../../../container-mate"
+	},
+	{
+		"path": "../../../gluesync-bootstrapper"
 	}
 ],
   "settings": {}
