@@ -154,6 +154,7 @@ Configure the application using environment variables:
 | `ENTITY_START_TIMEOUT` | Timeout in seconds for entity start operations | `2` |
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
+| `CHRONOS_SDK_TOKEN_REFRESH_ON_401` | Whether to automatically refresh the SDK token on 401 Unauthorized and retry outbound CoreHub calls exactly once | `True` |
 | `TZ` | Preferred timezone environment variable for job scheduling. If set, it takes precedence over `TIMEZONE`. | `UTC` |
 | `TIMEZONE` | Deprecated timezone environment variable for job scheduling. Used only as fallback when `TZ` is not set. | `UTC` |
 
