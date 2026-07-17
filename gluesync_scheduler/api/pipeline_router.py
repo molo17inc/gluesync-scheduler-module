@@ -35,6 +35,51 @@ from gluesync_scheduler.config.settings import settings
 # Configure logging
 logger = logging.getLogger(__name__)
 
+
+_AUTH_ERROR_MARKERS = ("Authentication failed", "Invalid authorization token", "CoreHub rejected")
+
+
+def _is_auth_error(message: Optional[str]) -> bool:
+    """Detect whether a PipelineManager failure message stems from a CoreHub 401."""
+    if not message:
+        return False
+    return any(marker in message for marker in _AUTH_ERROR_MARKERS)
+
+
+def _mark_job_failed(cron_job_identifier: Optional[str], message: str) -> None:
+    """Best-effort update of the cron job row to failed. Never raises."""
+    if not cron_job_identifier:
+        return
+    try:
+        from gluesync_scheduler.cli.job_runner import update_job_status
+        update_job_status(cron_job_identifier, False, message)
+        logger.info(f"Updated job status to failed for {cron_job_identifier}")
+    except Exception:
+        logger.exception("Error updating job status to failed")
+
+
+def _handle_operation_failure(message: str, cron_job_identifier: Optional[str]) -> None:
+    """Raise the correct HTTPException for a PipelineManager failure.
+
+    Auth failures propagate as 401 with a clear message; anything else stays 500.
+    Also flags the associated cron job row (when provided) as failed.
+    """
+    if _is_auth_error(message):
+        _mark_job_failed(cron_job_identifier, message)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "CoreHub rejected the token even after refresh; "
+                "check chronos credentials and CoreHub session TTL"
+            ),
+        )
+
+    _mark_job_failed(cron_job_identifier, message)
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=message,
+    )
+
 # Security dependency to ensure requests only come from localhost
 async def verify_localhost(request: Request):
     """
@@ -175,39 +220,7 @@ async def play_pipeline(
         
         # Check if the operation was successful
         if not result:
-            # If the operation failed, check if the underlying CoreHubClient encountered a 401 Unauthorized
-            from gluesync_scheduler.core.play_pause import CoreHubClient
-            client_inst = CoreHubClient()
-            
-            # Since CoreHubClient makes synchronous requests, we can check if the last status was 401 or if we got an explicit 401.
-            # In play_pause, the fetch_core_hub returns dict with status="error" and status_code=401 for auth failures.
-            # Let's inspect play_entities/play_pipeline implementations in PipelineManager (play_pause.py).
-            # If the call returns False because of a 401, we want to propagate 401.
-            # Let's check if the client has a 401 error or if we can raise HTTPException with 401.
-            # We can detect if it is an authentication_failed error message or similar.
-            # Let's raise 401 if we failed due to 401.
-            # To be robust, let's also pass a custom detail message.
-            if getattr(client_inst, '_last_status_code', None) == 401 or "Authentication failed" in message or "Invalid authorization token" in message:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="CoreHub rejected the refreshed token; check chronos credentials / CoreHub session TTL"
-                )
-
-            # Update job status to failed if cron_job_identifier is provided
-            if cron_job_identifier:
-                from gluesync_scheduler.db.database import SessionLocal
-                from gluesync_scheduler.cli.job_runner import update_job_status
-                
-                try:
-                    update_job_status(cron_job_identifier, False, message)
-                    logger.info(f"Updated job status to failed for {cron_job_identifier}")
-                except Exception as update_error:
-                    logger.error(f"Error updating job status to failed: {str(update_error)}")
-            
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=message
-            )
+            _handle_operation_failure(message, cron_job_identifier)
 
         
         # Update job status to success if cron_job_identifier is provided
