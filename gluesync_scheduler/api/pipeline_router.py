@@ -175,6 +175,24 @@ async def play_pipeline(
         
         # Check if the operation was successful
         if not result:
+            # If the operation failed, check if the underlying CoreHubClient encountered a 401 Unauthorized
+            from gluesync_scheduler.core.play_pause import CoreHubClient
+            client_inst = CoreHubClient()
+            
+            # Since CoreHubClient makes synchronous requests, we can check if the last status was 401 or if we got an explicit 401.
+            # In play_pause, the fetch_core_hub returns dict with status="error" and status_code=401 for auth failures.
+            # Let's inspect play_entities/play_pipeline implementations in PipelineManager (play_pause.py).
+            # If the call returns False because of a 401, we want to propagate 401.
+            # Let's check if the client has a 401 error or if we can raise HTTPException with 401.
+            # We can detect if it is an authentication_failed error message or similar.
+            # Let's raise 401 if we failed due to 401.
+            # To be robust, let's also pass a custom detail message.
+            if getattr(client_inst, '_last_status_code', None) == 401 or "Authentication failed" in message or "Invalid authorization token" in message:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="CoreHub rejected the refreshed token; check chronos credentials / CoreHub session TTL"
+                )
+
             # Update job status to failed if cron_job_identifier is provided
             if cron_job_identifier:
                 from gluesync_scheduler.db.database import SessionLocal
@@ -190,6 +208,7 @@ async def play_pipeline(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=message
             )
+
         
         # Update job status to success if cron_job_identifier is provided
         if cron_job_identifier:

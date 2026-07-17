@@ -320,6 +320,9 @@ class CoreHubClient:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+        # Retrieve configurable environment flag (default to 'true')
+        refresh_enabled = os.getenv('CHRONOS_SDK_TOKEN_REFRESH_ON_401', 'True').lower() in ('true', '1', 't')
+
         try:
             # Make the request with SSL verification setting
             if method == 'GET':
@@ -373,6 +376,7 @@ class CoreHubClient:
                     return {"status": "success", "status_code": response.status_code}
             elif response.status_code == 401:
                 # Authentication error - token is likely invalid
+                self._last_status_code = 401
                 error_message = "Authentication failed: Invalid or expired token"
                 try:
                     # Try to parse the error message from the response
@@ -383,6 +387,104 @@ class CoreHubClient:
                     pass
                 
                 logger.error(f"Authentication error (401): {error_message}")
+                
+                # If token refresh on 401 is enabled, perform re-auth and single retry
+                if refresh_enabled:
+                    logger.info("CHRONOS_SDK_TOKEN_REFRESH_ON_401 is enabled. Triggering SDK token refresh and single retry...")
+                    try:
+                        # Clear initialization and force-initialize the SDK to fetch a fresh token
+                        gluesync_sdk_client._is_initialized = False
+                        gluesync_sdk_client._token = None
+                        if gluesync_sdk_client._client:
+                            # Set client as disconnected to trigger a fresh login handshake
+                            gluesync_sdk_client._client.connected = False
+                        
+                        # Run sync or async re-auth depending on the current event loop state
+                        import asyncio
+                        try:
+                            loop = asyncio.get_event_loop()
+                        except RuntimeError:
+                            loop = None
+
+                        if loop and loop.is_running():
+                            # Running inside an active event loop, run connection/re-auth as a task
+                            loop.run_until_complete(gluesync_sdk_client.initialize())
+                        else:
+                            # No running event loop or synchronous context
+                            asyncio.run(gluesync_sdk_client.initialize())
+                            
+                        # Retrieve the fresh token
+                        new_token, from_sdk = self._get_current_token()
+                        if new_token:
+                            logger.info("Successfully refreshed SDK token after 401. Retrying request...")
+                            headers = headers.copy()
+                            headers['Authorization'] = f'Bearer {new_token}'
+                            
+                            # Perform single retry
+                            if method == 'GET':
+                                retry_response = requests.get(url, headers=headers, params=params, verify=verify)
+                            elif method == 'POST':
+                                retry_response = requests.post(url, headers=headers, json=body, params=params, verify=verify)
+                            elif method == 'PUT':
+                                retry_response = requests.put(url, headers=headers, json=body, params=params, verify=verify)
+                            elif method == 'DELETE':
+                                retry_response = requests.delete(url, headers=headers, json=body, params=params, verify=verify)
+                            else:
+                                return None
+                                
+                            if retry_response.status_code in [200, 201, 202, 204]:
+                                logger.info("Retry successful after token refresh!")
+                                # Process as happy path
+                                if retry_response.text:
+                                    try:
+                                        json_data = retry_response.json()
+                                        safe_response = {
+                                            "status": "success",
+                                            "status_code": retry_response.status_code
+                                        }
+                                        if isinstance(json_data, dict):
+                                            if "id" in json_data:
+                                                safe_response["id"] = json_data["id"]
+                                            if "name" in json_data:
+                                                safe_response["name"] = json_data["name"]
+                                            if "status" in json_data:
+                                                safe_response["operation_status"] = json_data["status"]
+                                            if "message" in json_data:
+                                                safe_response["message"] = json_data["message"]
+                                        return safe_response
+                                    except Exception:
+                                        return {"status": "success", "text": retry_response.text[:100], "status_code": retry_response.status_code}
+                                else:
+                                    return {"status": "success", "status_code": retry_response.status_code}
+                            elif retry_response.status_code == 401:
+                                # CoreHub still rejected the refreshed token
+                                self._last_status_code = 401
+                                retry_error_message = "Authentication failed again on retry with refreshed token"
+                                try:
+                                    retry_error_data = retry_response.json()
+                                    if "message" in retry_error_data:
+                                        retry_error_message = retry_error_data["message"]
+                                except Exception:
+                                    pass
+                                logger.error(f"Authentication error (401) on retry: {retry_error_message}")
+                                return {
+                                    "status": "error",
+                                    "status_code": 401,
+                                    "error": "authentication_failed",
+                                    "message": f"CoreHub rejected the refreshed token; check chronos credentials / CoreHub session TTL. Details: {retry_error_message}"
+                                }
+                            else:
+                                logger.error(f"Retry request failed with status code {retry_response.status_code}: {retry_response.text}")
+                                return {
+                                    "status": "error",
+                                    "status_code": retry_response.status_code,
+                                    "error": "request_failed",
+                                    "message": retry_response.text
+                                }
+                        else:
+                            logger.error("Failed to retrieve a fresh token after SDK client reinitialization")
+                    except Exception as refresh_err:
+                        logger.error(f"Error during SDK token refresh or retry: {str(refresh_err)}")
                 
                 # Reset token and trigger reconnection
                 self.token = None
@@ -399,10 +501,20 @@ class CoreHubClient:
                 }
             else:
                 logger.error(f"Request failed with status code {response.status_code}: {response.text}")
-                return None
+                return {
+                    "status": "error",
+                    "status_code": response.status_code,
+                    "error": "request_failed",
+                    "message": response.text
+                }
         except Exception as e:
             logger.error(f"Request failed with exception: {str(e)}")
-            return None
+            return {
+                "status": "error",
+                "status_code": 500,
+                "error": "exception",
+                "message": str(e)
+            }
     
     def get_pipelines(self) -> List[Dict[str, Any]]:
         """Get a list of all pipelines"""
