@@ -55,19 +55,24 @@ def can_manage_schedules(role: UserRole) -> bool:
     """True if ``role`` may create, edit, or delete schedules.
 
     Mirrors ``canManageSchedules`` in the UI permission model.
+    ``EXTERNAL_MODULE`` is included so trusted internal modules (e.g. the
+    Gluesync bootstrapper) can create schedules programmatically via the
+    authenticated API.
     """
-    return role in {UserRole.SUPER_ADMIN, UserRole.MANAGER}
+    return role in {UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.EXTERNAL_MODULE}
 
 
 def can_control_schedules(role: UserRole) -> bool:
     """True if ``role`` may run-now or enable/disable existing schedules.
 
     Mirrors ``canControlSchedules`` in the UI permission model.
+    ``EXTERNAL_MODULE`` is included for consistency with ``can_manage_schedules``.
     """
     return role in {
         UserRole.SUPER_ADMIN,
         UserRole.MANAGER,
         UserRole.MONITOR,
+        UserRole.EXTERNAL_MODULE,
     }
 
 

@@ -173,8 +173,8 @@ SETTINGS_ROUTES = [
 # Role \u2192 what each guard allows (mirrors test_auth_dependencies.py).
 GUARD_ALLOWS = {
     "current_user":    {"SUPER_ADMIN", "MANAGER", "MONITOR", "VIEWER", "EXTERNAL_MODULE"},
-    "require_control": {"SUPER_ADMIN", "MANAGER", "MONITOR"},
-    "require_manage":  {"SUPER_ADMIN", "MANAGER"},
+    "require_control": {"SUPER_ADMIN", "MANAGER", "MONITOR", "EXTERNAL_MODULE"},
+    "require_manage":  {"SUPER_ADMIN", "MANAGER", "EXTERNAL_MODULE"},
     "require_config":  {"SUPER_ADMIN", "MANAGER"},
 }
 

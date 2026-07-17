@@ -134,7 +134,7 @@ ROLE_MATRIX = {
     UserRole.MONITOR:     {"any": 200, "manage": 403, "control": 200, "config": 403},
     UserRole.VIEWER:      {"any": 200, "manage": 403, "control": 403, "config": 403},
     UserRole.EXTERNAL_MODULE: {
-        "any": 200, "manage": 403, "control": 403, "config": 403,
+        "any": 200, "manage": 200, "control": 200, "config": 403,
     },
 }
 

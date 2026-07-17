@@ -57,7 +57,7 @@ class TestPermissionMatrix:
             (UserRole.MANAGER, True),
             (UserRole.MONITOR, False),
             (UserRole.VIEWER, False),
-            (UserRole.EXTERNAL_MODULE, False),
+            (UserRole.EXTERNAL_MODULE, True),
         ],
     )
     def test_can_manage_schedules(self, role: UserRole, expected: bool) -> None:
@@ -70,7 +70,7 @@ class TestPermissionMatrix:
             (UserRole.MANAGER, True),
             (UserRole.MONITOR, True),
             (UserRole.VIEWER, False),
-            (UserRole.EXTERNAL_MODULE, False),
+            (UserRole.EXTERNAL_MODULE, True),
         ],
     )
     def test_can_control_schedules(self, role: UserRole, expected: bool) -> None:
@@ -114,9 +114,11 @@ class TestPermissionInvariants:
         assert not can_control_schedules(UserRole.VIEWER)
         assert not can_modify_configuration(UserRole.VIEWER)
 
-    def test_external_module_has_no_write_permissions(self) -> None:
-        # EXTERNAL_MODULE is a service-account role \u2014 must not be able
-        # to touch user-facing schedule state through the browser API.
-        assert not can_manage_schedules(UserRole.EXTERNAL_MODULE)
-        assert not can_control_schedules(UserRole.EXTERNAL_MODULE)
+    def test_external_module_can_manage_and_control_schedules(self) -> None:
+        # EXTERNAL_MODULE is a service-account role used by trusted internal
+        # modules (e.g. the Gluesync bootstrapper) to create schedules via
+        # the authenticated API. It may manage and control schedules but
+        # must not modify chronos-global configuration.
+        assert can_manage_schedules(UserRole.EXTERNAL_MODULE)
+        assert can_control_schedules(UserRole.EXTERNAL_MODULE)
         assert not can_modify_configuration(UserRole.EXTERNAL_MODULE)
