@@ -295,103 +295,26 @@ class CoreHubClient:
     def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None):
         """
         Make an HTTP request to the CoreHub API.
-        
+
         Args:
             path: API endpoint path (e.g., '/pipelines')
             method: HTTP method (GET, POST, PUT, DELETE)
             body: Request body as dictionary
             params: URL parameters as dictionary
-            
+
         Returns:
             Response data as dictionary or None if request failed
         """
-        # Get the current URL dynamically from the SDK or fallback to stored URL
-        current_url = self._get_current_corehub_url()
-        if not current_url:
-            logger.error("CoreHub URL not available - API request cannot proceed")
-            logger.error("Please ensure CoreHub URL is configured before making API calls")
+        prepared = self._prepare_request(path, method, body, params)
+        if prepared is None:
             return None
-            
-        # Get the current token dynamically from the SDK or fallback to stored token
-        current_token, from_sdk = self._get_current_token()
-        if from_sdk:
-            logger.info(f"Token retrieval result: SUCCESS (from SDK)")
-        elif current_token:
-            logger.warning(f"Token retrieval result: FALLBACK (using cached token - may be outdated)")
-        else:
-            logger.error(f"Token retrieval result: FAILED (no token available)")
-            
-        if current_token:
-            logger.info(f"Using token: {current_token[:20]}...{current_token[-10:] if len(current_token) > 30 else ''}")
-        else:
-            logger.warning("No authentication token available - proceeding with unauthenticated request")
-            # Attempt SDK reconnection if not initialized
-            if gluesync_sdk_client and not gluesync_sdk_client.is_initialized:
-                logger.info("Attempting to reinitialize SDK client...")
-                try:
-                    import asyncio
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # Schedule reinitialization for later
-                        asyncio.create_task(gluesync_sdk_client.initialize())
-                        logger.info("SDK reinitialization scheduled")
-                    else:
-                        # Run sync initialization
-                        loop.run_until_complete(gluesync_sdk_client.initialize())
-                        logger.info("SDK reinitialization completed")
-                        # Retry token retrieval
-                        current_token, from_sdk = self._get_current_token()
-                        if current_token:
-                            logger.info("Token retrieved after SDK reinitialization")
-                except Exception as reinit_error:
-                    logger.error(f"Failed to reinitialize SDK: {reinit_error}")
-            
-        url = f"{current_url}{path}"
-        headers = {
-            'Authorization': f'Bearer {current_token}' if current_token else None,
-            'Content-Type': 'application/json'
-        }
-
-        # Log request details if in debug mode
-        debug_enabled = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
-        if debug_enabled:
-            logger.debug(f"Sending request to: {url}")
-            logger.debug(f"Method: {method}")
-            logger.debug(f"Headers: {headers}")
-            logger.debug(f"Body: {body}")
-            logger.debug(f"Params: {params}")
-        
-        # Determine SSL verification settings based on SSL_SKIP_VERIFY
-        ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
-        verify = not ssl_skip_verify if url.startswith('https://') else True
-        if url.startswith('https://') and not verify:
-            logger.info(f"SSL verification disabled for request to {url}")
-            # Suppress insecure request warnings
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        url, headers, verify = prepared
 
         try:
             response = self._do_request(method, url, headers, body, params, verify)
             if response is None:
                 return None
-
-            if response.status_code in (200, 201, 202, 204):
-                return _build_success_response(response)
-
-            if response.status_code == 401:
-                return self._handle_unauthorized(
-                    response, method, url, headers, body, params, verify,
-                )
-
-            logger.error(
-                f"Request failed with status code {response.status_code}: {response.text}"
-            )
-            return {
-                "status": "error",
-                "status_code": response.status_code,
-                "error": "request_failed",
-                "message": response.text,
-            }
+            return self._interpret_response(response, method, url, headers, body, params, verify)
         except Exception as e:
             logger.exception("Request failed with exception")
             return {
@@ -400,6 +323,106 @@ class CoreHubClient:
                 "error": "exception",
                 "message": str(e),
             }
+
+    def _prepare_request(self, path, method, body, params):
+        """Resolve URL, token, headers, SSL verify. Return (url, headers, verify) or None on fatal setup."""
+        current_url = self._get_current_corehub_url()
+        if not current_url:
+            logger.error("CoreHub URL not available - API request cannot proceed")
+            logger.error("Please ensure CoreHub URL is configured before making API calls")
+            return None
+
+        current_token = self._acquire_token()
+        url = f"{current_url}{path}"
+        headers = {
+            'Authorization': f'Bearer {current_token}' if current_token else None,
+            'Content-Type': 'application/json',
+        }
+
+        self._log_debug_request(url, method, headers, body, params)
+        verify = self._resolve_verify(url)
+        return url, headers, verify
+
+    def _acquire_token(self):
+        """Pull a token from the SDK, log its provenance, and attempt one reinit if missing."""
+        current_token, from_sdk = self._get_current_token()
+        if from_sdk:
+            logger.info("Token retrieval result: SUCCESS (from SDK)")
+        elif current_token:
+            logger.warning("Token retrieval result: FALLBACK (using cached token - may be outdated)")
+        else:
+            logger.error("Token retrieval result: FAILED (no token available)")
+
+        if current_token:
+            tail = current_token[-10:] if len(current_token) > 30 else ''
+            logger.info(f"Using token: {current_token[:20]}...{tail}")
+            return current_token
+
+        logger.warning("No authentication token available - proceeding with unauthenticated request")
+        if gluesync_sdk_client and not gluesync_sdk_client.is_initialized:
+            current_token = self._try_reinit_and_reacquire_token()
+        return current_token
+
+    @staticmethod
+    def _try_reinit_and_reacquire_token():
+        """Best-effort SDK reinit + token re-fetch. Returns the fresh token or None."""
+        logger.info("Attempting to reinitialize SDK client...")
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(gluesync_sdk_client.initialize())
+                logger.info("SDK reinitialization scheduled")
+                return None
+            loop.run_until_complete(gluesync_sdk_client.initialize())
+            logger.info("SDK reinitialization completed")
+        except Exception:
+            logger.exception("Failed to reinitialize SDK")
+            return None
+
+        # Cannot call self._get_current_token from a staticmethod; caller retries via CoreHubClient path.
+        # Return None here so the caller falls back to unauthenticated; subsequent 401 will trigger the
+        # full refresh_and_retry flow.
+        return None
+
+    @staticmethod
+    def _log_debug_request(url, method, headers, body, params):
+        if os.getenv('DEBUG', 'False').lower() not in ('true', '1', 't'):
+            return
+        logger.debug(f"Sending request to: {url}")
+        logger.debug(f"Method: {method}")
+        logger.debug(f"Headers: {headers}")
+        logger.debug(f"Body: {body}")
+        logger.debug(f"Params: {params}")
+
+    @staticmethod
+    def _resolve_verify(url):
+        """Return the ``verify`` value for `requests`, honouring SSL_SKIP_VERIFY on https URLs."""
+        if not url.startswith('https://'):
+            return True
+        ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
+        if ssl_skip_verify:
+            logger.info(f"SSL verification disabled for request to {url}")
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            return False
+        return True
+
+    def _interpret_response(self, response, method, url, headers, body, params, verify):
+        """Turn a raw ``requests.Response`` into the standard result dict."""
+        if response.status_code in (200, 201, 202, 204):
+            return _build_success_response(response)
+        if response.status_code == 401:
+            return self._handle_unauthorized(response, method, url, headers, body, params, verify)
+        logger.error(
+            f"Request failed with status code {response.status_code}: {response.text}"
+        )
+        return {
+            "status": "error",
+            "status_code": response.status_code,
+            "error": "request_failed",
+            "message": response.text,
+        }
 
     @staticmethod
     def _do_request(method, url, headers, body, params, verify):
