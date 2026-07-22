@@ -80,16 +80,41 @@ logger = logging.getLogger(__name__)
 # Helpers to resolve runtime URLs
 # ---------------------------------------------------------------------------
 
+# Template expanded by CoreHub at webhook delivery time via WebhookUrlResolver.
+# Must NOT be replaced with a concrete localhost URL — CoreHub resolves the
+# connected Chronos module address (scheme/host/port) from the SDK session.
+_CHRONOS_ADDRESS_TEMPLATE = "{{chronos_address}}"
+
+
 def _get_chronos_callback_base() -> str:
-    """Return the base URL at which Chronos is reachable from the corehub."""
+    """Best-effort concrete base URL for *human-facing* Chronos links.
+
+    Used only for display defaults (e.g. TriggerFlow fire URL shown in APIs).
+    The UI is expected to override those with the browser origin
+    (``window.location.origin + '/chronos'``).
+
+    Do **not** use this for CoreHub→Chronos webhook callbacks. Those must use
+    ``{{chronos_address}}`` so CoreHub resolves the live module address.
+    """
     url = os.getenv("CHRONOS_CALLBACK_URL", "").rstrip("/")
     if url:
         return url
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", "1717"))
     host = os.getenv("SCHEDULER_INTERNAL_HOST", "localhost")
     ssl_enabled = os.getenv("SSL_ENABLED", "False").lower() in ("true", "1", "t")
     proto = "https" if ssl_enabled else "http"
     return f"{proto}://{host}:{port}"
+
+
+def _corehub_chronos_webhook_url(path: str) -> str:
+    """Build a CoreHub webhook URL that targets Chronos via address template.
+
+    ``path`` should start with ``/`` (e.g. ``/api/webhooks/notify``).
+    CoreHub expands ``{{chronos_address}}`` at delivery time.
+    """
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return f"{_CHRONOS_ADDRESS_TEMPLATE}{path}"
 
 
 def _get_corehub_base() -> str:
@@ -488,7 +513,8 @@ class ChainExecutionService:
                 logger.error("Cannot register platform event webhook — corehub URL unknown")
                 return None
 
-            callback_url = f"{_get_chronos_callback_base()}/api/webhooks/platform-event"
+            # CoreHub expands {{chronos_address}} to the connected Chronos module.
+            callback_url = _corehub_chronos_webhook_url("/api/webhooks/platform-event")
             webhook_id = f"{_CHRONOS_PLATFORM_WEBHOOK_PREFIX}{flow_id}"
 
             new_webhook = {
@@ -797,7 +823,9 @@ class ChainExecutionService:
                 logger.error("Cannot register webhook — corehub URL unknown")
                 return None
 
-            callback_url = f"{_get_chronos_callback_base()}/api/webhooks/notify"
+            # CoreHub expands {{chronos_address}} to the connected Chronos module.
+            # Never use localhost here — that makes CoreHub POST to itself.
+            callback_url = _corehub_chronos_webhook_url("/api/webhooks/notify")
             correlation_key = str(event.id)
             webhook_id = f"{_CHRONOS_WEBHOOK_PREFIX}{correlation_key}"
 

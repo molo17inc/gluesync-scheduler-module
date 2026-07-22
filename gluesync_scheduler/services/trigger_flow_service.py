@@ -38,7 +38,10 @@ from gluesync_scheduler.models.trigger_schemas import (
     TriggerFlowCreate,
     TriggerFlowUpdate,
 )
-from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+from gluesync_scheduler.services.chain_execution_service import (
+    _get_chronos_callback_base,
+    chain_execution_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,16 +53,15 @@ def _generate_token() -> str:
 def _build_trigger_url(flow_id: int) -> str:
     """Construct the fire URL for a TriggerFlow.
 
-    This is a best-effort backend default. The frontend overrides it
-    with the actual external proxy URL (window.location.origin + /chronos).
+    Best-effort backend default for API responses / docs. The frontend
+    overrides this with the browser-facing proxy URL
+    (``window.location.origin + '/chronos'``).
+
+    This is intentionally a concrete URL (via CHRONOS_CALLBACK_URL /
+    SCHEDULER_INTERNAL_HOST), not ``{{chronos_address}}`` — that template
+    is only for CoreHub→Chronos webhook callbacks.
     """
-    base = os.getenv("CHRONOS_CALLBACK_URL", "").rstrip("/")
-    if not base:
-        ssl_enabled = os.getenv("SSL_ENABLED", "False").lower() in ("true", "1", "t")
-        proto = "https" if ssl_enabled else "http"
-        host = os.getenv("SCHEDULER_INTERNAL_HOST", "localhost")
-        port = int(os.getenv("PORT", "8000"))
-        base = f"{proto}://{host}:{port}"
+    base = _get_chronos_callback_base()
     return f"{base}/api/triggers/{flow_id}/fire"
 
 
