@@ -351,12 +351,15 @@ class ChainExecutionService:
         ASYNC events are skipped (they don't use webhooks).
         ``main_job_task_type`` is the parent job's task type — used to determine
         which completion event the first SYNC event should listen for.
+        ``events`` is the full list of chained events (both SYNC and ASYNC)
+        so that the preceding step's task type can be resolved correctly even
+        when the preceding event is ASYNC.
         """
         sync_events = [e for e in events if e.execution_mode == ExecutionMode.SYNC]
         if not sync_events:
             return
         try:
-            coro = self._register_webhooks_batch(sync_events, main_job_task_type)
+            coro = self._register_webhooks_batch(events, main_job_task_type)
             asyncio.run(coro)
         except RuntimeError:
             # Event loop already running — fall back to thread.
@@ -367,7 +370,7 @@ class ChainExecutionService:
             import threading
             def _run():
                 try:
-                    asyncio.run(self._register_webhooks_batch(sync_events, main_job_task_type))
+                    asyncio.run(self._register_webhooks_batch(events, main_job_task_type))
                 except Exception as exc:
                     logger.error("Failed to register webhooks in thread: %s", exc)
             t = threading.Thread(target=_run, daemon=True)
@@ -567,10 +570,16 @@ class ChainExecutionService:
 
         For each SYNC event, the webhook listens for the **preceding** step's
         completion event(s) — that's the signal that tells Chronos to proceed.
+        ``events`` is the full list of chained events (both SYNC and ASYNC)
+        so the preceding step's task type can be resolved even when it is ASYNC.
         """
-        # Build a lookup of all events by position to find preceding siblings
+        # Build a lookup of ALL events by position to find preceding siblings.
+        # This must include ASYNC events so that a SYNC event whose preceding
+        # sibling is ASYNC resolves the correct task type instead of falling
+        # back to the parent job's task type.
         all_events_by_pos = {e.position: e for e in events}
-        for event in events:
+        sync_events = [e for e in events if e.execution_mode == ExecutionMode.SYNC]
+        for event in sync_events:
             if event.position == 0:
                 preceding_task_type = main_job_task_type
             else:
