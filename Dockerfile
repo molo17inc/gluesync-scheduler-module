@@ -53,8 +53,12 @@ FROM cgr.dev/chainguard/python:latest-dev
 USER root
 WORKDIR /app
 
-# Minimal runtime OS packages (Wolfi, continuously patched)
-RUN apk add --no-cache openssl procps tzdata
+# Minimal runtime OS packages (Wolfi, continuously patched).
+# latest-dev still ships setuptools 70.3.0 + msgpack 1.1.2 (HIGH); Wolfi
+# already has the fixed packages, but the public image has not rebuilt yet.
+RUN apk add --no-cache openssl procps tzdata py3-setuptools \
+    && python -m pip install --upgrade --force-reinstall --no-cache-dir \
+        'setuptools>=78.1.1' 'msgpack>=1.2.1'
 
 # Bring in the prebuilt virtual environment from the builder stage
 COPY --from=builder /opt/venv /opt/venv
