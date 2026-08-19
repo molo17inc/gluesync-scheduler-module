@@ -44,19 +44,18 @@ logger.info(f"Using DB_URL: {DB_URL}")
 
 
 def add_platform_event_column(engine):
-    from sqlalchemy import MetaData
+    from sqlalchemy import inspect
 
     logger.info(f"MIGRATION: Running migration against database: {engine.url}")
 
-    metadata = MetaData()
-    metadata.reflect(bind=engine)
+    inspector = inspect(engine)
+    existing_tables = inspector.get_table_names()
 
-    if 'trigger_flows' not in metadata.tables:
+    if 'trigger_flows' not in existing_tables:
         logger.info("MIGRATION: trigger_flows table does not exist, skipping migration")
         return
 
-    trigger_flows_table = metadata.tables['trigger_flows']
-    existing_columns = [col.name for col in trigger_flows_table.columns]
+    existing_columns = [col['name'] for col in inspector.get_columns('trigger_flows')]
     logger.info(f"MIGRATION: Current columns in trigger_flows: {existing_columns}")
 
     if 'platform_event' in existing_columns:
@@ -72,10 +71,8 @@ def add_platform_event_column(engine):
             connection.commit()
             logger.info("MIGRATION: platform_event column added")
 
-        metadata_after = MetaData()
-        metadata_after.reflect(bind=engine)
-        updated_table = metadata_after.tables['trigger_flows']
-        updated_columns = [col.name for col in updated_table.columns]
+        inspector_after = inspect(engine)
+        updated_columns = [col['name'] for col in inspector_after.get_columns('trigger_flows')]
         logger.info(f"MIGRATION: Columns after migration: {updated_columns}")
 
     except Exception as e:
