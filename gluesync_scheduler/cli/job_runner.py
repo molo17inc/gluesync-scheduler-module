@@ -200,10 +200,10 @@ def execute_job(job: ScheduledJob) -> bool:
         elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/pause"
         elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/one-time-snapshot"
+            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo"
         elif job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo"
-        elif job.task_type == TaskType.GROUP_REDO:
+        elif job.task_type in [TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo-group"
         else:
             logger.error(f"Unknown task type: {job.task_type}")
@@ -217,17 +217,21 @@ def execute_job(job: ScheduledJob) -> bool:
             json_data["entity_ids"] = entity_ids
 
         # Add group_ids for group redo operations
-        if group_ids and job.task_type == TaskType.GROUP_REDO:
+        if group_ids and job.task_type in [TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
             json_data["group_ids"] = group_ids
 
-        # Add with_snapshot for operations that support snapshot flag
-        if job.with_snapshot and job.task_type in [
+        # Snapshot UI events always send with_snapshot=true; redo/start honor the job flag
+        if job.task_type in [
+            TaskType.PIPELINE_SNAPSHOT,
+            TaskType.ENTITY_SNAPSHOT,
+            TaskType.GROUP_SNAPSHOT,
+        ] or (job.with_snapshot and job.task_type in [
             TaskType.PIPELINE_START,
             TaskType.ENTITY_START,
             TaskType.PIPELINE_REDO,
             TaskType.ENTITY_REDO,
             TaskType.GROUP_REDO,
-        ]:
+        ]):
             json_data["with_snapshot"] = True
 
         # Include snapshot_write_method where applicable (snapshot, redo)
@@ -235,6 +239,7 @@ def execute_job(job: ScheduledJob) -> bool:
             if job.task_type in [
                 TaskType.PIPELINE_SNAPSHOT,
                 TaskType.ENTITY_SNAPSHOT,
+                TaskType.GROUP_SNAPSHOT,
                 TaskType.PIPELINE_REDO,
                 TaskType.ENTITY_REDO,
                 TaskType.GROUP_REDO,

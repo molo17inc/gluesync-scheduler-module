@@ -739,7 +739,11 @@ class ChainExecutionService:
                 TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT,
             ):
                 payload["group_ids"] = group_ids
-            if event.with_snapshot:
+            if event.task_type in (
+                TaskType.ENTITY_SNAPSHOT,
+                TaskType.PIPELINE_SNAPSHOT,
+                TaskType.GROUP_SNAPSHOT,
+            ) or event.with_snapshot:
                 payload["with_snapshot"] = True
             if event.snapshot_write_method:
                 payload["snapshot_write_method"] = event.snapshot_write_method
@@ -1149,9 +1153,9 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
         TaskType.ENTITY_STOP: "pause",
         TaskType.PIPELINE_STOP: "pause",
         TaskType.GROUP_STOP: "pause",
-        TaskType.ENTITY_SNAPSHOT: "one-time-snapshot",
-        TaskType.PIPELINE_SNAPSHOT: "one-time-snapshot",
-        TaskType.GROUP_SNAPSHOT: "one-time-snapshot-group",
+        TaskType.ENTITY_SNAPSHOT: "redo",
+        TaskType.PIPELINE_SNAPSHOT: "redo",
+        TaskType.GROUP_SNAPSHOT: "redo-group",
         TaskType.ENTITY_REDO: "redo",
         TaskType.PIPELINE_REDO: "redo",
         TaskType.GROUP_REDO: "redo-group",

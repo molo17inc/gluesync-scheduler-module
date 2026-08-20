@@ -1111,9 +1111,9 @@ class JobService:
             elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP, TaskType.GROUP_STOP]:
                 action = "pause"
             elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
-                action = "one-time-snapshot"
+                action = "redo"
             elif job.task_type in [TaskType.GROUP_SNAPSHOT]:
-                action = "one-time-snapshot-group"
+                action = "redo-group"
             elif job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
                 action = "redo"
             elif job.task_type == TaskType.GROUP_REDO:
@@ -1142,13 +1142,17 @@ class JobService:
             if group_ids and job.task_type == TaskType.GROUP_REDO:
                 json_data["group_ids"] = group_ids
 
-            if job.with_snapshot and job.task_type in [
+            if job.task_type in [
+                TaskType.PIPELINE_SNAPSHOT,
+                TaskType.ENTITY_SNAPSHOT,
+                TaskType.GROUP_SNAPSHOT,
+            ] or (job.with_snapshot and job.task_type in [
                 TaskType.PIPELINE_START,
                 TaskType.ENTITY_START,
                 TaskType.PIPELINE_REDO,
                 TaskType.ENTITY_REDO,
                 TaskType.GROUP_REDO,
-            ]:
+            ]):
                 json_data["with_snapshot"] = True
 
             if job.snapshot_write_method and job.task_type in [
@@ -1305,11 +1309,11 @@ class JobService:
                             snapshot_write_method=snapshot_write_method
                         )
                     elif action == "redo-group":
-                        with_snapshot = getattr(job, 'with_snapshot', False)
+                        # Snapshot and redo-group both POST CoreHub redo-group with withSnapshot=true
                         result = corehub_client.redo_group(
                             job.pipeline_id,
                             group_id,
-                            with_snapshot=with_snapshot,
+                            with_snapshot=True,
                             snapshot_write_method=snapshot_write_method
                         )
                     else:

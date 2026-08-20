@@ -624,43 +624,14 @@ class CoreHubClient:
         return response is not None
     
     def resync_entity(self, pipeline_id: str, entity_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
-        """Trigger a one-time snapshot for a specific entity"""
-        # First, stop the entity to ensure data consistency during snapshot
-        logger.info(f"Stopping entity {entity_id} before snapshot...")
-        stop_success = self.stop_entity(pipeline_id, entity_id)
-        if not stop_success:
-            logger.error(f"Failed to stop entity {entity_id} before snapshot")
-            return False
-        
-        # Wait a moment to ensure the entity is fully stopped
-        import time
-        time.sleep(5)
-        
-        # Now perform the snapshot
-        path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
-        params = {
-            'entity': entity_id,
-            'snapshotWriteMethod': snapshot_write_method
-        }
-        
-        try:
-            response = self.fetch_core_hub(path, method='POST', params=params)
-            
-            # Check for auth errors specifically
-            if response and isinstance(response, dict) and response.get('status') == 'error':
-                logger.error(f"Error resyncing entity {entity_id}: {response.get('message')}")
-                return False
-                
-            success = response is not None
-            if success:
-                logger.info(f"Successfully resynced entity {entity_id} in pipeline {pipeline_id}")
-            else:
-                logger.error(f"Failed to resync entity {entity_id} in pipeline {pipeline_id}")
-            return success
-        except Exception as e:
-            logger.error(f"Error resyncing entity {entity_id}: {str(e)}")
-            # Don't hide errors anymore
-            return False
+        """UI snapshot events POST CoreHub redo with withSnapshot=true (INSERT vs UPSERT unchanged)."""
+        logger.info(
+            f"Snapshot for entity {entity_id} in pipeline {pipeline_id} "
+            f"uses redo (withSnapshot=true, snapshotWriteMethod={snapshot_write_method})"
+        )
+        return self.redo_entity(
+            pipeline_id, entity_id, with_snapshot=True, snapshot_write_method=snapshot_write_method
+        )
     
     def start_pipeline(self, pipeline_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
         """Start all entities in a pipeline"""
@@ -728,42 +699,14 @@ class CoreHubClient:
             return False
     
     def resync_pipeline(self, pipeline_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
-        """Trigger a one-time snapshot for all entities in a pipeline"""
-        # First, stop the pipeline to ensure data consistency during snapshot
-        logger.info(f"Stopping pipeline {pipeline_id} before snapshot...")
-        stop_success = self.stop_pipeline(pipeline_id)
-        if not stop_success:
-            logger.error(f"Failed to stop pipeline {pipeline_id} before snapshot")
-            return False
-        
-        # Wait a moment to ensure the pipeline is fully stopped
-        import time
-        time.sleep(5)
-        
-        # Now perform the snapshot
-        path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
-        params = {
-            'snapshotWriteMethod': snapshot_write_method
-        }
-        
-        try:
-            response = self.fetch_core_hub(path, method='POST', params=params)
-            
-            # Check for auth errors specifically
-            if response and isinstance(response, dict) and response.get('status') == 'error':
-                logger.error(f"Error resyncing pipeline {pipeline_id}: {response.get('message')}")
-                return False
-                
-            success = response is not None
-            if success:
-                logger.info(f"Successfully resynced pipeline {pipeline_id}")
-            else:
-                logger.error(f"Failed to resync pipeline {pipeline_id}")
-            return success
-        except Exception as e:
-            logger.error(f"Error resyncing pipeline {pipeline_id}: {str(e)}")
-            # Don't hide errors anymore
-            return False
+        """UI snapshot events POST CoreHub redo with withSnapshot=true (INSERT vs UPSERT unchanged)."""
+        logger.info(
+            f"Snapshot for pipeline {pipeline_id} uses redo "
+            f"(withSnapshot=true, snapshotWriteMethod={snapshot_write_method})"
+        )
+        return self.redo_pipeline(
+            pipeline_id, with_snapshot=True, snapshot_write_method=snapshot_write_method
+        )
     
     def start_group(self, pipeline_id: str, group_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
         """Start all entities in a specific group within a pipeline"""
@@ -818,42 +761,14 @@ class CoreHubClient:
             return False
     
     def resync_group(self, pipeline_id: str, group_id: str, snapshot_write_method: str = 'UPSERT') -> bool:
-        """Trigger a one-time snapshot for all entities in a specific group within a pipeline"""
-        # First, stop the group to ensure data consistency during snapshot
-        logger.info(f"Stopping group {group_id} before snapshot...")
-        stop_success = self.stop_group(pipeline_id, group_id)
-        if not stop_success:
-            logger.error(f"Failed to stop group {group_id} before snapshot")
-            return False
-        
-        # Wait a moment to ensure the group is fully stopped
-        import time
-        time.sleep(5)
-        
-        # Now perform the snapshot
-        path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot-group'
-        params = {
-            'groupId': group_id,
-            'snapshotWriteMethod': snapshot_write_method
-        }
-        
-        try:
-            response = self.fetch_core_hub(path, method='POST', params=params)
-            
-            # Check for auth errors specifically
-            if response and isinstance(response, dict) and response.get('status') == 'error':
-                logger.error(f"Error resyncing group {group_id} in pipeline {pipeline_id}: {response.get('message')}")
-                return False
-                
-            success = response is not None
-            if success:
-                logger.info(f"Successfully resynced group {group_id} in pipeline {pipeline_id}")
-            else:
-                logger.error(f"Failed to resync group {group_id} in pipeline {pipeline_id}")
-            return success
-        except Exception as e:
-            logger.error(f"Error resyncing group {group_id} in pipeline {pipeline_id}: {str(e)}")
-            return False
+        """UI snapshot events POST CoreHub redo-group with withSnapshot=true (INSERT vs UPSERT unchanged)."""
+        logger.info(
+            f"Snapshot for group {group_id} in pipeline {pipeline_id} uses redo-group "
+            f"(withSnapshot=true, snapshotWriteMethod={snapshot_write_method})"
+        )
+        return self.redo_group(
+            pipeline_id, group_id, with_snapshot=True, snapshot_write_method=snapshot_write_method
+        )
 
     def redo_group(self, pipeline_id: str, group_id: str, with_snapshot: bool = False,
                    snapshot_write_method: str = 'UPSERT') -> bool:
