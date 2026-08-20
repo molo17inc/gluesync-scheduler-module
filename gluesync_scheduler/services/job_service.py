@@ -1158,6 +1158,7 @@ class JobService:
             if job.snapshot_write_method and job.task_type in [
                 TaskType.PIPELINE_SNAPSHOT,
                 TaskType.ENTITY_SNAPSHOT,
+                TaskType.GROUP_SNAPSHOT,
                 TaskType.PIPELINE_REDO,
                 TaskType.ENTITY_REDO,
                 TaskType.GROUP_REDO,
@@ -1309,11 +1310,16 @@ class JobService:
                             snapshot_write_method=snapshot_write_method
                         )
                     elif action == "redo-group":
-                        # Snapshot and redo-group both POST CoreHub redo-group with withSnapshot=true
+                        # GROUP_SNAPSHOT always withSnapshot=true; GROUP_REDO honors the job flag
+                        # (Chronos /redo-group HTTP path already forces true for *_redo).
+                        with_snapshot = (
+                            True if job.task_type == TaskType.GROUP_SNAPSHOT
+                            else getattr(job, 'with_snapshot', False)
+                        )
                         result = corehub_client.redo_group(
                             job.pipeline_id,
                             group_id,
-                            with_snapshot=True,
+                            with_snapshot=with_snapshot,
                             snapshot_write_method=snapshot_write_method
                         )
                     else:

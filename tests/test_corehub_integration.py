@@ -122,10 +122,8 @@ def test_resync_entity_command(mock_sdk_client, mock_requests):
     args, kwargs = mock_requests.call_args
     
     assert args[0] == "POST"
-    assert "test-pipeline/commands/sync/redo" in args[1]
+    assert "test-pipeline/commands/sync/resync" in args[1]
     assert kwargs["params"]["entity"] == "test-entity"
-    assert kwargs["params"]["withSnapshot"] == "true"
-    assert kwargs["params"]["snapshotWriteMethod"] == "UPSERT"
     assert kwargs["headers"]["Authorization"] == "Bearer mock_token_123"
 
 
@@ -233,9 +231,8 @@ def test_pipeline_manager_resync_action(mock_sdk_client, mock_requests):
         args, kwargs = mock_requests.call_args
         
         assert args[0] == "POST"
-        assert "test-pipeline/commands/sync/redo" in args[1]
+        assert "test-pipeline/commands/sync/one-time-snapshot" in args[1]
         assert kwargs["params"]["entity"] == "entity1"
-        assert kwargs["params"]["withSnapshot"] == "true"
         assert kwargs["params"]["snapshotWriteMethod"] == "UPSERT"
         
         # Reset mock
@@ -250,9 +247,8 @@ def test_pipeline_manager_resync_action(mock_sdk_client, mock_requests):
         # Check the call for the entire pipeline
         args, kwargs = mock_requests.call_args
         assert args[0] == "POST"
-        assert "test-pipeline/commands/sync/redo" in args[1]
+        assert "test-pipeline/commands/sync/one-time-snapshot" in args[1]
         assert "entity" not in kwargs["params"]
-        assert kwargs["params"]["withSnapshot"] == "true"
         assert kwargs["params"]["snapshotWriteMethod"] == "UPSERT"
 
 

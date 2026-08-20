@@ -637,27 +637,23 @@ async def resync_pipeline(
         # Initialize pipeline manager
         pipeline_manager = PipelineManager()
         
-        # Snapshot UI events share the redo path (withSnapshot=true). INSERT vs UPSERT is unchanged.
+        # Resync pipeline or entities
         if entity_ids:
-            result = await pipeline_manager.redo_entities(
-                pipeline_id, entity_ids, True, snapshot_write_method
-            )
+            # Resync specific entities
+            result = await pipeline_manager.resync_entities(pipeline_id, entity_ids, snapshot_write_method)
             message = f"One-time snapshot triggered successfully for entities in pipeline {pipeline_id}" if result else f"Failed to resync entities in pipeline {pipeline_id}"
             details = {
                 "pipeline_id": pipeline_id,
                 "entities_resynced": entity_ids,
-                "snapshot_write_method": snapshot_write_method,
-                "with_snapshot": True,
+                "snapshot_write_method": snapshot_write_method
             }
         else:
-            result = await pipeline_manager.redo_pipeline(
-                pipeline_id, True, snapshot_write_method
-            )
+            # Resync entire pipeline
+            result = await pipeline_manager.resync_pipeline(pipeline_id, snapshot_write_method)
             message = f"One-time snapshot triggered successfully for pipeline {pipeline_id}" if result else f"Failed to resync pipeline {pipeline_id}"
             details = {
                 "pipeline_id": pipeline_id,
-                "snapshot_write_method": snapshot_write_method,
-                "with_snapshot": True,
+                "snapshot_write_method": snapshot_write_method
             }
         
         # Check if the operation was successful
