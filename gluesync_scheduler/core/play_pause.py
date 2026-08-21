@@ -27,7 +27,6 @@ import time
 import argparse
 import logging
 import asyncio
-import os
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
 
@@ -40,6 +39,19 @@ from gluesync_scheduler.services.group_service import group_service
 
 
 _SUCCESS_JSON_FIELDS = ("id", "name", "message")
+
+
+
+def _copy_success_payload_fields(safe, json_data):
+    """Copy known scalar fields and list payloads onto the sanitized success dict."""
+    for key in _SUCCESS_JSON_FIELDS:
+        if key in json_data:
+            safe[key] = json_data[key]
+    if "status" in json_data:
+        safe["operation_status"] = json_data["status"]
+    for key in ("entities", "statuses", "data", "items"):
+        if isinstance(json_data.get(key), list):
+            safe[key] = json_data[key]
 
 
 def _build_success_response(response):
@@ -75,14 +87,7 @@ def _build_success_response(response):
         safe["entities"] = json_data
         return safe
     if isinstance(json_data, dict):
-        for key in _SUCCESS_JSON_FIELDS:
-            if key in json_data:
-                safe[key] = json_data[key]
-        if "status" in json_data:
-            safe["operation_status"] = json_data["status"]
-        for key in ("entities", "statuses", "data", "items"):
-            if isinstance(json_data.get(key), list):
-                safe[key] = json_data[key]
+        _copy_success_payload_fields(safe, json_data)
     return safe
 
 
@@ -646,6 +651,17 @@ class CoreHubClient:
                 pending.add(eid)
         return pending
 
+
+    def _wait_targets_or_proceed(self, pipeline_id, entity_ids, timeout_error, missing_warning) -> bool:
+        """Wait for Hold, or continue without polling when IDs cannot be resolved."""
+        if entity_ids:
+            if not self._wait_for_entities_paused(pipeline_id, entity_ids):
+                logger.error(timeout_error)
+                return False
+            return True
+        logger.warning(missing_warning)
+        return True
+
     def _wait_for_entities_paused(self, pipeline_id: str, entity_ids: List[str],
                                   timeout: Optional[float] = None,
                                   poll_interval: Optional[float] = None) -> bool:
@@ -858,15 +874,14 @@ class CoreHubClient:
             for e in self.get_pipeline_entities(pipeline_id)
             if isinstance(e, dict) and (e.get('id') or e.get('entityId'))
         ]
-        if pipeline_entity_ids:
-            if not self._wait_for_entities_paused(pipeline_id, pipeline_entity_ids):
-                logger.error(f"Pipeline {pipeline_id} entities did not all reach Hold state before redo")
-                return False
-        else:
-            logger.warning(
-                f"Could not resolve entity IDs for pipeline {pipeline_id}; "
-                f"proceeding with redo without status polling"
-            )
+        if not self._wait_targets_or_proceed(
+            pipeline_id,
+            pipeline_entity_ids,
+            f"Pipeline {pipeline_id} entities did not all reach Hold state before redo",
+            f"Could not resolve entity IDs for pipeline {pipeline_id}; "
+            f"proceeding with redo without status polling",
+        ):
+            return False
 
         path = f'/pipelines/{pipeline_id}/commands/sync/redo'
         params = {
@@ -1054,18 +1069,15 @@ class CoreHubClient:
 
         # Poll CoreHub until every entity in the group reports Hold (paused)
         group_entity_ids = self._get_group_entity_ids(pipeline_id, group_id)
-        if group_entity_ids:
-            if not self._wait_for_entities_paused(pipeline_id, group_entity_ids):
-                logger.error(
-                    f"Group {group_id} entities in pipeline {pipeline_id} did not all "
-                    f"reach Hold state before redo"
-                )
-                return False
-        else:
-            logger.warning(
-                f"Could not resolve entity IDs for group {group_id} in pipeline "
-                f"{pipeline_id}; proceeding with redo without status polling"
-            )
+        if not self._wait_targets_or_proceed(
+            pipeline_id,
+            group_entity_ids,
+            f"Group {group_id} entities in pipeline {pipeline_id} did not all "
+            f"reach Hold state before redo",
+            f"Could not resolve entity IDs for group {group_id} in pipeline "
+            f"{pipeline_id}; proceeding with redo without status polling",
+        ):
+            return False
 
         path = f'/pipelines/{pipeline_id}/commands/sync/redo-group'
         params = {
