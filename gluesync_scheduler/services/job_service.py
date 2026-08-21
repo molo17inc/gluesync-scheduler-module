@@ -222,7 +222,7 @@ def _post_internal_job_request(method, endpoint, json_data, protocol) -> tuple:
         logger.info(f"Response preview: {_preview_response_text(response)}")
         return _interpret_job_http_response(response)
     except requests.exceptions.RequestException as e:
-        logger.error(f"HTTP request failed: {str(e)}")
+        logger.exception(f"HTTP request failed: {str(e)}")
         return False, f"HTTP request failed: {str(e)}", {}
 
 
@@ -280,7 +280,7 @@ def _run_group_ids(corehub_client, job, group_ids, action, snapshot_write_method
                 logger.error(f"Failed to execute {action} for group {group_id}")
         except Exception as e:
             results.append({"group_id": group_id, "status": "error", "error": str(e)})
-            logger.error(f"Error executing {action} for group {group_id}: {str(e)}")
+            logger.exception(f"Error executing {action} for group {group_id}: {str(e)}")
     return success_count, results
 
 
