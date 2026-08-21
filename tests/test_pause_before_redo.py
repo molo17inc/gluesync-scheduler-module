@@ -1,21 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Unit tests for pause-then-poll-Hold before redo (Chronos !19)."""
+"""Unit tests for pause-then-poll-settled (Hold or Error) before redo."""
 
 import os
 from unittest.mock import patch
 
 import pytest
-
-
-def _time_then_expire(*initial, expired=10.0):
-    """time.time is also used by logging; never exhaust the mock."""
-    seq = list(initial)
-
-    def _now():
-        return seq.pop(0) if seq else expired
-
-    return _now
-
 
 from gluesync_scheduler.core.play_pause import CoreHubClient
 
@@ -35,27 +24,41 @@ def client():
     CoreHubClient._instance = None
 
 
-def test_is_entity_hold_true_when_idle(client):
-    assert client._is_entity_hold(HOLD) is True
+def test_is_entity_settled_true_when_idle(client):
+    assert client._is_entity_settled(HOLD) is True
 
 
-def test_is_entity_hold_false_when_sync_active(client):
-    assert client._is_entity_hold(ACTIVE) is False
+def test_is_entity_settled_false_when_sync_active(client):
+    assert client._is_entity_settled(ACTIVE) is False
 
 
-def test_is_entity_hold_false_when_migration_active(client):
+def test_is_entity_settled_false_when_migration_active(client):
     entry = {"entityId": "e1", "isSyncActive": False, "isMigrationActive": True, "errorState": None}
-    assert client._is_entity_hold(entry) is False
+    assert client._is_entity_settled(entry) is False
 
 
-def test_is_entity_hold_false_when_error_state_set(client):
+def test_is_entity_settled_true_when_error_state_set(client):
+    # 184b6bd: Error is a settled state — only Active keeps the poller waiting.
     entry = {"entityId": "e1", "isSyncActive": False, "isMigrationActive": False, "errorState": "FAILED"}
-    assert client._is_entity_hold(entry) is False
+    assert client._is_entity_settled(entry) is True
 
 
-def test_is_entity_hold_false_for_non_dict(client):
-    assert client._is_entity_hold(None) is False
-    assert client._is_entity_hold("hold") is False
+def test_is_entity_settled_true_when_error_state_empty_object(client):
+    # Empty {} is a cleared error (Hold), still settled.
+    entry = {"entityId": "e1", "isSyncActive": False, "isMigrationActive": False, "errorState": {}}
+    assert client._is_entity_settled(entry) is True
+
+
+def test_entity_has_error_empty_object_is_not_error(client):
+    assert client._entity_has_error({"errorState": {}}) is False
+    assert client._entity_has_error({"errorState": None}) is False
+    assert client._entity_has_error({"errorState": {"code": "X"}}) is True
+    assert client._entity_has_error({"errorState": "FAILED"}) is True
+
+
+def test_is_entity_settled_false_for_non_dict(client):
+    assert client._is_entity_settled(None) is False
+    assert client._is_entity_settled("hold") is False
 
 
 @pytest.mark.parametrize(
@@ -89,36 +92,36 @@ def test_get_pipeline_entities_status_empty_on_failure(client):
         assert client.get_pipeline_entities_status("p1") == []
 
 
-def test_wait_for_entities_paused_empty_ids(client):
-    assert client._wait_for_entities_paused("p1", []) is True
+def test_wait_for_entities_settled_empty_ids(client):
+    assert client._wait_for_entities_settled("p1", []) is True
 
 
-def test_wait_for_entities_paused_already_hold(client):
+def test_wait_for_entities_settled_already_hold(client):
     with patch.object(client, "get_pipeline_entities_status", return_value=[HOLD]):
-        assert client._wait_for_entities_paused("p1", ["e1"], timeout=1, poll_interval=0) is True
+        assert client._wait_for_entities_settled("p1", ["e1"], timeout=1, poll_interval=0) is True
 
 
-def test_wait_for_entities_paused_polls_then_hold(client):
+def test_wait_for_entities_settled_polls_then_hold(client):
     with patch.object(
         client,
         "get_pipeline_entities_status",
         side_effect=[[ACTIVE], [HOLD]],
     ), patch("gluesync_scheduler.core.play_pause.time.sleep"):
-        assert client._wait_for_entities_paused("p1", ["e1"], timeout=5, poll_interval=0) is True
+        assert client._wait_for_entities_settled("p1", ["e1"], timeout=5, poll_interval=0) is True
 
 
-def test_wait_for_entities_paused_times_out(client):
+def test_wait_for_entities_settled_times_out(client):
     with patch.object(client, "get_pipeline_entities_status", return_value=[ACTIVE]), patch(
         "gluesync_scheduler.core.play_pause.time.sleep"
-    ), patch("gluesync_scheduler.core.play_pause.time.time", side_effect=_time_then_expire(0, 0.1, 10)):
-        assert client._wait_for_entities_paused("p1", ["e1"], timeout=1, poll_interval=0) is False
+    ), patch("gluesync_scheduler.core.play_pause.time.time", side_effect=[0, 0.1, 10]):
+        assert client._wait_for_entities_settled("p1", ["e1"], timeout=1, poll_interval=0) is False
 
 
-def test_wait_for_entities_paused_missing_entity_is_pending(client):
+def test_wait_for_entities_settled_missing_entity_is_pending(client):
     with patch.object(client, "get_pipeline_entities_status", return_value=[]), patch(
         "gluesync_scheduler.core.play_pause.time.sleep"
-    ), patch("gluesync_scheduler.core.play_pause.time.time", side_effect=_time_then_expire(0, 0.1, 10)):
-        assert client._wait_for_entities_paused("p1", ["e1"], timeout=1, poll_interval=0) is False
+    ), patch("gluesync_scheduler.core.play_pause.time.time", side_effect=[0, 0.1, 10]):
+        assert client._wait_for_entities_settled("p1", ["e1"], timeout=1, poll_interval=0) is False
 
 
 def test_redo_entity_aborts_when_pause_fails(client):
@@ -132,7 +135,7 @@ def test_redo_entity_aborts_when_pause_fails(client):
 
 def test_redo_entity_aborts_when_hold_times_out(client):
     with patch.object(client, "stop_entity", return_value=True), patch.object(
-        client, "_wait_for_entities_paused", return_value=False
+        client, "_wait_for_entities_settled", return_value=False
     ), patch.object(client, "fetch_core_hub") as fetch:
         assert client.redo_entity("p1", "e1") is False
         fetch.assert_not_called()
@@ -140,7 +143,7 @@ def test_redo_entity_aborts_when_hold_times_out(client):
 
 def test_redo_entity_posts_redo_after_hold(client):
     with patch.object(client, "stop_entity", return_value=True), patch.object(
-        client, "_wait_for_entities_paused", return_value=True
+        client, "_wait_for_entities_settled", return_value=True
     ), patch.object(
         client, "fetch_core_hub", return_value={"status": "success"}
     ) as fetch:
@@ -165,7 +168,7 @@ def test_redo_pipeline_aborts_when_pause_fails(client):
 def test_redo_pipeline_aborts_when_hold_times_out(client):
     with patch.object(client, "stop_pipeline", return_value=True), patch.object(
         client, "get_pipeline_entities", return_value=[{"id": "e1"}]
-    ), patch.object(client, "_wait_for_entities_paused", return_value=False), patch.object(
+    ), patch.object(client, "_wait_for_entities_settled", return_value=False), patch.object(
         client, "fetch_core_hub"
     ) as fetch:
         assert client.redo_pipeline("p1") is False
@@ -194,7 +197,7 @@ def test_redo_group_aborts_when_pause_fails(client):
 def test_redo_group_posts_redo_group_after_hold(client):
     with patch.object(client, "stop_group", return_value=True), patch.object(
         client, "_get_group_entity_ids", return_value=["e1"]
-    ), patch.object(client, "_wait_for_entities_paused", return_value=True), patch.object(
+    ), patch.object(client, "_wait_for_entities_settled", return_value=True), patch.object(
         client, "fetch_core_hub", return_value={"status": "success"}
     ) as fetch:
         assert client.redo_group("p1", "g1", with_snapshot=True) is True
@@ -228,7 +231,7 @@ def test_get_pipeline_entities_status_bare_dict(client):
 def test_redo_pipeline_posts_redo_after_hold(client):
     with patch.object(client, "stop_pipeline", return_value=True), patch.object(
         client, "get_pipeline_entities", return_value=[{"id": "e1"}]
-    ), patch.object(client, "_wait_for_entities_paused", return_value=True), patch.object(
+    ), patch.object(client, "_wait_for_entities_settled", return_value=True), patch.object(
         client, "fetch_core_hub", return_value={"status": "success"}
     ) as fetch:
         assert client.redo_pipeline("p1", with_snapshot=True) is True
@@ -239,7 +242,7 @@ def test_redo_pipeline_posts_redo_after_hold(client):
 def test_redo_group_aborts_when_hold_times_out(client):
     with patch.object(client, "stop_group", return_value=True), patch.object(
         client, "_get_group_entity_ids", return_value=["e1"]
-    ), patch.object(client, "_wait_for_entities_paused", return_value=False), patch.object(
+    ), patch.object(client, "_wait_for_entities_settled", return_value=False), patch.object(
         client, "fetch_core_hub"
     ) as fetch:
         assert client.redo_group("p1", "g1") is False
@@ -296,10 +299,10 @@ def test_get_pipeline_entities_status_unwraps_sanitized_success_dict(client):
         assert client.get_pipeline_entities_status("p1") == [HOLD]
 
 
-def test_pending_hold_ids_missing_or_active(client):
+def test_pending_settled_ids_missing_or_active(client):
     hold = {"entityId": "h1", "isSyncActive": False, "isMigrationActive": False, "errorState": None}
     active = {"entityId": "a1", "isSyncActive": True, "isMigrationActive": False, "errorState": None}
-    pending = client._pending_hold_ids([hold, active], {"h1", "a1", "missing"})
+    pending = client._pending_settled_ids([hold, active], {"h1", "a1", "missing"})
     assert pending == {"a1", "missing"}
 
 
