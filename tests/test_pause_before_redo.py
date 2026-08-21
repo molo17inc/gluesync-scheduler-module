@@ -248,3 +248,55 @@ def test_redo_group_proceeds_when_entity_ids_unresolved(client):
 def test_get_group_entity_ids_empty_on_failure(client):
     with patch.object(client, "fetch_core_hub", return_value=None):
         assert client._get_group_entity_ids("p1", "g1") == []
+
+
+def test_build_success_response_preserves_json_list():
+    from gluesync_scheduler.core.play_pause import _build_success_response
+
+    class _Resp:
+        status_code = 200
+        text = "[{}]"
+        def json(self):
+            return [HOLD]
+
+    out = _build_success_response(_Resp())
+    assert out["status"] == "success"
+    assert out["entities"] == [HOLD]
+
+
+def test_build_success_response_preserves_wrapped_list_keys():
+    from gluesync_scheduler.core.play_pause import _build_success_response
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+        def json(self):
+            return {"entities": [HOLD], "name": "p1"}
+
+    out = _build_success_response(_Resp())
+    assert out["entities"] == [HOLD]
+    assert out["name"] == "p1"
+
+
+def test_get_pipeline_entities_status_unwraps_sanitized_success_dict(client):
+    # Production fetch_core_hub shape after preserving list keys.
+    payload = {"status": "success", "status_code": 200, "entities": [HOLD]}
+    with patch.object(client, "fetch_core_hub", return_value=payload):
+        assert client.get_pipeline_entities_status("p1") == [HOLD]
+
+
+def test_pending_hold_ids_missing_or_active(client):
+    hold = {"entityId": "h1", "isSyncActive": False, "isMigrationActive": False, "errorState": None}
+    active = {"entityId": "a1", "isSyncActive": True, "isMigrationActive": False, "errorState": None}
+    pending = client._pending_hold_ids([hold, active], {"h1", "a1", "missing"})
+    assert pending == {"a1", "missing"}
+
+
+def test_get_group_entity_ids_unwraps_sanitized_success_dict(client):
+    payload = {
+        "status": "success",
+        "status_code": 200,
+        "entities": [{"id": "e1", "groupId": "g1"}, {"id": "e2", "groupId": "g2"}],
+    }
+    with patch.object(client, "fetch_core_hub", return_value=payload):
+        assert client._get_group_entity_ids("p1", "g1") == ["e1"]

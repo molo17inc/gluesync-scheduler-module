@@ -69,12 +69,20 @@ def _build_success_response(response):
         }
 
     safe = {"status": "success", "status_code": response.status_code}
+    if isinstance(json_data, list):
+        # Preserve list payloads (entities-status, config/entities). Command
+        # callers still get status/status_code; GET unwrap code reads entities.
+        safe["entities"] = json_data
+        return safe
     if isinstance(json_data, dict):
         for key in _SUCCESS_JSON_FIELDS:
             if key in json_data:
                 safe[key] = json_data[key]
         if "status" in json_data:
             safe["operation_status"] = json_data["status"]
+        for key in ("entities", "statuses", "data", "items"):
+            if isinstance(json_data.get(key), list):
+                safe[key] = json_data[key]
     return safe
 
 
@@ -623,6 +631,21 @@ class CoreHubClient:
             return False
         return True
 
+
+    def _pending_hold_ids(self, statuses, target_ids):
+        """Return target IDs that are missing or not yet in Hold."""
+        status_by_id = {}
+        for entry in statuses:
+            eid = self._entity_status_id(entry)
+            if eid:
+                status_by_id[eid] = entry
+        pending = set()
+        for eid in target_ids:
+            entry = status_by_id.get(eid)
+            if entry is None or not self._is_entity_hold(entry):
+                pending.add(eid)
+        return pending
+
     def _wait_for_entities_paused(self, pipeline_id: str, entity_ids: List[str],
                                   timeout: Optional[float] = None,
                                   poll_interval: Optional[float] = None) -> bool:
@@ -657,21 +680,9 @@ class CoreHubClient:
         )
 
         while time.time() < deadline:
-            statuses = self.get_pipeline_entities_status(pipeline_id)
-            status_by_id: Dict[str, Dict[str, Any]] = {}
-            for entry in statuses:
-                eid = self._entity_status_id(entry)
-                if eid:
-                    status_by_id[eid] = entry
-
-            pending: set = set()
-            for eid in target_ids:
-                entry = status_by_id.get(eid)
-                if entry is None:
-                    # Entity not reported yet; treat as still pending.
-                    pending.add(eid)
-                elif not self._is_entity_hold(entry):
-                    pending.add(eid)
+            pending = self._pending_hold_ids(
+                self.get_pipeline_entities_status(pipeline_id), target_ids
+            )
 
             if not pending:
                 logger.info(
