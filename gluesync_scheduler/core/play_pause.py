@@ -574,7 +574,148 @@ class CoreHubClient:
         if response:
             return response
         return None
-    
+
+    def get_pipeline_entities_status(self, pipeline_id: str) -> List[Dict[str, Any]]:
+        """Get the real-time runtime status of every entity in a pipeline.
+
+        Calls the CoreHub ``GET /pipelines/{pipeline_id}/entities-status`` endpoint,
+        which returns the same status data the MPP UI uses to render Active / Hold /
+        Error. Each entry carries ``isSyncActive``, ``isMigrationActive``,
+        ``isBusy`` and ``errorState`` flags.
+
+        Returns:
+            A list of entity status dicts, or an empty list if the request failed.
+        """
+        response = self.fetch_core_hub(f'/pipelines/{pipeline_id}/entities-status')
+        if not response:
+            return []
+        if isinstance(response, list):
+            return response
+        if isinstance(response, dict):
+            for key in ('entities', 'statuses', 'data', 'items'):
+                if isinstance(response.get(key), list):
+                    return response[key]
+            return [response]
+        return []
+
+    @staticmethod
+    def _entity_status_id(entry: Dict[str, Any]) -> Optional[str]:
+        """Best-effort extraction of the entity identifier from a status entry."""
+        for key in ('entityId', 'entityID', 'id', 'entity_id'):
+            value = entry.get(key)
+            if value:
+                return str(value)
+        return None
+
+    @staticmethod
+    def _is_entity_hold(entry: Dict[str, Any]) -> bool:
+        """Return True when an entity status entry is in the Hold (paused) state.
+
+        Mirrors the CoreHub / MPP UI computation: ``error`` if ``errorState`` is
+        set, ``active`` if ``isSyncActive`` or ``isMigrationActive`` is true, and
+        ``hold`` otherwise.
+        """
+        if not isinstance(entry, dict):
+            return False
+        if entry.get('errorState') is not None:
+            return False
+        if entry.get('isSyncActive') or entry.get('isMigrationActive'):
+            return False
+        return True
+
+    def _wait_for_entities_paused(self, pipeline_id: str, entity_ids: List[str],
+                                  timeout: Optional[float] = None,
+                                  poll_interval: Optional[float] = None) -> bool:
+        """Poll CoreHub until every entity in ``entity_ids`` reports Hold (paused).
+
+        Args:
+            pipeline_id: Pipeline hosting the entities.
+            entity_ids: Entity IDs that must all reach the Hold state.
+            timeout: Maximum seconds to wait before giving up (defaults to
+                ``CHRONOS_REDO_PAUSE_TIMEOUT`` or 60s).
+            poll_interval: Seconds between status checks (defaults to
+                ``CHRONOS_REDO_POLL_INTERVAL`` or 5s).
+
+        Returns:
+            True if all entities reached Hold within the timeout, False otherwise.
+        """
+        if not entity_ids:
+            return True
+
+        if timeout is None:
+            timeout = float(os.getenv('CHRONOS_REDO_PAUSE_TIMEOUT', '60'))
+        if poll_interval is None:
+            poll_interval = float(os.getenv('CHRONOS_REDO_POLL_INTERVAL', '5'))
+
+        target_ids = {str(eid) for eid in entity_ids}
+        deadline = time.time() + timeout
+        last_pending: set = set(target_ids)
+
+        logger.info(
+            f"Waiting for {len(target_ids)} entity(ies) in pipeline {pipeline_id} "
+            f"to reach Hold state (timeout={timeout}s, poll={poll_interval}s)"
+        )
+
+        while time.time() < deadline:
+            statuses = self.get_pipeline_entities_status(pipeline_id)
+            status_by_id: Dict[str, Dict[str, Any]] = {}
+            for entry in statuses:
+                eid = self._entity_status_id(entry)
+                if eid:
+                    status_by_id[eid] = entry
+
+            pending: set = set()
+            for eid in target_ids:
+                entry = status_by_id.get(eid)
+                if entry is None:
+                    # Entity not reported yet; treat as still pending.
+                    pending.add(eid)
+                elif not self._is_entity_hold(entry):
+                    pending.add(eid)
+
+            if not pending:
+                logger.info(
+                    f"All {len(target_ids)} target entity(ies) in pipeline "
+                    f"{pipeline_id} are now in Hold state"
+                )
+                return True
+
+            if pending != last_pending:
+                logger.info(
+                    f"Pipeline {pipeline_id}: {len(target_ids) - len(pending)}/"
+                    f"{len(target_ids)} entities paused; still waiting on: "
+                    f"{sorted(pending)}"
+                )
+                last_pending = pending
+
+            time.sleep(poll_interval)
+
+        logger.error(
+            f"Timed out after {timeout}s waiting for entities to pause in pipeline "
+            f"{pipeline_id}; still pending: {sorted(last_pending)}"
+        )
+        return False
+
+    def _get_group_entity_ids(self, pipeline_id: str, group_id: str) -> List[str]:
+        """Synchronously resolve the entity IDs that belong to a group.
+
+        Mirrors ``GroupService.get_group_entities`` but stays synchronous so it
+        can be used from the synchronous ``CoreHubClient.redo_group`` flow.
+        """
+        response = self.fetch_core_hub(f'/pipelines/{pipeline_id}/config/entities')
+        if not response:
+            return []
+        entities = response if isinstance(response, list) else response.get('entities', [])
+        if not isinstance(entities, list):
+            return []
+        group_entity_ids: List[str] = []
+        for entity in entities:
+            if isinstance(entity, dict) and entity.get('groupId') == group_id:
+                entity_id = entity.get('id') or entity.get('entityId')
+                if entity_id:
+                    group_entity_ids.append(str(entity_id))
+        return group_entity_ids
+
     def start_entity(self, pipeline_id: str, entity_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
         """Start a specific entity in a pipeline"""
         path = f'/pipelines/{pipeline_id}/commands/sync/start'
@@ -595,6 +736,18 @@ class CoreHubClient:
     
     def redo_entity(self, pipeline_id: str, entity_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
         """Restart CDC for a specific entity after snapshot using redo command"""
+        # Pause the entity first so the target is stopped before the redo is applied
+        logger.info(f"Pausing entity {entity_id} before redo...")
+        pause_success = self.stop_entity(pipeline_id, entity_id)
+        if not pause_success:
+            logger.error(f"Failed to pause entity {entity_id} before redo")
+            return False
+
+        # Poll CoreHub until the entity reports Hold (paused) before issuing the redo
+        if not self._wait_for_entities_paused(pipeline_id, [entity_id]):
+            logger.error(f"Entity {entity_id} did not reach Hold state before redo")
+            return False
+
         path = f'/pipelines/{pipeline_id}/commands/sync/redo'
         params = {
             'entity': entity_id,
@@ -681,6 +834,29 @@ class CoreHubClient:
     
     def redo_pipeline(self, pipeline_id: str, with_snapshot: bool = False, snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger redo command to run snapshot then restart CDC for entire pipeline"""
+        # Pause the pipeline first so the target is stopped before the redo is applied
+        logger.info(f"Pausing pipeline {pipeline_id} before redo...")
+        pause_success = self.stop_pipeline(pipeline_id)
+        if not pause_success:
+            logger.error(f"Failed to pause pipeline {pipeline_id} before redo")
+            return False
+
+        # Poll CoreHub until every entity in the pipeline reports Hold (paused)
+        pipeline_entity_ids = [
+            str(e.get('id') or e.get('entityId'))
+            for e in self.get_pipeline_entities(pipeline_id)
+            if isinstance(e, dict) and (e.get('id') or e.get('entityId'))
+        ]
+        if pipeline_entity_ids:
+            if not self._wait_for_entities_paused(pipeline_id, pipeline_entity_ids):
+                logger.error(f"Pipeline {pipeline_id} entities did not all reach Hold state before redo")
+                return False
+        else:
+            logger.warning(
+                f"Could not resolve entity IDs for pipeline {pipeline_id}; "
+                f"proceeding with redo without status polling"
+            )
+
         path = f'/pipelines/{pipeline_id}/commands/sync/redo'
         params = {
             'withSnapshot': 'true' if with_snapshot else 'false',
@@ -858,6 +1034,28 @@ class CoreHubClient:
     def redo_group(self, pipeline_id: str, group_id: str, with_snapshot: bool = False,
                    snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger redo command for all entities within a group"""
+        # Pause the group first so the target is stopped before the redo is applied
+        logger.info(f"Pausing group {group_id} in pipeline {pipeline_id} before redo...")
+        pause_success = self.stop_group(pipeline_id, group_id)
+        if not pause_success:
+            logger.error(f"Failed to pause group {group_id} in pipeline {pipeline_id} before redo")
+            return False
+
+        # Poll CoreHub until every entity in the group reports Hold (paused)
+        group_entity_ids = self._get_group_entity_ids(pipeline_id, group_id)
+        if group_entity_ids:
+            if not self._wait_for_entities_paused(pipeline_id, group_entity_ids):
+                logger.error(
+                    f"Group {group_id} entities in pipeline {pipeline_id} did not all "
+                    f"reach Hold state before redo"
+                )
+                return False
+        else:
+            logger.warning(
+                f"Could not resolve entity IDs for group {group_id} in pipeline "
+                f"{pipeline_id}; proceeding with redo without status polling"
+            )
+
         path = f'/pipelines/{pipeline_id}/commands/sync/redo-group'
         params = {
             'groupId': group_id,

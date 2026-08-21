@@ -155,6 +155,8 @@ Configure the application using environment variables:
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
 | `CHRONOS_SDK_TOKEN_REFRESH_ON_401` | Whether to automatically refresh the SDK token on 401 Unauthorized and retry outbound CoreHub calls exactly once | `True` |
+| `CHRONOS_REDO_PAUSE_TIMEOUT` | Maximum seconds to wait for entities to reach the Hold (paused) state before issuing a redo command. See [Pause before redo](#pause-before-redo). | `60` |
+| `CHRONOS_REDO_POLL_INTERVAL` | Seconds between CoreHub `entities-status` checks while polling for entities to reach the Hold (paused) state before a redo. See [Pause before redo](#pause-before-redo). | `5` |
 | `TZ` | Preferred timezone environment variable for job scheduling. If set, it takes precedence over `TIMEZONE`. | `UTC` |
 | `TIMEZONE` | Deprecated timezone environment variable for job scheduling. Used only as fallback when `TZ` is not set. | `UTC` |
 
@@ -630,6 +632,27 @@ The integration uses only the SDK-provided authentication token for all CoreHub 
 The module automatically retrieves the CoreHub URL from the SDK after discovery, ensuring that the correct URL is used even when the CoreHub is discovered dynamically through UDP broadcast.
 
 **Connection Behavior**: Whether using `GLUESYNC_HOST` for direct connection or UDP discovery, the scheduler will retry connecting to CoreHub indefinitely with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s max) until successful. This ensures reliable operation in containerized environments where services may start in different orders.
+
+### Pause before redo
+
+All redo operations (`entity_redo`, `pipeline_redo`, `group_redo`) now pause their target objects **before** sending the redo command to CoreHub, so the target is fully stopped before the redo is applied. Instead of waiting a fixed number of seconds, Chronos polls CoreHub for the runtime status of the affected entities and only proceeds once every target entity reports the **Hold** (paused) state.
+
+The polling uses CoreHub's `GET /pipelines/{pipeline_id}/entities-status` endpoint, which returns the same runtime status the MPP UI uses to render Active / Hold / Error. An entity is considered paused when `errorState` is unset and both `isSyncActive` and `isMigrationActive` are false.
+
+| Redo operation | Pause target | What is polled |
+|----------------|--------------|----------------|
+| `entity_redo` | The single entity (`stop` with `entity` param) | That entity reaching Hold |
+| `pipeline_redo` | The whole pipeline (`stop`) | All entities in the pipeline reaching Hold |
+| `group_redo` | The group (`stop-group`) | All entities belonging to the group reaching Hold |
+
+If the pause call itself fails, the redo is aborted. If polling times out before every target entity reaches Hold, the redo is also aborted and an error is logged. When the affected entity IDs cannot be resolved (for example the config endpoint returns nothing), Chronos proceeds with the redo and logs a warning rather than blocking indefinitely.
+
+The polling behavior is configurable through two environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CHRONOS_REDO_PAUSE_TIMEOUT` | `60` | Maximum seconds to wait for all target entities to reach Hold before giving up. |
+| `CHRONOS_REDO_POLL_INTERVAL` | `5` | Seconds between status checks while polling. |
 
 ## Testing
 
