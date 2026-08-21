@@ -100,7 +100,13 @@ def test_job_service_snapshot_and_redo_hit_redo(task_type, write_method, entity_
     assert expected_suffix in _url
     assert "one-time-snapshot" not in _url
     payload = req.call_args.kwargs["json"]
-    assert payload["with_snapshot"] is True
+    snapshot_types = (TaskType.ENTITY_SNAPSHOT, TaskType.PIPELINE_SNAPSHOT)
+    if task_type in snapshot_types:
+        # Snapshot UI events always force withSnapshot=true on the redo path.
+        assert payload["with_snapshot"] is True
+    else:
+        # ENTITY_REDO / PIPELINE_REDO honor the job flag (False in this fixture).
+        assert "with_snapshot" not in payload
     assert payload["snapshot_write_method"] == write_method
     _assert_no_resync(payload)
     if entity_ids:
