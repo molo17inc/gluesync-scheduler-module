@@ -365,7 +365,7 @@ test:
     - grep -vE "^(gluesync-sdk|pyjks)" requirements.txt > /tmp/requirements-ci.txt
     - pip install -r /tmp/requirements-ci.txt
     - mkdir -p logs
-    - python -m pytest tests/ -v --ignore=tests/test_api.py --ignore=tests/test_corehub_integration.py --ignore=tests/test_cron_jobs.py --ignore=tests/test_client_resilience_pytest.py --ignore=tests/test_chained_events.py --ignore=tests/security/test_auth_dependencies.py --ignore=tests/security/test_corehub_introspect.py --cov=gluesync_scheduler --cov-report=xml:coverage.xml --cov-report=term --junitxml=test-results.xml
+    - python -m pytest tests/ -v --ignore=tests/test_api.py --ignore=tests/test_corehub_integration.py --ignore=tests/test_cron_jobs.py --ignore=tests/test_client_resilience_pytest.py --ignore=tests/test_chained_events.py --ignore=tests/security/test_auth_dependencies.py --ignore=tests/security/test_corehub_introspect.py --cov=. --cov-report=xml:coverage.xml --cov-report=term --junitxml=test-results.xml
   artifacts:
     when: always
     paths:
@@ -395,7 +395,7 @@ build-sonar:
     - job: test
       artifacts: true
   script:
-    - sonar-scanner -Dsonar.host.url="${SONAR_HOST_URL}" -Dsonar.projectKey="${SONAR_PROJECT_KEY}" -Dsonar.python.coverage.reportPaths=coverage.xml -Dsonar.qualitygate.wait=true
+    - sonar-scanner -Dsonar.host.url="${SONAR_HOST_URL}" -Dsonar.projectKey="${SONAR_PROJECT_KEY}" -Dsonar.sources=gluesync_scheduler -Dsonar.tests=tests -Dsonar.python.version=3.12 -Dsonar.python.coverage.reportPaths=coverage.xml -Dsonar.qualitygate.wait=true
   allow_failure: true
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
