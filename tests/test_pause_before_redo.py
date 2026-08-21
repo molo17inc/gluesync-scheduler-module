@@ -6,6 +6,17 @@ from unittest.mock import patch
 
 import pytest
 
+
+def _time_then_expire(*initial, expired=10.0):
+    """time.time is also used by logging; never exhaust the mock."""
+    seq = list(initial)
+
+    def _now():
+        return seq.pop(0) if seq else expired
+
+    return _now
+
+
 from gluesync_scheduler.core.play_pause import CoreHubClient
 
 
@@ -113,14 +124,14 @@ def test_wait_for_entities_settled_polls_then_hold(client):
 def test_wait_for_entities_settled_times_out(client):
     with patch.object(client, "get_pipeline_entities_status", return_value=[ACTIVE]), patch(
         "gluesync_scheduler.core.play_pause.time.sleep"
-    ), patch("gluesync_scheduler.core.play_pause.time.time", side_effect=[0, 0.1, 10]):
+    ), patch("gluesync_scheduler.core.play_pause.time.time", side_effect=_time_then_expire(0, 0.1, 10)):
         assert client._wait_for_entities_settled("p1", ["e1"], timeout=1, poll_interval=0) is False
 
 
 def test_wait_for_entities_settled_missing_entity_is_pending(client):
     with patch.object(client, "get_pipeline_entities_status", return_value=[]), patch(
         "gluesync_scheduler.core.play_pause.time.sleep"
-    ), patch("gluesync_scheduler.core.play_pause.time.time", side_effect=[0, 0.1, 10]):
+    ), patch("gluesync_scheduler.core.play_pause.time.time", side_effect=_time_then_expire(0, 0.1, 10)):
         assert client._wait_for_entities_settled("p1", ["e1"], timeout=1, poll_interval=0) is False
 
 
