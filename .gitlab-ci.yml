@@ -17,6 +17,7 @@
 # Copyright (C) 2025 MOLO17. All rights reserved.
 
 stages:
+  - test
   - build-sonar
   - deploy
 
@@ -352,6 +353,33 @@ update_budibase_version:
     - if: "$CI_COMMIT_TAG =~ /^beta-/"
     - if: "$CI_COMMIT_TAG =~ /^tag-/"
 
+
+test:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends gcc
+    - pip install --upgrade pip
+    - pip install pytest pytest-cov
+    - grep -vE "^(gluesync-sdk|pyjks)" requirements.txt > /tmp/requirements-ci.txt
+    - pip install -r /tmp/requirements-ci.txt
+    - mkdir -p logs
+    - python -m pytest tests/ -v --ignore=tests/test_api.py --ignore=tests/test_corehub_integration.py --ignore=tests/test_cron_jobs.py --ignore=tests/test_client_resilience_pytest.py --ignore=tests/test_chained_events.py --ignore=tests/security/test_auth_dependencies.py --ignore=tests/security/test_corehub_introspect.py --cov=. --cov-report=xml:coverage.xml --cov-report=term --junitxml=test-results.xml
+  artifacts:
+    when: always
+    paths:
+      - coverage.xml
+    reports:
+      junit: test-results.xml
+    expire_in: 1 day
+  coverage: "/TOTAL.+ ([0-9]{1,3}%)/"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "master"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
 build-sonar:
   stage: build-sonar
   image:
@@ -363,8 +391,11 @@ build-sonar:
     paths:
       - "${SONAR_USER_HOME}/cache"
       - sonar-scanner/
+  needs:
+    - job: test
+      artifacts: true
   script:
-    - sonar-scanner -Dsonar.host.url="${SONAR_HOST_URL}" -Dsonar.projectKey="${SONAR_PROJECT_KEY}" -Dsonar.qualitygate.wait=true
+    - sonar-scanner -Dsonar.host.url="${SONAR_HOST_URL}" -Dsonar.projectKey="${SONAR_PROJECT_KEY}" -Dsonar.sources=gluesync_scheduler -Dsonar.tests=tests -Dsonar.python.version=3.12 -Dsonar.python.coverage.reportPaths=coverage.xml -Dsonar.qualitygate.wait=true
   allow_failure: true
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
