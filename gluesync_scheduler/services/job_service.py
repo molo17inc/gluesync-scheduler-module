@@ -64,6 +64,226 @@ def _job_sends_with_snapshot(job) -> bool:
     return bool(job.with_snapshot and job.task_type in _FLAG_SNAPSHOT_TYPES)
 
 
+_GROUP_OP_TYPES = (
+    TaskType.GROUP_START,
+    TaskType.GROUP_STOP,
+    TaskType.GROUP_SNAPSHOT,
+    TaskType.GROUP_REDO,
+)
+_WRITE_METHOD_TYPES = (
+    TaskType.PIPELINE_SNAPSHOT,
+    TaskType.ENTITY_SNAPSHOT,
+    TaskType.GROUP_SNAPSHOT,
+    TaskType.PIPELINE_REDO,
+    TaskType.ENTITY_REDO,
+    TaskType.GROUP_REDO,
+)
+# Snapshot UI events share the CoreHub redo path with explicit redo tasks.
+_ACTION_BY_TASK_TYPE = {
+    TaskType.PIPELINE_START: "play",
+    TaskType.ENTITY_START: "play",
+    TaskType.GROUP_START: "play",
+    TaskType.PIPELINE_STOP: "pause",
+    TaskType.ENTITY_STOP: "pause",
+    TaskType.GROUP_STOP: "pause",
+    TaskType.PIPELINE_SNAPSHOT: "redo",
+    TaskType.ENTITY_SNAPSHOT: "redo",
+    TaskType.PIPELINE_REDO: "redo",
+    TaskType.ENTITY_REDO: "redo",
+    TaskType.GROUP_SNAPSHOT: "redo-group",
+    TaskType.GROUP_REDO: "redo-group",
+    TaskType.PIPELINE_ENTER_MAINTENANCE: "enter-maintenance",
+    TaskType.PIPELINE_EXIT_MAINTENANCE: "exit-maintenance",
+}
+
+
+def _parse_job_entity_ids(job) -> list:
+    """Parse entity_ids JSON from a job, returning [] on missing/invalid data."""
+    entity_ids = []
+    if job.entity_ids:
+        try:
+            entity_ids = json.loads(job.entity_ids)
+            logger.info(f"Parsed entity_ids: {entity_ids}")
+        except json.JSONDecodeError:
+            logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
+    return entity_ids
+
+
+def _parse_job_group_ids(job) -> list:
+    """Parse group_ids JSON from a job, returning [] on missing/invalid data."""
+    group_ids = []
+    logger.info(f"Raw job.group_ids from database: {repr(job.group_ids)} (type: {type(job.group_ids)})")
+    if job.group_ids:
+        try:
+            group_ids = json.loads(job.group_ids)
+            logger.info(f"Successfully parsed group_ids: {group_ids} (count: {len(group_ids)})")
+        except json.JSONDecodeError as e:
+            logger.warning(f"Could not parse group_ids JSON: {job.group_ids}, error: {e}")
+    else:
+        logger.info("No group_ids found in job - job.group_ids is None or empty")
+    return group_ids
+
+
+def _internal_api_base() -> tuple:
+    """Return (protocol, base_url) for Chronos internal API calls."""
+    ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+    protocol = "https" if ssl_enabled else "http"
+    internal_host = os.getenv('SCHEDULER_INTERNAL_HOST', 'localhost')
+    default_internal_port = os.getenv('SCHEDULER_INTERNAL_PORT')
+    if default_internal_port is None:
+        default_internal_port = os.getenv('PORT', '8000')
+    internal_port = int(default_internal_port)
+    base_url = f"{protocol}://{internal_host}:{internal_port}/api"
+    logger.info(f"Using internal API URL: {base_url} (SSL: {ssl_enabled})")
+    return protocol, base_url
+
+
+def _build_job_execute_payload(job, entity_ids, group_ids) -> dict:
+    """Build the JSON body for a non-group job execution request."""
+    json_data = {}
+    if entity_ids:
+        json_data["entity_ids"] = entity_ids
+    if group_ids and job.task_type == TaskType.GROUP_REDO:
+        json_data["group_ids"] = group_ids
+    if _job_sends_with_snapshot(job):
+        json_data["with_snapshot"] = True
+    if job.snapshot_write_method and job.task_type in _WRITE_METHOD_TYPES:
+        json_data["snapshot_write_method"] = job.snapshot_write_method
+    return json_data
+
+
+def _internal_request_ssl(protocol):
+    """Return (verify, cert) for an internal HTTP request."""
+    if protocol == "https":
+        ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
+        verify = not ssl_skip_verify
+        logger.info(f"Using HTTPS with SSL verification: {verify}")
+    else:
+        verify = True
+    cert = None
+    if protocol == "https":
+        cert_file = os.environ.get('SSL_CERT_FILE')
+        key_file = os.environ.get('SSL_KEY_FILE')
+        if cert_file and os.path.exists(cert_file) and key_file and os.path.exists(key_file):
+            cert = (cert_file, key_file)
+            logger.info(f"Using certificate files for HTTPS request: {cert_file} and {key_file}")
+    return verify, cert
+
+
+def _preview_response_text(response) -> str:
+    """Truncate response text for logs."""
+    if len(response.text) > 100:
+        return response.text[:100] + '...'
+    return response.text
+
+
+def _interpret_job_http_response(response) -> tuple:
+    """Map an HTTP response to (success, message, details)."""
+    if response.status_code in [200, 201, 202]:
+        success_msg = f"Job executed successfully with status code {response.status_code}"
+        logger.info(success_msg)
+        result = {
+            "status": "success",
+            "code": str(response.status_code),
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        }
+        return True, success_msg, result
+    truncated_response = _preview_response_text(response)
+    error_msg = f"Job execution failed with status {response.status_code}"
+    logger.error(f"{error_msg}: {truncated_response}")
+    result = {
+        "status_code": response.status_code,
+        "success": False,
+        "error": truncated_response,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    return False, error_msg, result
+
+
+def _post_internal_job_request(method, endpoint, json_data, protocol) -> tuple:
+    """POST the job payload to the internal API and interpret the response."""
+    try:
+        verify, cert = _internal_request_ssl(protocol)
+        # Timeout is configurable via SCHEDULER_INTERNAL_HTTP_TIMEOUT (seconds).
+        # The previous hard-coded 30s caused false "Read timed out" failures when
+        # multiple cron jobs on the same pipeline collided (e.g. at :00 and :30).
+        internal_http_timeout = int(os.getenv('SCHEDULER_INTERNAL_HTTP_TIMEOUT', '120'))
+        response = requests.request(
+            method=method,
+            url=endpoint,
+            json=json_data,
+            headers={"Content-Type": "application/json"},
+            timeout=internal_http_timeout,
+            verify=verify,  # Control SSL certificate verification
+            cert=cert  # Include certificates for client authentication if available
+        )
+        logger.info(f"Response status code: {response.status_code}")
+        logger.info(f"Response headers: {response.headers}")
+        logger.info(f"Response preview: {_preview_response_text(response)}")
+        return _interpret_job_http_response(response)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"HTTP request failed: {str(e)}")
+        return False, f"HTTP request failed: {str(e)}", {}
+
+
+def _call_corehub_group_action(corehub_client, job, group_id, action, snapshot_write_method):
+    """Dispatch a single CoreHub group action. GROUP_SNAPSHOT always sends withSnapshot=true."""
+    if action == "play":
+        # For start operations, check if with_snapshot is enabled
+        with_snapshot = getattr(job, 'with_snapshot', False)
+        return corehub_client.start_group(
+            job.pipeline_id,
+            group_id,
+            with_snapshot=with_snapshot,
+            snapshot_write_method=snapshot_write_method
+        )
+    if action == "pause":
+        return corehub_client.stop_group(job.pipeline_id, group_id)
+    if action == "resync" or action == "one-time-snapshot-group":
+        return corehub_client.resync_group(
+            job.pipeline_id,
+            group_id,
+            snapshot_write_method=snapshot_write_method
+        )
+    if action == "redo-group":
+        # GROUP_SNAPSHOT always withSnapshot=true; GROUP_REDO honors the job flag
+        # (Chronos /redo-group HTTP path already forces true for *_redo).
+        if job.task_type == TaskType.GROUP_SNAPSHOT:
+            with_snapshot = True
+        else:
+            with_snapshot = getattr(job, 'with_snapshot', False)
+        return corehub_client.redo_group(
+            job.pipeline_id,
+            group_id,
+            with_snapshot=with_snapshot,
+            snapshot_write_method=snapshot_write_method
+        )
+    logger.error(f"Unknown action for group operation: {action}")
+    return False
+
+
+def _run_group_ids(corehub_client, job, group_ids, action, snapshot_write_method):
+    """Execute one CoreHub group call per id. Returns (success_count, results)."""
+    success_count = 0
+    results = []
+    for group_id in group_ids:
+        try:
+            result = _call_corehub_group_action(
+                corehub_client, job, group_id, action, snapshot_write_method
+            )
+            if result:
+                success_count += 1
+                results.append({"group_id": group_id, "status": "success"})
+                logger.info(f"Successfully executed {action} for group {group_id}")
+            else:
+                results.append({"group_id": group_id, "status": "failed"})
+                logger.error(f"Failed to execute {action} for group {group_id}")
+        except Exception as e:
+            results.append({"group_id": group_id, "status": "error", "error": str(e)})
+            logger.error(f"Error executing {action} for group {group_id}: {str(e)}")
+    return success_count, results
+
+
 class JobService:
     """Service for managing scheduled jobs"""
 
@@ -1088,179 +1308,25 @@ class JobService:
         """
         try:
             logger.info(f"Starting execution of job {job.id}: {job.name} (type: {job.task_type})")
-            
-            # Parse entity_ids if present
-            entity_ids = []
-            if job.entity_ids:
-                try:
-                    entity_ids = json.loads(job.entity_ids)
-                    logger.info(f"Parsed entity_ids: {entity_ids}")
-                except json.JSONDecodeError:
-                    logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
-            
-            # Parse group_ids if present
-            group_ids = []
-            logger.info(f"Raw job.group_ids from database: {repr(job.group_ids)} (type: {type(job.group_ids)})")
-            if job.group_ids:
-                try:
-                    group_ids = json.loads(job.group_ids)
-                    logger.info(f"Successfully parsed group_ids: {group_ids} (count: {len(group_ids)})")
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Could not parse group_ids JSON: {job.group_ids}, error: {e}")
-            else:
-                logger.info("No group_ids found in job - job.group_ids is None or empty")
-            
-            # Use localhost for internal API calls, not the binding address (0.0.0.0)
-            # Use HTTPS protocol when SSL is enabled
-            ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
-            protocol = "https" if ssl_enabled else "http"
-            internal_host = os.getenv('SCHEDULER_INTERNAL_HOST', 'localhost')
-            default_internal_port = os.getenv('SCHEDULER_INTERNAL_PORT')
-            if default_internal_port is None:
-                default_internal_port = os.getenv('PORT', '8000')
-            internal_port = int(default_internal_port)
-            base_url = f"{protocol}://{internal_host}:{internal_port}/api"
-            
-            # Clean log output to remove any potential hidden characters
-            logger.info(f"Using internal API URL: {base_url} (SSL: {ssl_enabled})")
-            
-            # Determine the endpoint based on task type and set the HTTP method
+            entity_ids = _parse_job_entity_ids(job)
+            group_ids = _parse_job_group_ids(job)
+            protocol, base_url = _internal_api_base()
             method = "POST"  # All our endpoints use POST method
-            
-            # Determine the action for the endpoint path
-            if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.GROUP_START]:
-                action = "play"
-            elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP, TaskType.GROUP_STOP]:
-                action = "pause"
-            elif job.task_type in [
-                TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT,
-                TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO,
-            ]:
-                action = "redo"
-            elif job.task_type in [TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
-                action = "redo-group"
-            elif job.task_type == TaskType.PIPELINE_ENTER_MAINTENANCE:
-                action = "enter-maintenance"
-            elif job.task_type == TaskType.PIPELINE_EXIT_MAINTENANCE:
-                action = "exit-maintenance"
-            else:
+            action = _ACTION_BY_TASK_TYPE.get(job.task_type)
+            if action is None:
                 error_msg = f"Unknown task type: {job.task_type}"
                 logger.error(error_msg)
                 return False, error_msg, {}
 
             # For group-level operations we directly invoke CoreHub client, preserving legacy behavior
-            if job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
+            if job.task_type in _GROUP_OP_TYPES:
                 return self._execute_group_operation(job, group_ids, action)
 
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
-
-            # Prepare the JSON payload similar to CLI job runner
-            json_data = {}
-
-            if entity_ids:
-                json_data["entity_ids"] = entity_ids
-
-            if group_ids and job.task_type == TaskType.GROUP_REDO:
-                json_data["group_ids"] = group_ids
-
-            if _job_sends_with_snapshot(job):
-                json_data["with_snapshot"] = True
-
-            if job.snapshot_write_method and job.task_type in [
-                TaskType.PIPELINE_SNAPSHOT,
-                TaskType.ENTITY_SNAPSHOT,
-                TaskType.GROUP_SNAPSHOT,
-                TaskType.PIPELINE_REDO,
-                TaskType.ENTITY_REDO,
-                TaskType.GROUP_REDO,
-            ]:
-                json_data["snapshot_write_method"] = job.snapshot_write_method
-
+            json_data = _build_job_execute_payload(job, entity_ids, group_ids)
             logger.info(f"Endpoint: {method} {endpoint}")
             logger.info(f"JSON Payload: {json_data}")
-            
-            try:
-                # Determine SSL verification settings
-                # For HTTPS, we may need to skip verification if using self-signed certs
-                if protocol == "https":
-                    # Skip verification if SSL_SKIP_VERIFY is enabled
-                    ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
-                    verify = not ssl_skip_verify
-                    logger.info(f"Using HTTPS with SSL verification: {verify}")
-                else:
-                    # For HTTP, verification is not applicable
-                    verify = True
-                
-                # Add certificate paths if available and using HTTPS
-                cert = None
-                if protocol == "https":
-                    cert_file = os.environ.get('SSL_CERT_FILE')
-                    key_file = os.environ.get('SSL_KEY_FILE')
-                    if cert_file and os.path.exists(cert_file) and key_file and os.path.exists(key_file):
-                        cert = (cert_file, key_file)
-                        logger.info(f"Using certificate files for HTTPS request: {cert_file} and {key_file}")
-                
-                # Make the HTTP request.
-                # Timeout is configurable via SCHEDULER_INTERNAL_HTTP_TIMEOUT (seconds).
-                # The previous hard-coded 30s caused false "Read timed out" failures when
-                # multiple cron jobs on the same pipeline collided (e.g. at :00 and :30).
-                internal_http_timeout = int(os.getenv('SCHEDULER_INTERNAL_HTTP_TIMEOUT', '120'))
-                response = requests.request(
-                    method=method,
-                    url=endpoint,
-                    json=json_data,
-                    headers={"Content-Type": "application/json"},
-                    timeout=internal_http_timeout,
-                    verify=verify,  # Control SSL certificate verification
-                    cert=cert  # Include certificates for client authentication if available
-                )
-                logger.info(f"Response status code: {response.status_code}")
-                logger.info(f"Response headers: {response.headers}")
-                
-                # Log a limited preview of the response for debugging
-                # This prevents large responses from flooding the logs
-                response_preview = response.text[:100] + '...' if len(response.text) > 100 else response.text
-                logger.info(f"Response preview: {response_preview}")
-            except requests.exceptions.RequestException as e:
-                logger.error(f"HTTP request failed: {str(e)}")
-                return False, f"HTTP request failed: {str(e)}", {}
-            
-            # Check the response
-            if response.status_code in [200, 201, 202]:
-                # Don't try to parse the response JSON, just return a simple success message
-                # This completely avoids any potential recursion issues
-                success_msg = f"Job executed successfully with status code {response.status_code}"
-                logger.info(success_msg)
-                
-                # Create a new, completely flat response with only primitive types
-                # This completely eliminates the possibility of recursion errors
-                result = {
-                    "status": "success",
-                    "code": str(response.status_code),
-                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                }
-                
-                # We don't even include the response preview in the result
-                # Just log it and return a simple success flag
-                
-                return True, success_msg, result
-            else:
-                # For error responses, just log the status code and a truncated response
-                truncated_response = response.text[:100] + '...' if len(response.text) > 100 else response.text
-                error_msg = f"Job execution failed with status {response.status_code}"
-                logger.error(f"{error_msg}: {truncated_response}")
-                
-                # Return a minimal response with just primitive types
-                # Avoid including any complex objects that might cause recursion
-                result = {
-                    "status_code": response.status_code,
-                    "success": False,
-                    "error": truncated_response,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                
-                return False, error_msg, result
-                
+            return _post_internal_job_request(method, endpoint, json_data, protocol)
         except Exception as e:
             error_msg = f"Error executing job: {str(e)}"
             logger.error(error_msg)
@@ -1296,58 +1362,10 @@ class JobService:
                 }
                 return False, warn_msg, details
             
-            success_count = 0
             total_groups = len(group_ids)
-            results = []
-            
-            # Execute operation for each group (CoreHub only supports one group per call)
-            for group_id in group_ids:
-                try:
-                    if action == "play":
-                        # For start operations, check if with_snapshot is enabled
-                        with_snapshot = getattr(job, 'with_snapshot', False)
-                        result = corehub_client.start_group(
-                            job.pipeline_id, 
-                            group_id, 
-                            with_snapshot=with_snapshot,
-                            snapshot_write_method=snapshot_write_method
-                        )
-                    elif action == "pause":
-                        result = corehub_client.stop_group(job.pipeline_id, group_id)
-                    elif action == "resync" or action == "one-time-snapshot-group":
-                        result = corehub_client.resync_group(
-                            job.pipeline_id,
-                            group_id,
-                            snapshot_write_method=snapshot_write_method
-                        )
-                    elif action == "redo-group":
-                        # GROUP_SNAPSHOT always withSnapshot=true; GROUP_REDO honors the job flag
-                        # (Chronos /redo-group HTTP path already forces true for *_redo).
-                        if job.task_type == TaskType.GROUP_SNAPSHOT:
-                            with_snapshot = True
-                        else:
-                            with_snapshot = getattr(job, 'with_snapshot', False)
-                        result = corehub_client.redo_group(
-                            job.pipeline_id,
-                            group_id,
-                            with_snapshot=with_snapshot,
-                            snapshot_write_method=snapshot_write_method
-                        )
-                    else:
-                        logger.error(f"Unknown action for group operation: {action}")
-                        result = False
-                    
-                    if result:
-                        success_count += 1
-                        results.append({"group_id": group_id, "status": "success"})
-                        logger.info(f"Successfully executed {action} for group {group_id}")
-                    else:
-                        results.append({"group_id": group_id, "status": "failed"})
-                        logger.error(f"Failed to execute {action} for group {group_id}")
-                        
-                except Exception as e:
-                    results.append({"group_id": group_id, "status": "error", "error": str(e)})
-                    logger.error(f"Error executing {action} for group {group_id}: {str(e)}")
+            success_count, results = _run_group_ids(
+                corehub_client, job, group_ids, action, snapshot_write_method
+            )
             
             # Determine overall success
             overall_success = success_count == total_groups

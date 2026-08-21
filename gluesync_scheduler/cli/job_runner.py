@@ -189,25 +189,72 @@ def _job_sends_with_snapshot(job) -> bool:
     return bool(job.with_snapshot and job.task_type in _FLAG_SNAPSHOT_TYPES)
 
 
+_JOB_RUNNER_ACTIONS = {
+    TaskType.PIPELINE_START: "play",
+    TaskType.ENTITY_START: "play",
+    TaskType.PIPELINE_STOP: "pause",
+    TaskType.ENTITY_STOP: "pause",
+    TaskType.PIPELINE_SNAPSHOT: "redo",
+    TaskType.ENTITY_SNAPSHOT: "redo",
+    TaskType.PIPELINE_REDO: "redo",
+    TaskType.ENTITY_REDO: "redo",
+    TaskType.GROUP_SNAPSHOT: "redo-group",
+    TaskType.GROUP_REDO: "redo-group",
+}
+_JOB_RUNNER_WRITE_METHOD_TYPES = (
+    TaskType.PIPELINE_SNAPSHOT,
+    TaskType.ENTITY_SNAPSHOT,
+    TaskType.GROUP_SNAPSHOT,
+    TaskType.PIPELINE_REDO,
+    TaskType.ENTITY_REDO,
+    TaskType.GROUP_REDO,
+)
+_JOB_RUNNER_GROUP_ID_TYPES = (TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO)
+
+
+def _parse_job_id_list(raw, field_name: str) -> list:
+    """Parse a JSON list field from a job, returning [] on missing/invalid data."""
+    ids = []
+    if raw:
+        try:
+            ids = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning(f"Could not parse {field_name} JSON: {raw}")
+    return ids
+
+
+def _job_runner_endpoint(job, base_url: str):
+    """Return the Chronos API endpoint for this job, or None if the type is unknown.
+
+    Snapshot UI events share the CoreHub redo path with explicit redo tasks.
+    """
+    action = _JOB_RUNNER_ACTIONS.get(job.task_type)
+    if action is None:
+        logger.error(f"Unknown task type: {job.task_type}")
+        return None
+    return f"{base_url}/pipelines/{job.pipeline_id}/{action}"
+
+
+def _job_runner_payload(job, entity_ids, group_ids) -> dict:
+    """Build the JSON body for a CLI job-runner request."""
+    json_data = {}
+    if entity_ids:
+        json_data["entity_ids"] = entity_ids
+    if group_ids and job.task_type in _JOB_RUNNER_GROUP_ID_TYPES:
+        json_data["group_ids"] = group_ids
+    if _job_sends_with_snapshot(job):
+        json_data["with_snapshot"] = True
+    if job.snapshot_write_method and job.task_type in _JOB_RUNNER_WRITE_METHOD_TYPES:
+        json_data["snapshot_write_method"] = job.snapshot_write_method
+    return json_data
+
+
 def execute_job(job: ScheduledJob) -> bool:
     """Execute the job based on its type and parameters"""
     try:
-        # Parse entity_ids if present
-        entity_ids = []
-        if job.entity_ids:
-            try:
-                entity_ids = json.loads(job.entity_ids)
-            except json.JSONDecodeError:
-                logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
+        entity_ids = _parse_job_id_list(job.entity_ids, "entity_ids")
+        group_ids = _parse_job_id_list(job.group_ids, "group_ids")
 
-        # Parse group_ids if present
-        group_ids = []
-        if job.group_ids:
-            try:
-                group_ids = json.loads(job.group_ids)
-            except json.JSONDecodeError:
-                logger.warning(f"Could not parse group_ids JSON: {job.group_ids}")
-        
         # Use HTTPS protocol when SSL is enabled
         ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
         protocol = "https" if ssl_enabled else "http"
@@ -215,82 +262,44 @@ def execute_job(job: ScheduledJob) -> bool:
         port = int(os.getenv('PORT', '8000'))
         base_url = f"{protocol}://{host}:{port}/api"
         logger.info(f"Using API URL: {base_url} (SSL: {ssl_enabled})")
-        
-        # Determine the endpoint based on task type
-        # Snapshot UI events share the CoreHub redo path with explicit redo tasks.
-        if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/play"
-        elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/pause"
-        elif job.task_type in [
-            TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT,
-            TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO,
-        ]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo"
-        elif job.task_type in [TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo-group"
-        else:
-            logger.error(f"Unknown task type: {job.task_type}")
+
+        endpoint = _job_runner_endpoint(job, base_url)
+        if not endpoint:
             return False
-        
-        # Prepare the JSON payload
-        json_data = {}
-        
-        # Add entity_ids to the payload if present
-        if entity_ids:
-            json_data["entity_ids"] = entity_ids
 
-        # Add group_ids for group redo operations
-        if group_ids and job.task_type in [TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
-            json_data["group_ids"] = group_ids
+        json_data = _job_runner_payload(job, entity_ids, group_ids)
 
-        if _job_sends_with_snapshot(job):
-            json_data["with_snapshot"] = True
-
-        # Include snapshot_write_method where applicable (snapshot, redo)
-        if job.snapshot_write_method:
-            if job.task_type in [
-                TaskType.PIPELINE_SNAPSHOT,
-                TaskType.ENTITY_SNAPSHOT,
-                TaskType.GROUP_SNAPSHOT,
-                TaskType.PIPELINE_REDO,
-                TaskType.ENTITY_REDO,
-                TaskType.GROUP_REDO,
-            ]:
-                json_data["snapshot_write_method"] = job.snapshot_write_method
-        
         # Log the request details
         logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
         logger.info(f"Endpoint: POST {endpoint}")
         logger.info(f"JSON Payload: {json_data}")
-        
+
         # Make the API request with JSON payload
         headers = {
             "Content-Type": "application/json"
         }
-        
+
         # Skip SSL verification if SSL_SKIP_VERIFY is enabled
         ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
         verify = not ssl_skip_verify if ssl_enabled else True
         logger.info(f"SSL verification: {verify}")
-        
+
         # Add timeout to prevent hanging requests
         response = requests.post(
-            endpoint, 
-            json=json_data, 
-            headers=headers, 
+            endpoint,
+            json=json_data,
+            headers=headers,
             verify=verify,
             timeout=30
         )
-        
+
         # Check the response
         if response.status_code in [200, 202]:
             logger.info(f"Job executed successfully: {response.text}")
             return True
-        else:
-            logger.error(f"Job execution failed with status {response.status_code}: {response.text}")
-            return False
-            
+        logger.error(f"Job execution failed with status {response.status_code}: {response.text}")
+        return False
+
     except Exception as e:
         logger.error(f"Error executing job: {str(e)}")
         return False
