@@ -74,6 +74,18 @@ class ExecutableEvent:
             execution_mode=event.execution_mode,
         )
 
+
+def _event_sends_with_snapshot(event) -> bool:
+    """Snapshot UI events always send with_snapshot; others honor the event flag."""
+    if event.task_type in (
+        TaskType.ENTITY_SNAPSHOT,
+        TaskType.PIPELINE_SNAPSHOT,
+        TaskType.GROUP_SNAPSHOT,
+    ):
+        return True
+    return bool(event.with_snapshot)
+
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -739,11 +751,7 @@ class ChainExecutionService:
                 TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT,
             ):
                 payload["group_ids"] = group_ids
-            if event.task_type in (
-                TaskType.ENTITY_SNAPSHOT,
-                TaskType.PIPELINE_SNAPSHOT,
-                TaskType.GROUP_SNAPSHOT,
-            ) or event.with_snapshot:
+            if _event_sends_with_snapshot(event):
                 payload["with_snapshot"] = True
             if event.snapshot_write_method:
                 payload["snapshot_write_method"] = event.snapshot_write_method

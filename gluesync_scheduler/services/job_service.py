@@ -42,6 +42,28 @@ from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 logger = logging.getLogger(__name__)
 
+
+_SNAPSHOT_TYPES = (
+    TaskType.PIPELINE_SNAPSHOT,
+    TaskType.ENTITY_SNAPSHOT,
+    TaskType.GROUP_SNAPSHOT,
+)
+_FLAG_SNAPSHOT_TYPES = (
+    TaskType.PIPELINE_START,
+    TaskType.ENTITY_START,
+    TaskType.PIPELINE_REDO,
+    TaskType.ENTITY_REDO,
+    TaskType.GROUP_REDO,
+)
+
+
+def _job_sends_with_snapshot(job) -> bool:
+    """Snapshot UI events always send with_snapshot; redo/start honor the job flag."""
+    if job.task_type in _SNAPSHOT_TYPES:
+        return True
+    return bool(job.with_snapshot and job.task_type in _FLAG_SNAPSHOT_TYPES)
+
+
 class JobService:
     """Service for managing scheduled jobs"""
 
@@ -1110,13 +1132,12 @@ class JobService:
                 action = "play"
             elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP, TaskType.GROUP_STOP]:
                 action = "pause"
-            elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
+            elif job.task_type in [
+                TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT,
+                TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO,
+            ]:
                 action = "redo"
-            elif job.task_type in [TaskType.GROUP_SNAPSHOT]:
-                action = "redo-group"
-            elif job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
-                action = "redo"
-            elif job.task_type == TaskType.GROUP_REDO:
+            elif job.task_type in [TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
                 action = "redo-group"
             elif job.task_type == TaskType.PIPELINE_ENTER_MAINTENANCE:
                 action = "enter-maintenance"
@@ -1142,17 +1163,7 @@ class JobService:
             if group_ids and job.task_type == TaskType.GROUP_REDO:
                 json_data["group_ids"] = group_ids
 
-            if job.task_type in [
-                TaskType.PIPELINE_SNAPSHOT,
-                TaskType.ENTITY_SNAPSHOT,
-                TaskType.GROUP_SNAPSHOT,
-            ] or (job.with_snapshot and job.task_type in [
-                TaskType.PIPELINE_START,
-                TaskType.ENTITY_START,
-                TaskType.PIPELINE_REDO,
-                TaskType.ENTITY_REDO,
-                TaskType.GROUP_REDO,
-            ]):
+            if _job_sends_with_snapshot(job):
                 json_data["with_snapshot"] = True
 
             if job.snapshot_write_method and job.task_type in [
@@ -1312,10 +1323,10 @@ class JobService:
                     elif action == "redo-group":
                         # GROUP_SNAPSHOT always withSnapshot=true; GROUP_REDO honors the job flag
                         # (Chronos /redo-group HTTP path already forces true for *_redo).
-                        with_snapshot = (
-                            True if job.task_type == TaskType.GROUP_SNAPSHOT
-                            else getattr(job, 'with_snapshot', False)
-                        )
+                        if job.task_type == TaskType.GROUP_SNAPSHOT:
+                            with_snapshot = True
+                        else:
+                            with_snapshot = getattr(job, 'with_snapshot', False)
                         result = corehub_client.redo_group(
                             job.pipeline_id,
                             group_id,

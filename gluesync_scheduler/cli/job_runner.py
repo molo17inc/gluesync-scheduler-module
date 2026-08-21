@@ -167,6 +167,28 @@ def update_job_status(job_identifier: str, success: bool, error_message: Optiona
         logger.error(f"Error updating job status: {str(e)}")
         return False
 
+
+_SNAPSHOT_TYPES = (
+    TaskType.PIPELINE_SNAPSHOT,
+    TaskType.ENTITY_SNAPSHOT,
+    TaskType.GROUP_SNAPSHOT,
+)
+_FLAG_SNAPSHOT_TYPES = (
+    TaskType.PIPELINE_START,
+    TaskType.ENTITY_START,
+    TaskType.PIPELINE_REDO,
+    TaskType.ENTITY_REDO,
+    TaskType.GROUP_REDO,
+)
+
+
+def _job_sends_with_snapshot(job) -> bool:
+    """Snapshot UI events always send with_snapshot; redo/start honor the job flag."""
+    if job.task_type in _SNAPSHOT_TYPES:
+        return True
+    return bool(job.with_snapshot and job.task_type in _FLAG_SNAPSHOT_TYPES)
+
+
 def execute_job(job: ScheduledJob) -> bool:
     """Execute the job based on its type and parameters"""
     try:
@@ -195,13 +217,15 @@ def execute_job(job: ScheduledJob) -> bool:
         logger.info(f"Using API URL: {base_url} (SSL: {ssl_enabled})")
         
         # Determine the endpoint based on task type
+        # Snapshot UI events share the CoreHub redo path with explicit redo tasks.
         if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/play"
         elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/pause"
-        elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo"
-        elif job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
+        elif job.task_type in [
+            TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT,
+            TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO,
+        ]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo"
         elif job.task_type in [TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo-group"
@@ -220,18 +244,7 @@ def execute_job(job: ScheduledJob) -> bool:
         if group_ids and job.task_type in [TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
             json_data["group_ids"] = group_ids
 
-        # Snapshot UI events always send with_snapshot=true; redo/start honor the job flag
-        if job.task_type in [
-            TaskType.PIPELINE_SNAPSHOT,
-            TaskType.ENTITY_SNAPSHOT,
-            TaskType.GROUP_SNAPSHOT,
-        ] or (job.with_snapshot and job.task_type in [
-            TaskType.PIPELINE_START,
-            TaskType.ENTITY_START,
-            TaskType.PIPELINE_REDO,
-            TaskType.ENTITY_REDO,
-            TaskType.GROUP_REDO,
-        ]):
+        if _job_sends_with_snapshot(job):
             json_data["with_snapshot"] = True
 
         # Include snapshot_write_method where applicable (snapshot, redo)
