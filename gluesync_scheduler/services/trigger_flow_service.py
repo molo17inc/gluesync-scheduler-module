@@ -207,20 +207,18 @@ class TriggerFlowService:
         if old_event:
             try:
                 chain_execution_service.sync_delete_platform_event_webhook(flow_id)
-            except Exception as exc:
-                logger.error(
-                    "Failed to delete old platform event webhook for flow %d: %s",
+            except Exception:
+                logger.exception(
+                    "Failed to delete old platform event webhook for flow %d",
                     flow_id,
-                    exc,
                 )
         if new_event:
             try:
                 chain_execution_service.sync_register_platform_event_webhook(flow_id, new_event)
-            except Exception as exc:
-                logger.error(
-                    "Failed to register new platform event webhook for flow %d: %s",
+            except Exception:
+                logger.exception(
+                    "Failed to register new platform event webhook for flow %d",
                     flow_id,
-                    exc,
                 )
 
     def update_flow(self, flow_id: int, data: TriggerFlowUpdate) -> Optional[TriggerFlow]:
