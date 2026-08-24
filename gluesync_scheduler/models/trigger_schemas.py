@@ -50,8 +50,8 @@ class TriggerEventMode(str, Enum):
 
 class TriggerRouting(str, Enum):
     """How a platform-event trigger selects which action to run."""
-    ORIGIN = ROUTING_ORIGIN  # Route to the source
-    BROADCAST = ROUTING_BROADCAST  # Broadcast
+    ORIGIN = ROUTING_ORIGIN
+    BROADCAST = ROUTING_BROADCAST
 
 
 class TriggerEventBase(BaseModel):

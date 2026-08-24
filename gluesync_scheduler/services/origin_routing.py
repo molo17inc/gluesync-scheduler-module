@@ -138,36 +138,53 @@ def _id_from_mapping(mapping: Dict[str, Any]) -> Tuple[Optional[str], Optional[s
     return None, None
 
 
+def _nested_payload_dicts(root: Dict[str, Any]) -> List[Dict[str, Any]]:
+    containers: List[Dict[str, Any]] = [root]
+    for key in ("event", "data", "payload", "body"):
+        nested = _as_dict(root.get(key))
+        if nested is not None:
+            containers.append(nested)
+    return containers
+
+
+def _source_from_declared(container: Dict[str, Any]) -> Optional[EventSource]:
+    """Prefer Hub ``source`` {kind, id}; also accept a bare source id string."""
+    source_obj = container.get("source")
+    if isinstance(source_obj, dict):
+        sid, id_key = _id_from_mapping(source_obj)
+        if sid:
+            return EventSource(kind=_kind_from_mapping(source_obj, id_key), id=sid)
+        return None
+    if source_obj is None:
+        return None
+    sid = _stringify_id(source_obj)
+    if not sid:
+        return None
+    return EventSource(kind=None, id=sid)
+
+
+def _source_from_legacy_ids(container: Dict[str, Any]) -> Optional[EventSource]:
+    sid, id_key = _id_from_mapping(container)
+    if not sid:
+        return None
+    return EventSource(kind=_kind_from_mapping(container, id_key), id=sid)
+
+
 def extract_event_source(payload: Optional[Dict[str, Any]]) -> Optional[EventSource]:
     """Read Hub ``event.source {kind, id}`` or fall back to today's id fields."""
     root = _as_dict(payload)
     if root is None:
         return None
 
-    containers: List[Dict[str, Any]] = [root]
-    for key in ("event", "data", "payload", "body"):
-        nested = _as_dict(root.get(key))
-        if nested is not None:
-            containers.append(nested)
-
-    # Prefer an explicit source object (stable Hub contract).
+    containers = _nested_payload_dicts(root)
     for container in containers:
-        source_obj = container.get("source")
-        if isinstance(source_obj, dict):
-            sid, id_key = _id_from_mapping(source_obj)
-            if sid:
-                kind = _kind_from_mapping(source_obj, id_key)
-                return EventSource(kind=kind, id=sid)
-        elif source_obj is not None:
-            sid = _stringify_id(source_obj)
-            if sid:
-                return EventSource(kind=None, id=sid)
-
+        declared = _source_from_declared(container)
+        if declared is not None:
+            return declared
     for container in containers:
-        sid, id_key = _id_from_mapping(container)
-        if sid:
-            return EventSource(kind=_kind_from_mapping(container, id_key), id=sid)
-
+        legacy = _source_from_legacy_ids(container)
+        if legacy is not None:
+            return legacy
     return None
 
 
