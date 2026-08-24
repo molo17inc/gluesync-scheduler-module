@@ -107,6 +107,7 @@ class TriggerFlow(Base):
     description = Column(String, nullable=True)
     enabled = Column(Boolean, default=True, nullable=False)
     platform_event = Column(String, nullable=True)
+    routing = Column(String, nullable=True)  # "origin" | "broadcast"; null = broadcast
     secret_token = Column(String, nullable=False)
     last_triggered = Column(TIMESTAMP(timezone=True), nullable=True)
     last_successful_trigger = Column(TIMESTAMP(timezone=True), nullable=True)

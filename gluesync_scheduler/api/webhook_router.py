@@ -158,6 +158,14 @@ async def platform_event_notify(
             detail=f"Invalid X-Trigger-Flow-ID header: {x_trigger_flow_id}",
         )
 
+    body: Dict[str, Any] = {}
+    try:
+        parsed = await request.json()
+        if isinstance(parsed, dict):
+            body = parsed
+    except Exception:
+        body = {}
+
     logger.info("platform_event_notify: received callback for flow_id=%d", flow_id)
 
     # Fire the trigger flow in the background
@@ -176,7 +184,9 @@ async def platform_event_notify(
             if not flow.enabled:
                 logger.info("platform_event_notify: flow %d is disabled — skipping", flow_id)
                 return
-            success, err = await svc.fire(flow_id, source="platform_event")
+            success, err = await svc.fire(
+                flow_id, source="platform_event", event_payload=body
+            )
             if not success:
                 logger.error("platform_event_notify: flow %d execution failed: %s", flow_id, err)
         finally:

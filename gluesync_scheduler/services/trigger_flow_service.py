@@ -42,6 +42,12 @@ from gluesync_scheduler.services.chain_execution_service import (
     _get_chronos_callback_base,
     chain_execution_service,
 )
+from gluesync_scheduler.services.origin_routing import (
+    ROUTING_BROADCAST,
+    default_routing_for_platform_event,
+    filter_events_for_routing,
+    normalize_routing,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,11 +140,13 @@ class TriggerFlowService:
         Returns (flow, plaintext_token) — the token is only handed back here.
         """
         token = _generate_token()
+        routing = data.routing.value if getattr(data, "routing", None) is not None else default_routing_for_platform_event(data.platform_event)
         flow = TriggerFlow(
             name=data.name,
             description=data.description,
             enabled=data.enabled,
             platform_event=data.platform_event,
+            routing=routing,
             secret_token=token,
         )
         self.db.add(flow)
@@ -179,6 +187,8 @@ class TriggerFlowService:
             flow.enabled = data.enabled
         if data.platform_event is not None:
             flow.platform_event = data.platform_event
+        if data.routing is not None:
+            flow.routing = data.routing.value if hasattr(data.routing, "value") else normalize_routing(data.routing)
 
         if data.events is not None:
             # Replace events atomically
@@ -260,11 +270,19 @@ class TriggerFlowService:
     # Fire
     # ------------------------------------------------------------------
 
-    async def fire(self, flow_id: int, source: str = "manual") -> Tuple[bool, str]:
+    async def fire(
+        self,
+        flow_id: int,
+        source: str = "manual",
+        event_payload: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, str]:
         """Execute the TriggerFlow chain.
 
         Updates last_triggered on the flow record.
         Returns (success, error_message).
+
+        When the flow uses origin routing and ``source`` is a platform event,
+        only actions whose target matches ``event.source`` (kind + id) run.
         """
         flow = self.db.query(TriggerFlow).filter(TriggerFlow.id == flow_id).first()
         if flow is None:
@@ -276,6 +294,18 @@ class TriggerFlowService:
             .order_by(TriggerFlowEvent.position)
             .all()
         )
+
+        routing = flow.routing or ROUTING_BROADCAST
+        if source == "platform_event":
+            events = filter_events_for_routing(
+                events, routing, event_payload, flow_id=flow_id
+            )
+            if routing == "origin" and not events:
+                logger.info(
+                    "TriggerFlow %d origin routing: no matching target — no-op",
+                    flow_id,
+                )
+                return True, ""
 
         now = datetime.now(tz=timezone.utc)
         flow.last_triggered = now
