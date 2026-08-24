@@ -172,13 +172,7 @@ class TriggerFlowService:
 
         return flow, token
 
-    def update_flow(self, flow_id: int, data: TriggerFlowUpdate) -> Optional[TriggerFlow]:
-        flow = self.db.query(TriggerFlow).filter(TriggerFlow.id == flow_id).first()
-        if flow is None:
-            return None
-
-        old_platform_event = flow.platform_event
-
+    def _apply_flow_field_updates(self, flow: TriggerFlow, data: TriggerFlowUpdate) -> None:
         if data.name is not None:
             flow.name = data.name
         if data.description is not None:
@@ -188,33 +182,62 @@ class TriggerFlowService:
         if data.platform_event is not None:
             flow.platform_event = data.platform_event
         if data.routing is not None:
-            flow.routing = data.routing.value if hasattr(data.routing, "value") else normalize_routing(data.routing)
+            flow.routing = (
+                data.routing.value
+                if hasattr(data.routing, "value")
+                else normalize_routing(data.routing)
+            )
 
+    def _replace_flow_events(self, flow_id: int, events: List[TriggerEventCreate]) -> None:
+        self.db.query(TriggerFlowEvent).filter(
+            TriggerFlowEvent.trigger_flow_id == flow_id
+        ).delete()
+        for ev in _events_to_orm(events, flow_id):
+            self.db.add(ev)
+
+    def _maybe_reregister_platform_webhook(
+        self,
+        flow_id: int,
+        requested_event: Optional[str],
+        old_event: Optional[str],
+        new_event: Optional[str],
+    ) -> None:
+        if requested_event is None or new_event == old_event:
+            return
+        if old_event:
+            try:
+                chain_execution_service.sync_delete_platform_event_webhook(flow_id)
+            except Exception as exc:
+                logger.error(
+                    "Failed to delete old platform event webhook for flow %d: %s",
+                    flow_id,
+                    exc,
+                )
+        if new_event:
+            try:
+                chain_execution_service.sync_register_platform_event_webhook(flow_id, new_event)
+            except Exception as exc:
+                logger.error(
+                    "Failed to register new platform event webhook for flow %d: %s",
+                    flow_id,
+                    exc,
+                )
+
+    def update_flow(self, flow_id: int, data: TriggerFlowUpdate) -> Optional[TriggerFlow]:
+        flow = self.db.query(TriggerFlow).filter(TriggerFlow.id == flow_id).first()
+        if flow is None:
+            return None
+
+        old_platform_event = flow.platform_event
+        self._apply_flow_field_updates(flow, data)
         if data.events is not None:
-            # Replace events atomically
-            self.db.query(TriggerFlowEvent).filter(
-                TriggerFlowEvent.trigger_flow_id == flow_id
-            ).delete()
-            for ev in _events_to_orm(data.events, flow_id):
-                self.db.add(ev)
+            self._replace_flow_events(flow_id, data.events)
 
         self.db.commit()
         self.db.refresh(flow)
-
-        # Re-register webhook if platform_event changed
-        new_platform_event = flow.platform_event
-        if data.platform_event is not None and new_platform_event != old_platform_event:
-            if old_platform_event:
-                try:
-                    chain_execution_service.sync_delete_platform_event_webhook(flow_id)
-                except Exception as exc:
-                    logger.error("Failed to delete old platform event webhook for flow %d: %s", flow_id, exc)
-            if new_platform_event:
-                try:
-                    chain_execution_service.sync_register_platform_event_webhook(flow_id, new_platform_event)
-                except Exception as exc:
-                    logger.error("Failed to register new platform event webhook for flow %d: %s", flow_id, exc)
-
+        self._maybe_reregister_platform_webhook(
+            flow_id, data.platform_event, old_platform_event, flow.platform_event
+        )
         return self.get_flow(flow_id)
 
     def toggle_enabled(self, flow_id: int, enabled: bool) -> Optional[TriggerFlow]:
