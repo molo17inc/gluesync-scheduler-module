@@ -121,6 +121,33 @@ class TestExtractAndMatch:
         assert out == evs
 
 
+    def test_extract_nested_event_source(self):
+        src = extract_event_source({"event": {"source": {"kind": "group", "id": "g-1"}}})
+        assert src == EventSource(kind="group", id="g-1")
+
+    def test_extract_objectId_fallback(self):
+        src = extract_event_source({"data": {"objectId": "obj-2"}})
+        assert src == EventSource(kind="object", id="obj-2")
+
+    def test_job_target_matches_group(self):
+        ev = _ns_event(group_ids=["g-1"])
+        assert job_target_matches(ev, EventSource(kind="group", id="g-1")) is True
+        assert job_target_matches(ev, EventSource(kind="group", id="g-x")) is False
+
+    def test_unknown_routing_treated_as_broadcast(self):
+        evs = [_ns_event(entity_ids=["a"])]
+        out = filter_events_for_routing(evs, "sideways", {"source": {"kind": "table", "id": "z"}})
+        assert out == evs
+
+    def test_substring_table_reorg_is_entity_scoped(self):
+        assert default_routing_for_platform_event("DB2_TABLE_REORG_COMPLETED") == ROUTING_ORIGIN
+
+    def test_normalize_routing_rejects_unknown(self):
+        with pytest.raises(ValueError):
+            normalize_routing("sideways")
+
+
+
 class TestDispatch:
     def _seed_flow(self, db, routing, entity_ids):
         flow = TriggerFlow(
@@ -225,3 +252,29 @@ class TestDispatch:
         ran = exec_mock.await_args.args[1]
         assert len(ran) == 1
         assert json.loads(ran[0].entity_ids) == ["legacy-1"]
+
+    def test_origin_empty_payload_is_noop(self, db_session):
+        flow_id = self._seed_flow(db_session, ROUTING_ORIGIN, ["t-a"])
+        svc = TriggerFlowService(db_session)
+        with patch(
+            "gluesync_scheduler.services.trigger_flow_service.chain_execution_service.execute_trigger_flow",
+            new=AsyncMock(return_value=True),
+        ) as exec_mock:
+            ok, _ = asyncio.run(svc.fire(flow_id, source="platform_event", event_payload={}))
+        assert ok is True
+        exec_mock.assert_not_awaited()
+
+    def test_update_flow_persists_routing(self, db_session):
+        from gluesync_scheduler.models.trigger_schemas import TriggerFlowUpdate
+        svc = TriggerFlowService(db_session)
+        data = TriggerFlowCreate(
+            name="upd",
+            platform_event="ENTITY_CDC_STARTED",
+            events=[_entity_event("e1")],
+        )
+        flow, _ = svc.create_flow(data)
+        assert flow.routing == ROUTING_BROADCAST
+        svc.update_flow(flow.id, TriggerFlowUpdate(routing=TriggerRouting.ORIGIN))
+        stored = db_session.query(TriggerFlow).filter_by(id=flow.id).first()
+        assert stored.routing == ROUTING_ORIGIN
+

@@ -21,6 +21,7 @@
  * Copyright (C) 2025 MOLO17. All rights reserved.
 """
 
+import json
 import logging
 from typing import Any, Dict, Optional
 
@@ -163,7 +164,7 @@ async def platform_event_notify(
         parsed = await request.json()
         if isinstance(parsed, dict):
             body = parsed
-    except Exception:
+    except (ValueError, TypeError, json.JSONDecodeError):
         body = {}
 
     logger.info("platform_event_notify: received callback for flow_id=%d", flow_id)
