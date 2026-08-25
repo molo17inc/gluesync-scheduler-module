@@ -620,17 +620,9 @@ class CoreHubClient:
                 return str(value)
         return None
 
-    _SETTLED_STATUS_NAMES = frozenset({
-        "hold",
-        "pause",
-        "paused",
-        "error",
-        "warning",
-    })
-
     @staticmethod
     def _has_nonempty_state(entry: Dict[str, Any], key: str) -> bool:
-        """True when ``entry[key]`` is a non-null, non-empty error/warning payload."""
+        """True when ``entry[key]`` is a non-null, non-empty payload."""
         if not isinstance(entry, dict):
             return False
         state = entry.get(key)
@@ -642,43 +634,44 @@ class CoreHubClient:
 
     @staticmethod
     def _entity_has_error(entry: Dict[str, Any]) -> bool:
-        """Return True when ``errorState`` denotes an actual error.
+        """Return True when ``errorState`` denotes an actual error or warning.
 
-        Mirrors the CoreHub / MPP UI computation: an error is present only when
+        Mirrors the CoreHub / MPP UI computation: an issue is present only when
         ``errorState`` is a non-null **and non-empty** object. An empty ``{}``
-        (cleared error) is treated as no error, matching the Kotlin MCP code.
+        (cleared issue) is treated as no error, matching the Kotlin MCP code.
+        Hub !2219 stores WARNING vs ERROR on ``errorState.severity``.
         """
         return CoreHubClient._has_nonempty_state(entry, "errorState")
 
     @staticmethod
-    def _entity_has_warning(entry: Dict[str, Any]) -> bool:
-        """Return True when ``warningState`` denotes an actual warning."""
-        return CoreHubClient._has_nonempty_state(entry, "warningState")
-
-    @staticmethod
-    def _entity_status_name(entry: Dict[str, Any]) -> Optional[str]:
+    def _error_state_severity(entry: Dict[str, Any]) -> Optional[str]:
+        """Return ``errorState.severity`` uppercased, or None."""
         if not isinstance(entry, dict):
             return None
-        for key in ("status", "entityStatus", "state"):
-            raw = entry.get(key)
-            if isinstance(raw, str) and raw.strip():
-                return raw.strip().lower()
+        state = entry.get("errorState")
+        if not isinstance(state, dict):
+            return None
+        raw = state.get("severity")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().upper()
         return None
 
     @staticmethod
-    def _is_entity_settled(entry: Dict[str, Any]) -> bool:
-        """Return True when an entity is no longer actively running.
+    def _entity_has_warning(entry: Dict[str, Any]) -> bool:
+        """Return True when Hub reports ``errorState.severity == WARNING``."""
+        return CoreHubClient._error_state_severity(entry) == "WARNING"
 
-        Hold (paused), Error, and Warning are acceptable states to move forward
-        with the following command. Only Active (syncing or snapshotting) keeps
-        us waiting. An explicit warning/error status or payload is settled even
-        if Hub still reports sync/migration flags.
+    @staticmethod
+    def _is_entity_settled(entry: Dict[str, Any]) -> bool:
+        """Return True when redo may proceed for this entity.
+
+        Hold (paused), Error, and Warning are acceptable. Warning and Error
+        remain settled even if Hub still reports ``isSyncActive`` /
+        ``isMigrationActive`` (Hub !2219: an entity can keep running while
+        Warning, same as Error).
         """
         if not isinstance(entry, dict):
             return False
-        name = CoreHubClient._entity_status_name(entry)
-        if name in CoreHubClient._SETTLED_STATUS_NAMES:
-            return True
         if CoreHubClient._entity_has_error(entry) or CoreHubClient._entity_has_warning(entry):
             return True
         if entry.get("isSyncActive") or entry.get("isMigrationActive"):
