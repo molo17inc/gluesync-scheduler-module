@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Unit tests for pause-then-poll-settled (Hold or Error) before redo."""
+"""Unit tests for pause-then-poll-settled (Hold, Error, or Warning) before redo."""
 
 import os
 from unittest.mock import patch
@@ -58,6 +58,42 @@ def test_is_entity_settled_true_when_error_state_empty_object(client):
     # Empty {} is a cleared error (Hold), still settled.
     entry = {"entityId": "e1", "isSyncActive": False, "isMigrationActive": False, "errorState": {}}
     assert client._is_entity_settled(entry) is True
+
+
+def test_is_entity_settled_true_when_warning_state_set(client):
+    entry = {
+        "entityId": "e1",
+        "isSyncActive": False,
+        "isMigrationActive": False,
+        "warningState": {"code": "LAG"},
+    }
+    assert client._is_entity_settled(entry) is True
+
+
+def test_is_entity_settled_true_when_status_warning(client):
+    entry = {
+        "entityId": "e1",
+        "isSyncActive": False,
+        "isMigrationActive": False,
+        "status": "WARNING",
+    }
+    assert client._is_entity_settled(entry) is True
+
+
+def test_is_entity_settled_true_when_warning_even_if_sync_flag(client):
+    entry = {
+        "entityId": "e1",
+        "isSyncActive": True,
+        "isMigrationActive": False,
+        "status": "warning",
+    }
+    assert client._is_entity_settled(entry) is True
+
+
+def test_entity_has_warning_empty_object_is_not_warning(client):
+    assert client._entity_has_warning({"warningState": {}}) is False
+    assert client._entity_has_warning({"warningState": None}) is False
+    assert client._entity_has_warning({"warningState": {"code": "LAG"}}) is True
 
 
 def test_entity_has_error_empty_object_is_not_error(client):

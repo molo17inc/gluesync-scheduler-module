@@ -593,7 +593,7 @@ class CoreHubClient:
 
         Calls the CoreHub ``GET /pipelines/{pipeline_id}/entities-status`` endpoint,
         which returns the same status data the MPP UI uses to render Active / Hold /
-        Error. Each entry carries ``isSyncActive``, ``isMigrationActive``,
+        Error / Warning. Each entry carries ``isSyncActive``, ``isMigrationActive``,
         ``isBusy`` and ``errorState`` flags.
 
         Returns:
@@ -620,6 +620,26 @@ class CoreHubClient:
                 return str(value)
         return None
 
+    _SETTLED_STATUS_NAMES = frozenset({
+        "hold",
+        "pause",
+        "paused",
+        "error",
+        "warning",
+    })
+
+    @staticmethod
+    def _has_nonempty_state(entry: Dict[str, Any], key: str) -> bool:
+        """True when ``entry[key]`` is a non-null, non-empty error/warning payload."""
+        if not isinstance(entry, dict):
+            return False
+        state = entry.get(key)
+        if state is None:
+            return False
+        if isinstance(state, dict):
+            return len(state) > 0
+        return bool(state)
+
     @staticmethod
     def _entity_has_error(entry: Dict[str, Any]) -> bool:
         """Return True when ``errorState`` denotes an actual error.
@@ -628,30 +648,41 @@ class CoreHubClient:
         ``errorState`` is a non-null **and non-empty** object. An empty ``{}``
         (cleared error) is treated as no error, matching the Kotlin MCP code.
         """
-        error_state = entry.get('errorState') if isinstance(entry, dict) else None
-        if error_state is None:
-            return False
-        if isinstance(error_state, dict):
-            return len(error_state) > 0
-        # A non-null, non-dict value (e.g. a non-empty string) also counts as an error.
-        return bool(error_state)
+        return CoreHubClient._has_nonempty_state(entry, "errorState")
+
+    @staticmethod
+    def _entity_has_warning(entry: Dict[str, Any]) -> bool:
+        """Return True when ``warningState`` denotes an actual warning."""
+        return CoreHubClient._has_nonempty_state(entry, "warningState")
+
+    @staticmethod
+    def _entity_status_name(entry: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(entry, dict):
+            return None
+        for key in ("status", "entityStatus", "state"):
+            raw = entry.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip().lower()
+        return None
 
     @staticmethod
     def _is_entity_settled(entry: Dict[str, Any]) -> bool:
         """Return True when an entity is no longer actively running.
 
-        Both Hold (paused) and Error are acceptable states to move forward with
-        the following command — only Active (syncing or snapshotting) keeps us
-        waiting. This mirrors the CoreHub / MPP UI computation where an entity is
-        ``active`` if ``isSyncActive`` or ``isMigrationActive`` is true, and
-        otherwise resolves to ``hold`` or ``error``.
+        Hold (paused), Error, and Warning are acceptable states to move forward
+        with the following command. Only Active (syncing or snapshotting) keeps
+        us waiting. An explicit warning/error status or payload is settled even
+        if Hub still reports sync/migration flags.
         """
         if not isinstance(entry, dict):
             return False
-        # Active = still syncing or migrating; keep waiting.
-        if entry.get('isSyncActive') or entry.get('isMigrationActive'):
+        name = CoreHubClient._entity_status_name(entry)
+        if name in CoreHubClient._SETTLED_STATUS_NAMES:
+            return True
+        if CoreHubClient._entity_has_error(entry) or CoreHubClient._entity_has_warning(entry):
+            return True
+        if entry.get("isSyncActive") or entry.get("isMigrationActive"):
             return False
-        # Not active: either Hold (paused) or Error — both are good to proceed.
         return True
 
     def _pending_settled_ids(self, statuses, target_ids):
@@ -669,7 +700,7 @@ class CoreHubClient:
         return pending
 
     def _wait_targets_or_proceed(self, pipeline_id, entity_ids, timeout_error, missing_warning) -> bool:
-        """Wait for Hold/Error, or continue without polling when IDs cannot be resolved."""
+        """Wait for Hold/Error/Warning, or continue without polling when IDs cannot be resolved."""
         if entity_ids:
             if not self._wait_for_entities_settled(pipeline_id, entity_ids):
                 logger.error(timeout_error)
@@ -683,10 +714,9 @@ class CoreHubClient:
                                    poll_interval: Optional[float] = None) -> bool:
         """Poll CoreHub until every entity in ``entity_ids`` is no longer Active.
 
-        An entity is considered ready to proceed when it reports either Hold
-        (paused) or Error — i.e. it is not actively syncing or snapshotting.
-        Only the Active state (``isSyncActive`` or ``isMigrationActive`` true)
-        keeps the poller waiting.
+        An entity is considered ready to proceed when it reports Hold (paused),
+        Error, or Warning. Only the Active state (``isSyncActive`` or
+        ``isMigrationActive`` true, with no error/warning) keeps the poller waiting.
 
         Args:
             pipeline_id: Pipeline hosting the entities.
@@ -697,7 +727,7 @@ class CoreHubClient:
                 ``CHRONOS_REDO_POLL_INTERVAL`` or 5s).
 
         Returns:
-            True if all entities reached Hold/Error within the timeout, False otherwise.
+            True if all entities reached Hold/Error/Warning within the timeout, False otherwise.
         """
         if not entity_ids:
             return True
@@ -713,7 +743,7 @@ class CoreHubClient:
 
         logger.info(
             f"Waiting for {len(target_ids)} entity(ies) in pipeline {pipeline_id} "
-            f"to leave the Active state (Hold or Error accepted) "
+            f"to leave the Active state (Hold, Error, or Warning accepted) "
             f"(timeout={timeout}s, poll={poll_interval}s)"
         )
 
@@ -725,7 +755,7 @@ class CoreHubClient:
             if not pending:
                 logger.info(
                     f"All {len(target_ids)} target entity(ies) in pipeline "
-                    f"{pipeline_id} are now settled (Hold or Error)"
+                    f"{pipeline_id} are now settled (Hold, Error, or Warning)"
                 )
                 return True
 
