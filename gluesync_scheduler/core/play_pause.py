@@ -132,6 +132,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _extract_saved_query_fields(payload):
+    """Return (sql, agent_id) from a CoreHub saved-query payload, or (None, None)."""
+    if not isinstance(payload, dict) or payload.get("status") == "error":
+        return None, None
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if not isinstance(data, dict):
+        return None, None
+    sql = None
+    for key in ("sql", "querySql", "query_sql", "query"):
+        val = data.get(key)
+        if val and str(val).strip():
+            sql = str(val)
+            break
+    if not sql:
+        return None, None
+    agent = None
+    for key in ("agentId", "agent_id", "agent"):
+        val = data.get(key)
+        if val and str(val).strip():
+            agent = str(val)
+            break
+    return sql, agent
+
+
 class CoreHubClient:
     """Client for interacting with the Gluesync Core Hub API"""
     
@@ -1205,12 +1229,66 @@ class CoreHubClient:
         """Return CoreHub Query Studio agents payload as-is."""
         return self.fetch_core_hub("/query-studio/agents", method="GET", raw=True)
 
-    def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str) -> bool:
+    def fetch_saved_query(self, saved_query_id: str):
+        """GET CoreHub Query Studio saved query by id (raw Hub payload)."""
+        from urllib.parse import quote
+        path = f"/query-studio/saved-queries/{quote(str(saved_query_id), safe='')}"
+        return self.fetch_core_hub(path, method="GET", raw=True)
+
+    def resolve_query_studio_execution(self, agent_id, query_sql, saved_query_id=None):
+        """Prefer live Hub SQL for a saved query; fall back to stored snapshot.
+
+        Returns (agent_id, query_sql) or (None, None) if neither live nor snapshot SQL is available.
+        On 404/403/failure fetching the saved query, uses the stored query_sql snapshot.
+        """
+        snapshot_sql = query_sql if query_sql and str(query_sql).strip() else None
+        resolved_agent = agent_id if agent_id and str(agent_id).strip() else None
+        resolved_sql = snapshot_sql
+
+        sid = str(saved_query_id).strip() if saved_query_id and str(saved_query_id).strip() else None
+        if sid:
+            try:
+                payload = self.fetch_saved_query(sid)
+            except Exception:
+                logger.exception(
+                    "Failed to fetch Query Studio saved query %s; using snapshot", sid
+                )
+                payload = None
+            live_sql, live_agent = _extract_saved_query_fields(payload)
+            if live_sql:
+                resolved_sql = live_sql
+                if live_agent:
+                    resolved_agent = live_agent
+                logger.info("Using live SQL from Query Studio saved query %s", sid)
+            else:
+                logger.warning(
+                    "Query Studio saved query %s unavailable (404/403/failure); falling back to stored snapshot",
+                    sid,
+                )
+
+        if not resolved_sql or not resolved_agent:
+            return None, None
+        return resolved_agent, resolved_sql
+
+    def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str, saved_query_id: str = None) -> bool:
         """Execute a Query Studio SQL query against a pipeline agent.
 
+        If saved_query_id is set, try Hub live SQL first and fall back to query_sql snapshot.
         Hub HTTP 2xx with status ERROR / failed query is treated as failure.
         """
         from gluesync_scheduler.models.models import preview_query_sql
+
+        resolved_agent, resolved_sql = self.resolve_query_studio_execution(
+            agent_id, query_sql, saved_query_id
+        )
+        if not resolved_agent or not resolved_sql:
+            logger.error(
+                "Query Studio execute missing agent_id/SQL for pipeline %s (saved_query_id=%s)",
+                pipeline_id, saved_query_id,
+            )
+            return False
+        agent_id = resolved_agent
+        query_sql = resolved_sql
 
         logger.info(
             "Executing Query Studio SQL on pipeline %s agent %s: %s",
@@ -1696,12 +1774,12 @@ class PipelineManager:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.client.exit_maintenance_mode, pipeline_id)
 
-    async def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str) -> bool:
+    async def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str, saved_query_id: str = None) -> bool:
         """Execute a Query Studio SQL query via CoreHub."""
-        logger.info("Query Studio execute pipeline=%s agent=%s", pipeline_id, agent_id)
+        logger.info("Query Studio execute pipeline=%s agent=%s saved_query_id=%s", pipeline_id, agent_id, saved_query_id)
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, self.client.execute_query_studio, pipeline_id, agent_id, query_sql
+            None, self.client.execute_query_studio, pipeline_id, agent_id, query_sql, saved_query_id
         )
 
 

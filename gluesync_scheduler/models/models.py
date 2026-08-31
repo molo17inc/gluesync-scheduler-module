@@ -62,17 +62,25 @@ def preview_query_sql(query_sql, limit=QUERY_STUDIO_SQL_PREVIEW_LEN):
     return text[:limit] + "..."
 
 
-def require_query_studio_fields(task_type, agent_id, query_sql):
-    """Validate agent_id + query_sql when task_type is QUERY_STUDIO.
+def _nonempty(value):
+    return bool(value and str(value).strip())
 
+
+def require_query_studio_fields(task_type, agent_id, query_sql, saved_query_id=None):
+    """Validate QUERY_STUDIO fields.
+
+    agent_id is always required. Either query_sql or saved_query_id (or both)
+    must be non-empty. Custom query: saved_query_id null + query_sql required.
+    Saved query: saved_query_id set; query_sql is an optional snapshot of the
+    SQL at save time (the UI always sends it, but missing SQL is still accepted).
     entity_ids / group_ids / with_snapshot are ignored for this task type.
     """
     if task_type != TaskType.QUERY_STUDIO:
         return
-    if not (agent_id and str(agent_id).strip()):
+    if not _nonempty(agent_id):
         raise ValueError("query_studio requires a non-empty agent_id")
-    if not (query_sql and str(query_sql).strip()):
-        raise ValueError("query_studio requires a non-empty query_sql")
+    if not _nonempty(query_sql) and not _nonempty(saved_query_id):
+        raise ValueError("query_studio requires a non-empty query_sql or saved_query_id")
 
 
 class ScheduledJob(Base):
@@ -90,6 +98,7 @@ class ScheduledJob(Base):
     snapshot_write_method = Column(String, nullable=False, default='UPSERT')
     agent_id = Column(String, nullable=True)
     query_sql = Column(Text, nullable=True)
+    saved_query_id = Column(String, nullable=True)
     enabled = Column(Boolean, default=True)
     command = Column(Text, nullable=False)
     cron_job_identifier = Column(String, nullable=False, unique=True)
@@ -124,6 +133,7 @@ class ChainedJobEvent(Base):
     snapshot_write_method = Column(String, nullable=False, default="UPSERT")
     agent_id = Column(String, nullable=True)
     query_sql = Column(Text, nullable=True)
+    saved_query_id = Column(String, nullable=True)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     webhook_timeout_seconds = Column(Integer, nullable=False, default=3600)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
@@ -161,6 +171,7 @@ class TriggerFlowEvent(Base):
     snapshot_write_method = Column(String, nullable=False, default="UPSERT")
     agent_id = Column(String, nullable=True)
     query_sql = Column(Text, nullable=True)
+    saved_query_id = Column(String, nullable=True)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))

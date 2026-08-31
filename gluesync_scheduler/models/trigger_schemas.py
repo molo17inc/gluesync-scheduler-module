@@ -54,7 +54,8 @@ class TriggerEventBase(BaseModel):
         pattern="^(UPSERT|INSERT)$",
     )
     agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
-    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required when task_type is query_studio)")
+    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
+    saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
     execution_mode: TriggerEventMode = Field(
         TriggerEventMode.ASYNC,
         description="async: fire-and-forget; sync: wait for corehub webhook callback before next event",
@@ -62,7 +63,7 @@ class TriggerEventBase(BaseModel):
 
     @model_validator(mode="after")
     def _validate_query_studio(self):
-        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql)
+        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
         return self
 
 

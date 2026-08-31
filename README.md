@@ -404,7 +404,13 @@ Stored fields:
 
 - `pipeline_id` — pipeline that hosts the target agent
 - `agent_id` — Query Studio agent to execute against
-- `query_sql` — SQL text (do **not** put SQL on the crontab command line)
+- `query_sql` — SQL text (do **not** put SQL on the crontab command line). Required for a **custom query**. For a **saved query** this is a snapshot of the SQL at save time (the UI always sends it).
+- `saved_query_id` — optional CoreHub saved-query id. When set, Chronos targets that saved query rather than custom SQL only.
+
+A Query Studio task can target either:
+
+- **Custom SQL**: `saved_query_id` null, `query_sql` required
+- **Saved query**: `saved_query_id` set; `query_sql` is stored as a snapshot. If Hub is reachable, Chronos executes the live SQL from `GET {corehub}/query-studio/saved-queries/{id}` (and Hub `agentId` when present). On 404/403/failure it falls back to the stored snapshot. If both the live query and the snapshot are missing, the job fails.
 
 On fire, Chronos calls CoreHub:
 
@@ -421,7 +427,8 @@ HTTP 2xx with Hub `status` `ERROR` (failed query) is treated as a Chronos job fa
 The Control Plane Scheduler UI should bind:
 
 - an **agent picker** to `agent_id` (Chronos `GET /api/query-studio/agents` proxies CoreHub `GET /query-studio/agents`)
-- a **SQL code editor** to `query_sql`
+- a **saved-query picker** to `saved_query_id` (optional; omit for custom SQL)
+- a **SQL code editor** to `query_sql` (custom SQL, or snapshot when targeting a saved query)
 
 ## Scheduling Options
 

@@ -61,6 +61,7 @@ class ExecutableEvent:
     execution_mode: ExecutionMode
     agent_id: Optional[str] = None
     query_sql: Optional[str] = None
+    saved_query_id: Optional[str] = None
 
     @staticmethod
     def from_chained(event: "ChainedJobEvent") -> "ExecutableEvent":
@@ -76,6 +77,7 @@ class ExecutableEvent:
             execution_mode=event.execution_mode,
             agent_id=getattr(event, "agent_id", None),
             query_sql=getattr(event, "query_sql", None),
+            saved_query_id=getattr(event, "saved_query_id", None),
         )
 
     @staticmethod
@@ -92,6 +94,7 @@ class ExecutableEvent:
             execution_mode=event.execution_mode,
             agent_id=getattr(event, "agent_id", None),
             query_sql=getattr(event, "query_sql", None),
+            saved_query_id=getattr(event, "saved_query_id", None),
         )
 
 logger = logging.getLogger(__name__)
@@ -1178,7 +1181,10 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
 def _event_payload(event: ExecutableEvent) -> dict:
     """Build the Chronos internal pipeline-API payload for an executable event."""
     if event.task_type == TaskType.QUERY_STUDIO:
-        return {"agent_id": event.agent_id, "query_sql": event.query_sql}
+        payload = {"agent_id": event.agent_id, "query_sql": event.query_sql}
+        if event.saved_query_id:
+            payload["saved_query_id"] = event.saved_query_id
+        return payload
     payload: dict = {}
     entity_ids = _parse_json_list(event.entity_ids)
     group_ids = _parse_json_list(event.group_ids)

@@ -49,13 +49,14 @@ class ChainedEventBase(BaseModel):
     with_snapshot: bool = Field(False, description="Whether to include a snapshot")
     snapshot_write_method: str = Field("UPSERT", description="Snapshot write method: UPSERT or INSERT", pattern="^(UPSERT|INSERT)$")
     agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
-    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required when task_type is query_studio)")
+    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
+    saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
     execution_mode: ChainedEventMode = Field(ChainedEventMode.ASYNC, description="async: fire-and-forget; sync: wait for corehub webhook callback before next event")
     webhook_timeout_seconds: int = Field(3600, description="Timeout in seconds for waiting on webhook callback in sync mode (default: 3600 = 1 hour)", ge=1)
 
     @model_validator(mode="after")
     def _validate_query_studio(self):
-        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql)
+        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
         return self
 
 
@@ -130,7 +131,8 @@ class JobBase(BaseModel):
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
     snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
-    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required when task_type is query_studio)")
+    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
+    saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(
@@ -148,7 +150,7 @@ class JobBase(BaseModel):
 
     @model_validator(mode="after")
     def _validate_query_studio(self):
-        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql)
+        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
         return self
 
 
@@ -183,7 +185,8 @@ class JobUpdate(BaseModel):
     with_snapshot: Optional[bool] = Field(None, description="Updated snapshot setting")
     snapshot_write_method: Optional[str] = Field(None, description="Updated write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     agent_id: Optional[str] = Field(None, description="Updated Query Studio agent ID")
-    query_sql: Optional[str] = Field(None, description="Updated Query Studio SQL")
+    query_sql: Optional[str] = Field(None, description="Updated Query Studio SQL snapshot")
+    saved_query_id: Optional[str] = Field(None, description="Updated Query Studio saved-query ID")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(None, description="Replace all chained events with this list (pass empty list to clear)")
@@ -191,7 +194,7 @@ class JobUpdate(BaseModel):
     @model_validator(mode="after")
     def _validate_query_studio(self):
         if self.task_type == TaskType.QUERY_STUDIO:
-            require_query_studio_fields(self.task_type, self.agent_id, self.query_sql)
+            require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
         return self
 
     model_config = ConfigDict(

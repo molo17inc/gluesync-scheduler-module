@@ -216,6 +216,8 @@ def execute_job(job: ScheduledJob) -> bool:
         request_timeout = 30
         if job.task_type == TaskType.QUERY_STUDIO:
             json_data = {"agent_id": job.agent_id, "query_sql": job.query_sql}
+            if getattr(job, "saved_query_id", None):
+                json_data["saved_query_id"] = job.saved_query_id
             request_timeout = 120
         
         # Add entity_ids to the payload if present
@@ -269,6 +271,8 @@ def execute_job(job: ScheduledJob) -> bool:
                 "agent_id": job.agent_id,
                 "query_sql": preview_query_sql(job.query_sql),
             }
+            if getattr(job, "saved_query_id", None):
+                log_payload["saved_query_id"] = job.saved_query_id
         logger.info(f"JSON Payload: {log_payload}")
 
         response = requests.post(

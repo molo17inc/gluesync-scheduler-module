@@ -440,10 +440,10 @@ class JobService:
                     )
                 logger.info(f"Creating group job with {len(job_data.group_ids)} groups: {job_data.group_ids}")
 
-            require_query_studio_fields(job_data.task_type, job_data.agent_id, job_data.query_sql)
+            require_query_studio_fields(job_data.task_type, job_data.agent_id, job_data.query_sql, job_data.saved_query_id)
             if job_data.chained_events:
                 for ce in job_data.chained_events:
-                    require_query_studio_fields(ce.task_type, ce.agent_id, ce.query_sql)
+                    require_query_studio_fields(ce.task_type, ce.agent_id, ce.query_sql, ce.saved_query_id)
             
             # Create the database record
             db_job = ScheduledJob(
@@ -458,6 +458,7 @@ class JobService:
                 snapshot_write_method=job_data.snapshot_write_method,
                 agent_id=job_data.agent_id,
                 query_sql=job_data.query_sql,
+                saved_query_id=job_data.saved_query_id,
                 enabled=job_data.enabled,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -505,6 +506,7 @@ class JobService:
                         snapshot_write_method=ce.snapshot_write_method,
                         agent_id=ce.agent_id,
                         query_sql=ce.query_sql,
+                        saved_query_id=ce.saved_query_id,
                         execution_mode=ExecutionMode(ce.execution_mode.value),
                         webhook_timeout_seconds=ce.webhook_timeout_seconds,
                     )
@@ -606,10 +608,11 @@ class JobService:
 
             final_agent_id = update_data.get("agent_id", db_job.agent_id)
             final_query_sql = update_data.get("query_sql", db_job.query_sql)
-            require_query_studio_fields(final_task_type, final_agent_id, final_query_sql)
+            final_saved_query_id = update_data.get("saved_query_id", db_job.saved_query_id)
+            require_query_studio_fields(final_task_type, final_agent_id, final_query_sql, final_saved_query_id)
             if job_data.chained_events:
                 for ce in job_data.chained_events:
-                    require_query_studio_fields(ce.task_type, ce.agent_id, ce.query_sql)
+                    require_query_studio_fields(ce.task_type, ce.agent_id, ce.query_sql, ce.saved_query_id)
             
             # Handle schedule conversion to cron_expression if schedule is provided
             if "schedule" in update_data and update_data["schedule"]:
@@ -859,6 +862,7 @@ class JobService:
                             snapshot_write_method=ce.snapshot_write_method,
                             agent_id=ce.agent_id,
                             query_sql=ce.query_sql,
+                            saved_query_id=ce.saved_query_id,
                             execution_mode=ExecutionMode(ce.execution_mode.value),
                             webhook_timeout_seconds=ce.webhook_timeout_seconds,
                         )
@@ -1175,6 +1179,8 @@ class JobService:
             json_data = {}
             if job.task_type == TaskType.QUERY_STUDIO:
                 json_data = {"agent_id": job.agent_id, "query_sql": job.query_sql}
+                if getattr(job, "saved_query_id", None):
+                    json_data["saved_query_id"] = job.saved_query_id
 
             if job.task_type != TaskType.QUERY_STUDIO and entity_ids:
                 json_data["entity_ids"] = entity_ids
@@ -1207,6 +1213,8 @@ class JobService:
                     "agent_id": job.agent_id,
                     "query_sql": preview_query_sql(job.query_sql),
                 }
+                if getattr(job, "saved_query_id", None):
+                    log_payload["saved_query_id"] = job.saved_query_id
             logger.info(f"JSON Payload: {log_payload}")
             
             try:
@@ -1457,6 +1465,7 @@ def _rows_to_chained_responses(rows: list) -> list:
             snapshot_write_method=row.snapshot_write_method,
             agent_id=row.agent_id,
             query_sql=row.query_sql,
+            saved_query_id=row.saved_query_id,
             execution_mode=row.execution_mode.value,
         )
         result.append(resp)

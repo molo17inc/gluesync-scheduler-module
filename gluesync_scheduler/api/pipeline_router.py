@@ -920,29 +920,34 @@ async def execute_query_studio(
     """Execute a Query Studio SQL query against a pipeline agent via CoreHub.
 
     **INTERNAL USE ONLY**: localhost / scheduler-internal callers (cron, chains).
-    Body: ``{"agent_id": "...", "query_sql": "..."}``.
+    Body: ``{"agent_id": "...", "query_sql": "...", "saved_query_id": "..."}``.
+    ``saved_query_id`` is optional; when set, live Hub SQL is preferred over the snapshot.
     """
     cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
     body = body or {}
     agent_id = body.get("agent_id")
     query_sql = body.get("query_sql")
-    if not (agent_id and str(agent_id).strip()) or not (query_sql and str(query_sql).strip()):
+    saved_query_id = body.get("saved_query_id")
+    has_agent = bool(agent_id and str(agent_id).strip())
+    has_sql = bool(query_sql and str(query_sql).strip())
+    has_saved = bool(saved_query_id and str(saved_query_id).strip())
+    if not has_agent or (not has_sql and not has_saved):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="query_studio requires non-empty agent_id and query_sql",
+            detail="query_studio requires non-empty agent_id and query_sql or saved_query_id",
         )
 
     from gluesync_scheduler.models.models import preview_query_sql
     logger.info(
-        "Received Query Studio request for pipeline %s agent %s: %s",
-        pipeline_id, agent_id, preview_query_sql(query_sql),
+        "Received Query Studio request for pipeline %s agent %s saved_query_id=%s: %s",
+        pipeline_id, agent_id, saved_query_id, preview_query_sql(query_sql),
     )
     if cron_job_identifier:
         logger.info("Cron job identifier: %s", cron_job_identifier)
 
     try:
         pipeline_manager = PipelineManager()
-        result = await pipeline_manager.execute_query_studio(pipeline_id, agent_id, query_sql)
+        result = await pipeline_manager.execute_query_studio(pipeline_id, agent_id, query_sql, saved_query_id)
         message = (
             f"Query Studio query executed successfully on pipeline {pipeline_id}"
             if result else f"Query Studio query failed on pipeline {pipeline_id}"

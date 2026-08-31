@@ -72,7 +72,7 @@ def _events_to_orm(
     """Convert a list of TriggerEventCreate Pydantic models to ORM objects."""
     result = []
     for pos, ev in enumerate(events):
-        require_query_studio_fields(ev.task_type, ev.agent_id, ev.query_sql)
+        require_query_studio_fields(ev.task_type, ev.agent_id, ev.query_sql, ev.saved_query_id)
         orm = TriggerFlowEvent(
             trigger_flow_id=flow_id,
             position=pos,
@@ -84,6 +84,7 @@ def _events_to_orm(
             snapshot_write_method=ev.snapshot_write_method,
             agent_id=ev.agent_id,
             query_sql=ev.query_sql,
+            saved_query_id=ev.saved_query_id,
             execution_mode=ExecutionMode(ev.execution_mode.value),
         )
         result.append(orm)

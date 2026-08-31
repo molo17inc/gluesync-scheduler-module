@@ -230,3 +230,220 @@ def test_list_query_studio_agents_forwards_to_hub():
     assert resp.json() == hub_payload
     assert captured["path"] == "/query-studio/agents"
     assert captured["method"] == "GET"
+
+
+def test_create_query_studio_job_persists_saved_query_id(db_session):
+    with patch("gluesync_scheduler.services.job_service.scheduler_service") as mock_svc:
+        mock_svc.create_job.return_value = "sched-id-sq"
+        svc = JobService(db_session)
+        created = svc.create_job(
+            _job_create(saved_query_id="sq-abc", query_sql="SELECT snapshot")
+        )
+
+    assert created.task_type == TaskType.QUERY_STUDIO
+    assert created.saved_query_id == "sq-abc"
+    assert created.query_sql == "SELECT snapshot"
+
+    stored = db_session.query(ScheduledJob).filter_by(id=created.id).first()
+    assert stored.saved_query_id == "sq-abc"
+    assert stored.query_sql == "SELECT snapshot"
+
+
+def test_create_query_studio_job_accepts_saved_query_id_without_sql():
+    job = _job_create(query_sql=None, saved_query_id="sq-abc")
+    assert job.task_type == TaskType.QUERY_STUDIO
+    assert job.saved_query_id == "sq-abc"
+    assert job.query_sql is None
+
+
+def test_create_query_studio_job_rejects_missing_sql_and_saved_query_id():
+    with pytest.raises(ValidationError):
+        _job_create(query_sql=None, saved_query_id=None)
+
+
+def test_query_studio_does_not_invent_extra_task_types():
+    assert TaskType.QUERY_STUDIO.value == "query_studio"
+    assert "QUERY_STUDIO_SAVED" not in TaskType.__members__
+    assert "SAVED_QUERY" not in TaskType.__members__
+
+
+def test_trigger_flow_persists_saved_query_id(db_session):
+    svc = TriggerFlowService(db_session)
+    data = TriggerFlowCreate(
+        name="qs-saved-flow",
+        events=[
+            TriggerEventCreate(
+                task_type=TaskType.QUERY_STUDIO,
+                pipeline_id="pipe-1",
+                agent_id="agent-42",
+                query_sql="SELECT snapshot",
+                saved_query_id="sq-flow",
+                execution_mode="async",
+            )
+        ],
+    )
+    flow, _token = svc.create_flow(data)
+    evts = (
+        db_session.query(TriggerFlowEvent)
+        .filter_by(trigger_flow_id=flow.id)
+        .all()
+    )
+    assert len(evts) == 1
+    assert evts[0].task_type == TaskType.QUERY_STUDIO
+    assert evts[0].saved_query_id == "sq-flow"
+    assert evts[0].query_sql == "SELECT snapshot"
+
+
+def test_chained_query_studio_event_persists_saved_query_id(db_session):
+    from gluesync_scheduler.models.models import ChainedJobEvent
+    from gluesync_scheduler.models.schemas import ChainedEventCreate
+
+    with patch("gluesync_scheduler.services.job_service.scheduler_service") as mock_svc:
+        mock_svc.create_job.return_value = "sched-id-chain"
+        svc = JobService(db_session)
+        created = svc.create_job(
+            _job_create(
+                chained_events=[
+                    ChainedEventCreate(
+                        task_type=TaskType.QUERY_STUDIO,
+                        pipeline_id="pipe-1",
+                        agent_id="agent-9",
+                        query_sql="SELECT chained",
+                        saved_query_id="sq-chain",
+                    )
+                ]
+            )
+        )
+
+    rows = (
+        db_session.query(ChainedJobEvent)
+        .filter_by(parent_job_id=created.id)
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].task_type == TaskType.QUERY_STUDIO
+    assert rows[0].saved_query_id == "sq-chain"
+    assert created.chained_events[0].saved_query_id == "sq-chain"
+
+
+def test_execute_query_studio_uses_snapshot_when_hub_fetch_fails():
+    from gluesync_scheduler.core.play_pause import CoreHubClient
+
+    captured = []
+
+    def fake_fetch(path, method="GET", body=None, params=None, timeout=None, raw=False):
+        captured.append({"path": path, "method": method, "body": body})
+        if method == "GET":
+            return {"status": "error", "status_code": 404, "message": "not found"}
+        return {"status": "success", "status_code": 200, "operation_status": "COMPLETED"}
+
+    client = CoreHubClient.__new__(CoreHubClient)
+    client.fetch_core_hub = fake_fetch
+    ok = CoreHubClient.execute_query_studio(
+        client, "pipe-1", "agent-9", "SELECT snapshot", saved_query_id="sq-1"
+    )
+    assert ok is True
+    get_calls = [c for c in captured if c["method"] == "GET"]
+    post_calls = [c for c in captured if c["method"] == "POST"]
+    assert get_calls[0]["path"] == "/query-studio/saved-queries/sq-1"
+    assert post_calls[0]["path"] == "/query-studio/pipelines/pipe-1/agents/agent-9/execute"
+    assert post_calls[0]["body"] == {"sql": "SELECT snapshot"}
+
+
+def test_execute_query_studio_prefers_hub_sql_when_fetch_succeeds():
+    from gluesync_scheduler.core.play_pause import CoreHubClient
+
+    captured = []
+
+    def fake_fetch(path, method="GET", body=None, params=None, timeout=None, raw=False):
+        captured.append({"path": path, "method": method, "body": body})
+        if method == "GET":
+            return {"sql": "SELECT live FROM hub", "agentId": "agent-live"}
+        return {"status": "success", "status_code": 200, "operation_status": "COMPLETED"}
+
+    client = CoreHubClient.__new__(CoreHubClient)
+    client.fetch_core_hub = fake_fetch
+    ok = CoreHubClient.execute_query_studio(
+        client, "pipe-1", "agent-9", "SELECT snapshot", saved_query_id="sq-1"
+    )
+    assert ok is True
+    post_calls = [c for c in captured if c["method"] == "POST"]
+    assert post_calls[0]["path"] == "/query-studio/pipelines/pipe-1/agents/agent-live/execute"
+    assert post_calls[0]["body"] == {"sql": "SELECT live FROM hub"}
+
+
+def test_execute_query_studio_fails_when_hub_and_snapshot_missing():
+    from gluesync_scheduler.core.play_pause import CoreHubClient
+
+    def fake_fetch(path, method="GET", body=None, params=None, timeout=None, raw=False):
+        if method == "GET":
+            return {"status": "error", "status_code": 403, "message": "forbidden"}
+        raise AssertionError("execute should not be called when SQL is missing")
+
+    client = CoreHubClient.__new__(CoreHubClient)
+    client.fetch_core_hub = fake_fetch
+    ok = CoreHubClient.execute_query_studio(
+        client, "pipe-1", "agent-9", None, saved_query_id="sq-1"
+    )
+    assert ok is False
+
+
+def test_job_runner_includes_saved_query_id_when_present(monkeypatch):
+    from gluesync_scheduler.cli.job_runner import execute_job
+
+    posted = {}
+
+    class _Resp:
+        status_code = 200
+        text = '{"success": true}'
+
+    def fake_post(url, json=None, headers=None, verify=None, timeout=None):
+        posted.update(url=url, json=json, timeout=timeout)
+        return _Resp()
+
+    monkeypatch.setattr("gluesync_scheduler.cli.job_runner.requests.post", fake_post)
+
+    job = ScheduledJob(
+        name="qs",
+        task_type=TaskType.QUERY_STUDIO,
+        cron_expression="0 * * * *",
+        pipeline_id="pipe-1",
+        agent_id="agent-9",
+        query_sql="SELECT snapshot",
+        saved_query_id="sq-1",
+        enabled=True,
+        command="pending",
+        cron_job_identifier="gluesync_job_qs_saved",
+        snapshot_write_method="UPSERT",
+    )
+    assert execute_job(job) is True
+    assert posted["json"] == {
+        "agent_id": "agent-9",
+        "query_sql": "SELECT snapshot",
+        "saved_query_id": "sq-1",
+    }
+
+
+def test_chain_event_payload_includes_saved_query_id():
+    from gluesync_scheduler.models.models import ExecutionMode
+    from gluesync_scheduler.services.chain_execution_service import ExecutableEvent, _event_payload
+
+    event = ExecutableEvent(
+        id=1,
+        position=0,
+        task_type=TaskType.QUERY_STUDIO,
+        pipeline_id="pipe-1",
+        entity_ids=None,
+        group_ids=None,
+        with_snapshot=False,
+        snapshot_write_method="UPSERT",
+        execution_mode=ExecutionMode.ASYNC,
+        agent_id="agent-9",
+        query_sql="SELECT snapshot",
+        saved_query_id="sq-1",
+    )
+    assert _event_payload(event) == {
+        "agent_id": "agent-9",
+        "query_sql": "SELECT snapshot",
+        "saved_query_id": "sq-1",
+    }
