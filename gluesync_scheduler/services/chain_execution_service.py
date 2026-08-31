@@ -59,6 +59,8 @@ class ExecutableEvent:
     with_snapshot: bool
     snapshot_write_method: str
     execution_mode: ExecutionMode
+    agent_id: Optional[str] = None
+    query_sql: Optional[str] = None
 
     @staticmethod
     def from_chained(event: "ChainedJobEvent") -> "ExecutableEvent":
@@ -72,6 +74,24 @@ class ExecutableEvent:
             with_snapshot=event.with_snapshot,
             snapshot_write_method=event.snapshot_write_method,
             execution_mode=event.execution_mode,
+            agent_id=getattr(event, "agent_id", None),
+            query_sql=getattr(event, "query_sql", None),
+        )
+
+    @staticmethod
+    def from_trigger(event) -> "ExecutableEvent":
+        return ExecutableEvent(
+            id=event.id,
+            position=event.position,
+            task_type=event.task_type,
+            pipeline_id=event.pipeline_id,
+            entity_ids=event.entity_ids,
+            group_ids=event.group_ids,
+            with_snapshot=event.with_snapshot,
+            snapshot_write_method=event.snapshot_write_method,
+            execution_mode=event.execution_mode,
+            agent_id=getattr(event, "agent_id", None),
+            query_sql=getattr(event, "query_sql", None),
         )
 
 logger = logging.getLogger(__name__)
@@ -165,7 +185,10 @@ def _task_type_to_webhook_events(task_type: TaskType) -> list:
         TaskType.GROUP_REDO: ["GROUP_SNAPSHOT_COMPLETED", "ENTITY_SNAPSHOT_FAILED"],
         TaskType.PIPELINE_ENTER_MAINTENANCE: ["PIPELINE_ENTER_MAINTENANCE"],
         TaskType.PIPELINE_EXIT_MAINTENANCE: ["PIPELINE_EXIT_MAINTENANCE"],
+        TaskType.QUERY_STUDIO: [],
     }
+    if task_type == TaskType.QUERY_STUDIO:
+        return []
     return mapping.get(task_type, ["ENTITY_SNAPSHOT_COMPLETED", "ENTITY_CDC_STARTED", "ENTITY_CDC_STOPPED"])
 
 
@@ -260,7 +283,7 @@ class ChainExecutionService:
         errors: list[str] = []
 
         try:
-            for event in events:
+            for index, event in enumerate(events):
                 logger.info(
                     "Chained event pos=%d type=%s mode=%s pipeline=%s",
                     event.position, event.task_type, event.execution_mode, event.pipeline_id,
@@ -269,8 +292,10 @@ class ChainExecutionService:
                     # Fire-and-forget: trigger the event but don't await its HTTP result
                     asyncio.ensure_future(self._execute_chained_event(event, db))
                 else:
-                    # Sync: wait for preceding step's callback, then fire the event
-                    success = await self._execute_sync_event(event, db)
+                    # Sync: wait for preceding step's callback, then fire the event.
+                    # QUERY_STUDIO has no Hub completion webhook — skip wait and use HTTP.
+                    preceding = job.task_type if index == 0 else events[index - 1].task_type
+                    success = await self._execute_sync_event(event, db, preceding)
                     if not success:
                         webhook_detail = getattr(self, '_last_webhook_error', None)
                         if webhook_detail:
@@ -325,20 +350,7 @@ class ChainExecutionService:
 
         logger.info("Executing TriggerFlow %d: %d event(s)", flow_id, len(events))
 
-        executables = [
-            ExecutableEvent(
-                id=e.id,
-                position=e.position,
-                task_type=e.task_type,
-                pipeline_id=e.pipeline_id,
-                entity_ids=e.entity_ids,
-                group_ids=e.group_ids,
-                with_snapshot=e.with_snapshot,
-                snapshot_write_method=e.snapshot_write_method,
-                execution_mode=e.execution_mode,
-            )
-            for e in events
-        ]
+        executables = [ExecutableEvent.from_trigger(e) for e in events]
         return await self._run_executable_list(executables)
 
     async def _run_executable_list(self, events: List[ExecutableEvent]) -> bool:
@@ -611,6 +623,12 @@ class ChainExecutionService:
             else:
                 prev = all_events_by_pos.get(event.position - 1)
                 preceding_task_type = prev.task_type if prev else main_job_task_type
+            if not _task_type_to_webhook_events(preceding_task_type):
+                logger.info(
+                    "Skipping webhook registration for event %d — preceding task %s has no Hub completion webhook",
+                    event.id, preceding_task_type,
+                )
+                continue
             webhook_id = await self._register_corehub_webhook(event, preceding_task_type)
             if not webhook_id:
                 detail = getattr(self, '_last_webhook_error', 'unknown error')
@@ -727,22 +745,7 @@ class ChainExecutionService:
                 return False
 
             endpoint = f"{base_url}/pipelines/{event.pipeline_id}/{action}"
-            payload: dict = {}
-
-            entity_ids = _parse_json_list(event.entity_ids)
-            group_ids = _parse_json_list(event.group_ids)
-
-            if entity_ids:
-                payload["entity_ids"] = entity_ids
-            if group_ids and event.task_type in (
-                TaskType.GROUP_REDO, TaskType.GROUP_START,
-                TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT,
-            ):
-                payload["group_ids"] = group_ids
-            if event.with_snapshot:
-                payload["with_snapshot"] = True
-            if event.snapshot_write_method:
-                payload["snapshot_write_method"] = event.snapshot_write_method
+            payload = _event_payload(event)
 
             timeout = int(os.getenv("SCHEDULER_INTERNAL_HTTP_TIMEOUT", "120"))
             ssl_skip = os.getenv("SSL_SKIP_VERIFY", "False").lower() in ("true", "1", "t")
@@ -773,25 +776,35 @@ class ChainExecutionService:
             logger.error("Event id=%d raised exception: %s", event.id, exc)
             return False
 
-    async def _execute_sync_event(self, event: ChainedJobEvent, db: Session) -> bool:
+    async def _execute_sync_event(
+        self, event: ChainedJobEvent, db: Session, preceding_task_type: Optional[TaskType] = None
+    ) -> bool:
         """Wait for the preceding step's completion callback, then fire the event.
 
         The webhook is persistent (registered at job create/update time) and
         listens for the **preceding** step's completion event(s).  Here we
         wait for that callback, then fire the actual operation.
         The active listening window is managed by ``execute_chain``.
+
+        QUERY_STUDIO has no CoreHub completion webhook; when it is the
+        preceding step, skip the wait and treat the HTTP execute as done.
         """
         correlation_key = str(event.id)
         try:
-            # Wait for the preceding step's completion callback first
-            timeout = event.webhook_timeout_seconds if event.webhook_timeout_seconds else 3600
-            completed = await self._wait_for_webhook(correlation_key, timeout_seconds=timeout)
-            if not completed:
-                logger.warning(
-                    "Timed out waiting for preceding step callback for sync event %d",
-                    event.id,
+            if preceding_task_type is not None and not _task_type_to_webhook_events(preceding_task_type):
+                logger.info(
+                    "Skipping webhook wait for event %d — preceding task %s completes via HTTP",
+                    event.id, preceding_task_type,
                 )
-                return False
+            else:
+                timeout = event.webhook_timeout_seconds if event.webhook_timeout_seconds else 3600
+                completed = await self._wait_for_webhook(correlation_key, timeout_seconds=timeout)
+                if not completed:
+                    logger.warning(
+                        "Timed out waiting for preceding step callback for sync event %d",
+                        event.id,
+                    )
+                    return False
 
             # Preceding step completed — now fire the actual task
             ok = await self._execute_chained_event(event, db)
@@ -1157,8 +1170,30 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
         TaskType.GROUP_REDO: "redo-group",
         TaskType.PIPELINE_ENTER_MAINTENANCE: "enter-maintenance",
         TaskType.PIPELINE_EXIT_MAINTENANCE: "exit-maintenance",
+        TaskType.QUERY_STUDIO: "query-studio",
     }
     return mapping.get(task_type)
+
+
+def _event_payload(event: ExecutableEvent) -> dict:
+    """Build the Chronos internal pipeline-API payload for an executable event."""
+    if event.task_type == TaskType.QUERY_STUDIO:
+        return {"agent_id": event.agent_id, "query_sql": event.query_sql}
+    payload: dict = {}
+    entity_ids = _parse_json_list(event.entity_ids)
+    group_ids = _parse_json_list(event.group_ids)
+    if entity_ids:
+        payload["entity_ids"] = entity_ids
+    if group_ids and event.task_type in (
+        TaskType.GROUP_REDO, TaskType.GROUP_START,
+        TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT,
+    ):
+        payload["group_ids"] = group_ids
+    if event.with_snapshot:
+        payload["with_snapshot"] = True
+    if event.snapshot_write_method:
+        payload["snapshot_write_method"] = event.snapshot_write_method
+    return payload
 
 
 def _parse_json_list(value) -> list:

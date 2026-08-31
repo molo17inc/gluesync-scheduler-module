@@ -909,3 +909,72 @@ async def exit_maintenance_mode(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error exiting maintenance mode: {str(e)}"
         )
+
+
+@router.post("/{pipeline_id}/query-studio", response_model=OperationResponse, summary="Execute a Query Studio SQL query")
+async def execute_query_studio(
+    request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline hosting the agent"),
+    body: dict = Body(default=None),
+):
+    """Execute a Query Studio SQL query against a pipeline agent via CoreHub.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers (cron, chains).
+    Body: ``{"agent_id": "...", "query_sql": "..."}``.
+    """
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    body = body or {}
+    agent_id = body.get("agent_id")
+    query_sql = body.get("query_sql")
+    if not (agent_id and str(agent_id).strip()) or not (query_sql and str(query_sql).strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="query_studio requires non-empty agent_id and query_sql",
+        )
+
+    from gluesync_scheduler.models.models import preview_query_sql
+    logger.info(
+        "Received Query Studio request for pipeline %s agent %s: %s",
+        pipeline_id, agent_id, preview_query_sql(query_sql),
+    )
+    if cron_job_identifier:
+        logger.info("Cron job identifier: %s", cron_job_identifier)
+
+    try:
+        pipeline_manager = PipelineManager()
+        result = await pipeline_manager.execute_query_studio(pipeline_id, agent_id, query_sql)
+        message = (
+            f"Query Studio query executed successfully on pipeline {pipeline_id}"
+            if result else f"Query Studio query failed on pipeline {pipeline_id}"
+        )
+        if not result:
+            _handle_operation_failure(message, cron_job_identifier)
+
+        if cron_job_identifier:
+            try:
+                from gluesync_scheduler.cli.job_runner import update_job_status
+                update_job_status(cron_job_identifier, True)
+                logger.info("Updated job status for %s", cron_job_identifier)
+            except Exception:
+                logger.exception("Error updating job status")
+
+        return {
+            "success": True,
+            "message": message,
+            "data": {"pipeline_id": pipeline_id, "agent_id": agent_id},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error executing Query Studio query")
+        if cron_job_identifier:
+            try:
+                from gluesync_scheduler.cli.job_runner import update_job_status
+                update_job_status(cron_job_identifier, False, str(e))
+            except Exception:
+                logger.exception("Error updating job status to failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error executing Query Studio query: {str(e)}",
+        )
+

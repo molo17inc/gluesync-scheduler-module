@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytz
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ExecutionMode, TaskType, TriggerFlow, TriggerFlowEvent, TriggerFlowExecutionLog
+from gluesync_scheduler.models.models import ExecutionMode, TaskType, TriggerFlow, TriggerFlowEvent, TriggerFlowExecutionLog, require_query_studio_fields
 from gluesync_scheduler.models.trigger_schemas import (
     TriggerEventCreate,
     TriggerFlowCreate,
@@ -72,6 +72,7 @@ def _events_to_orm(
     """Convert a list of TriggerEventCreate Pydantic models to ORM objects."""
     result = []
     for pos, ev in enumerate(events):
+        require_query_studio_fields(ev.task_type, ev.agent_id, ev.query_sql)
         orm = TriggerFlowEvent(
             trigger_flow_id=flow_id,
             position=pos,
@@ -81,6 +82,8 @@ def _events_to_orm(
             group_ids=json.dumps(ev.group_ids) if ev.group_ids is not None else None,
             with_snapshot=ev.with_snapshot,
             snapshot_write_method=ev.snapshot_write_method,
+            agent_id=ev.agent_id,
+            query_sql=ev.query_sql,
             execution_mode=ExecutionMode(ev.execution_mode.value),
         )
         result.append(orm)

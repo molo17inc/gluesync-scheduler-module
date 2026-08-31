@@ -205,15 +205,21 @@ def execute_job(job: ScheduledJob) -> bool:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo"
         elif job.task_type == TaskType.GROUP_REDO:
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo-group"
+        elif job.task_type == TaskType.QUERY_STUDIO:
+            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/query-studio"
         else:
             logger.error(f"Unknown task type: {job.task_type}")
             return False
         
         # Prepare the JSON payload
         json_data = {}
+        request_timeout = 30
+        if job.task_type == TaskType.QUERY_STUDIO:
+            json_data = {"agent_id": job.agent_id, "query_sql": job.query_sql}
+            request_timeout = 120
         
         # Add entity_ids to the payload if present
-        if entity_ids:
+        if job.task_type != TaskType.QUERY_STUDIO and entity_ids:
             json_data["entity_ids"] = entity_ids
 
         # Add group_ids for group redo operations
@@ -244,7 +250,6 @@ def execute_job(job: ScheduledJob) -> bool:
         # Log the request details
         logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
         logger.info(f"Endpoint: POST {endpoint}")
-        logger.info(f"JSON Payload: {json_data}")
         
         # Make the API request with JSON payload
         headers = {
@@ -257,12 +262,21 @@ def execute_job(job: ScheduledJob) -> bool:
         logger.info(f"SSL verification: {verify}")
         
         # Add timeout to prevent hanging requests
+        log_payload = json_data
+        if job.task_type == TaskType.QUERY_STUDIO:
+            from gluesync_scheduler.models.models import preview_query_sql
+            log_payload = {
+                "agent_id": job.agent_id,
+                "query_sql": preview_query_sql(job.query_sql),
+            }
+        logger.info(f"JSON Payload: {log_payload}")
+
         response = requests.post(
             endpoint, 
             json=json_data, 
             headers=headers, 
             verify=verify,
-            timeout=30
+            timeout=request_timeout
         )
         
         # Check the response

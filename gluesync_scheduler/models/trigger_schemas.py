@@ -27,9 +27,9 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 import pytz
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator, validator
 
-from gluesync_scheduler.models.models import TaskType
+from gluesync_scheduler.models.models import TaskType, require_query_studio_fields
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 
@@ -53,10 +53,17 @@ class TriggerEventBase(BaseModel):
         description="Snapshot write method: UPSERT or INSERT",
         pattern="^(UPSERT|INSERT)$",
     )
+    agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
+    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required when task_type is query_studio)")
     execution_mode: TriggerEventMode = Field(
         TriggerEventMode.ASYNC,
         description="async: fire-and-forget; sync: wait for corehub webhook callback before next event",
     )
+
+    @model_validator(mode="after")
+    def _validate_query_studio(self):
+        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql)
+        return self
 
 
 class TriggerEventCreate(TriggerEventBase):

@@ -35,7 +35,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ScheduledJob, TaskType, Setting, ChainedJobEvent, ExecutionMode
+from gluesync_scheduler.models.models import ScheduledJob, TaskType, Setting, ChainedJobEvent, ExecutionMode, require_query_studio_fields, preview_query_sql
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
@@ -439,6 +439,11 @@ class JobService:
                         detail=f"Task type {job_data.task_type} requires group_ids to be provided"
                     )
                 logger.info(f"Creating group job with {len(job_data.group_ids)} groups: {job_data.group_ids}")
+
+            require_query_studio_fields(job_data.task_type, job_data.agent_id, job_data.query_sql)
+            if job_data.chained_events:
+                for ce in job_data.chained_events:
+                    require_query_studio_fields(ce.task_type, ce.agent_id, ce.query_sql)
             
             # Create the database record
             db_job = ScheduledJob(
@@ -451,6 +456,8 @@ class JobService:
                 group_ids=json.dumps(job_data.group_ids) if job_data.group_ids else None,
                 with_snapshot=job_data.with_snapshot,
                 snapshot_write_method=job_data.snapshot_write_method,
+                agent_id=job_data.agent_id,
+                query_sql=job_data.query_sql,
                 enabled=job_data.enabled,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -496,6 +503,8 @@ class JobService:
                         group_ids=json.dumps(ce.group_ids) if ce.group_ids else None,
                         with_snapshot=ce.with_snapshot,
                         snapshot_write_method=ce.snapshot_write_method,
+                        agent_id=ce.agent_id,
+                        query_sql=ce.query_sql,
                         execution_mode=ExecutionMode(ce.execution_mode.value),
                         webhook_timeout_seconds=ce.webhook_timeout_seconds,
                     )
@@ -516,9 +525,18 @@ class JobService:
             result.chained_events = _load_chained_events(self.db, db_job.id)
             return result
             
+        except HTTPException:
+            self.db.rollback()
+            raise
+        except ValueError as e:
+            self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
         except Exception as e:
             self.db.rollback()
-            logger.error(f"Error creating job: {str(e)}")
+            logger.exception("Error creating job")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error creating job: {str(e)}"
@@ -585,6 +603,13 @@ class JobService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Task type {final_task_type} requires group_ids to be provided"
                     )
+
+            final_agent_id = update_data.get("agent_id", db_job.agent_id)
+            final_query_sql = update_data.get("query_sql", db_job.query_sql)
+            require_query_studio_fields(final_task_type, final_agent_id, final_query_sql)
+            if job_data.chained_events:
+                for ce in job_data.chained_events:
+                    require_query_studio_fields(ce.task_type, ce.agent_id, ce.query_sql)
             
             # Handle schedule conversion to cron_expression if schedule is provided
             if "schedule" in update_data and update_data["schedule"]:
@@ -832,6 +857,8 @@ class JobService:
                             group_ids=json.dumps(ce.group_ids) if ce.group_ids else None,
                             with_snapshot=ce.with_snapshot,
                             snapshot_write_method=ce.snapshot_write_method,
+                            agent_id=ce.agent_id,
+                            query_sql=ce.query_sql,
                             execution_mode=ExecutionMode(ce.execution_mode.value),
                             webhook_timeout_seconds=ce.webhook_timeout_seconds,
                         )
@@ -852,9 +879,18 @@ class JobService:
             result.chained_events = _load_chained_events(self.db, db_job.id)
             return result
             
+        except HTTPException:
+            self.db.rollback()
+            raise
+        except ValueError as e:
+            self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
         except Exception as e:
             self.db.rollback()
-            logger.error(f"Error updating job: {str(e)}")
+            logger.exception("Error updating job")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error updating job: {str(e)}"
@@ -1122,6 +1158,8 @@ class JobService:
                 action = "enter-maintenance"
             elif job.task_type == TaskType.PIPELINE_EXIT_MAINTENANCE:
                 action = "exit-maintenance"
+            elif job.task_type == TaskType.QUERY_STUDIO:
+                action = "query-studio"
             else:
                 error_msg = f"Unknown task type: {job.task_type}"
                 logger.error(error_msg)
@@ -1135,8 +1173,10 @@ class JobService:
 
             # Prepare the JSON payload similar to CLI job runner
             json_data = {}
+            if job.task_type == TaskType.QUERY_STUDIO:
+                json_data = {"agent_id": job.agent_id, "query_sql": job.query_sql}
 
-            if entity_ids:
+            if job.task_type != TaskType.QUERY_STUDIO and entity_ids:
                 json_data["entity_ids"] = entity_ids
 
             if group_ids and job.task_type == TaskType.GROUP_REDO:
@@ -1161,7 +1201,13 @@ class JobService:
                 json_data["snapshot_write_method"] = job.snapshot_write_method
 
             logger.info(f"Endpoint: {method} {endpoint}")
-            logger.info(f"JSON Payload: {json_data}")
+            log_payload = json_data
+            if job.task_type == TaskType.QUERY_STUDIO:
+                log_payload = {
+                    "agent_id": job.agent_id,
+                    "query_sql": preview_query_sql(job.query_sql),
+                }
+            logger.info(f"JSON Payload: {log_payload}")
             
             try:
                 # Determine SSL verification settings
@@ -1409,6 +1455,8 @@ def _rows_to_chained_responses(rows: list) -> list:
             group_ids=json.loads(row.group_ids) if row.group_ids else None,
             with_snapshot=row.with_snapshot,
             snapshot_write_method=row.snapshot_write_method,
+            agent_id=row.agent_id,
+            query_sql=row.query_sql,
             execution_mode=row.execution_mode.value,
         )
         result.append(resp)

@@ -54,6 +54,17 @@ def _copy_success_payload_fields(safe, json_data):
             safe[key] = json_data[key]
 
 
+def _raw_success_payload(response):
+    """Return the Hub JSON body as-is (lists/dicts/empty)."""
+    if not response.text:
+        return None
+    try:
+        return response.json()
+    except json.JSONDecodeError:
+        logger.warning("Raw Hub response is not valid JSON: %s...", response.text[:100])
+        return response.text
+
+
 def _build_success_response(response):
     """Build the safe success dict returned to callers of ``fetch_core_hub``.
 
@@ -305,7 +316,7 @@ class CoreHubClient:
         logger.error("Token retrieval result: FAILED (no token available)")
         return None, False  # Return tuple: (token, from_sdk)
     
-    def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None):
+    def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None, timeout=None, raw: bool = False):
         """
         Make an HTTP request to the CoreHub API.
 
@@ -314,6 +325,8 @@ class CoreHubClient:
             method: HTTP method (GET, POST, PUT, DELETE)
             body: Request body as dictionary
             params: URL parameters as dictionary
+            timeout: Optional request timeout in seconds
+            raw: When True, return the Hub JSON payload as-is on HTTP 2xx
 
         Returns:
             Response data as dictionary or None if request failed
@@ -324,10 +337,13 @@ class CoreHubClient:
         url, headers, verify = prepared
 
         try:
-            response = self._do_request(method, url, headers, body, params, verify)
+            response = self._do_request(method, url, headers, body, params, verify, timeout=timeout)
             if response is None:
                 return None
-            return self._interpret_response(response, method, url, headers, body, params, verify)
+            return self._interpret_response(
+                response, method, url, headers, body, params, verify,
+                timeout=timeout, raw=raw,
+            )
         except Exception as e:
             logger.exception("Request failed with exception")
             return {
@@ -421,12 +437,17 @@ class CoreHubClient:
             return False
         return True
 
-    def _interpret_response(self, response, method, url, headers, body, params, verify):
+    def _interpret_response(self, response, method, url, headers, body, params, verify, timeout=None, raw=False):
         """Turn a raw ``requests.Response`` into the standard result dict."""
         if response.status_code in (200, 201, 202, 204):
+            if raw:
+                return _raw_success_payload(response)
             return _build_success_response(response)
         if response.status_code == 401:
-            return self._handle_unauthorized(response, method, url, headers, body, params, verify)
+            return self._handle_unauthorized(
+                response, method, url, headers, body, params, verify,
+                timeout=timeout, raw=raw,
+            )
         logger.error(
             f"Request failed with status code {response.status_code}: {response.text}"
         )
@@ -438,21 +459,24 @@ class CoreHubClient:
         }
 
     @staticmethod
-    def _do_request(method, url, headers, body, params, verify):
+    def _do_request(method, url, headers, body, params, verify, timeout=None):
         """Dispatch a single HTTP call using `requests`. Returns None on unsupported method."""
         method = method.upper()
+        kwargs = {"headers": headers, "params": params, "verify": verify}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         if method == 'GET':
-            return requests.get(url, headers=headers, params=params, verify=verify)
+            return requests.get(url, **kwargs)
         if method == 'POST':
-            return requests.post(url, headers=headers, json=body, params=params, verify=verify)
+            return requests.post(url, json=body, **kwargs)
         if method == 'PUT':
-            return requests.put(url, headers=headers, json=body, params=params, verify=verify)
+            return requests.put(url, json=body, **kwargs)
         if method == 'DELETE':
-            return requests.delete(url, headers=headers, json=body, params=params, verify=verify)
+            return requests.delete(url, json=body, **kwargs)
         logger.error(f"Unsupported HTTP method: {method}")
         return None
 
-    def _handle_unauthorized(self, response, method, url, headers, body, params, verify):
+    def _handle_unauthorized(self, response, method, url, headers, body, params, verify, timeout=None, raw=False):
         """Handle a 401 from CoreHub: optionally refresh the SDK token and retry once."""
         self._last_status_code = 401
         error_message = _extract_error_message(
@@ -465,7 +489,9 @@ class CoreHubClient:
         ).lower() in ('true', '1', 't')
 
         if refresh_enabled:
-            retry_result = self._refresh_and_retry(method, url, headers, body, params, verify)
+            retry_result = self._refresh_and_retry(
+                method, url, headers, body, params, verify, timeout=timeout, raw=raw,
+            )
             if retry_result is not None:
                 return retry_result
 
@@ -479,7 +505,7 @@ class CoreHubClient:
             "message": error_message,
         }
 
-    def _refresh_and_retry(self, method, url, headers, body, params, verify):
+    def _refresh_and_retry(self, method, url, headers, body, params, verify, timeout=None, raw=False):
         """Force an SDK re-login and retry the original request exactly once.
 
         Returns the retry result dict, or None if refresh/retry was not attempted
@@ -499,10 +525,12 @@ class CoreHubClient:
             logger.info("Successfully refreshed SDK token after 401. Retrying request...")
             retry_headers = headers.copy()
             retry_headers['Authorization'] = f'Bearer {new_token}'
-            retry_response = self._do_request(method, url, retry_headers, body, params, verify)
+            retry_response = self._do_request(
+                method, url, retry_headers, body, params, verify, timeout=timeout,
+            )
             if retry_response is None:
                 return None
-            return self._process_retry_response(retry_response)
+            return self._process_retry_response(retry_response, raw=raw)
         except Exception:
             logger.exception("Error during SDK token refresh or retry")
             return None
@@ -526,10 +554,12 @@ class CoreHubClient:
         else:
             asyncio.run(gluesync_sdk_client.initialize())
 
-    def _process_retry_response(self, retry_response):
+    def _process_retry_response(self, retry_response, raw=False):
         """Convert a retry response into the standard result dict."""
         if retry_response.status_code in (200, 201, 202, 204):
             logger.info("Retry successful after token refresh!")
+            if raw:
+                return _raw_success_payload(retry_response)
             return _build_success_response(retry_response)
 
         if retry_response.status_code == 401:
@@ -1168,6 +1198,59 @@ class CoreHubClient:
             return False
 
 
+
+    QUERY_STUDIO_TIMEOUT_SECONDS = 120
+
+    def list_query_studio_agents(self):
+        """Return CoreHub Query Studio agents payload as-is."""
+        return self.fetch_core_hub("/query-studio/agents", method="GET", raw=True)
+
+    def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str) -> bool:
+        """Execute a Query Studio SQL query against a pipeline agent.
+
+        Hub HTTP 2xx with status ERROR / failed query is treated as failure.
+        """
+        from gluesync_scheduler.models.models import preview_query_sql
+
+        logger.info(
+            "Executing Query Studio SQL on pipeline %s agent %s: %s",
+            pipeline_id, agent_id, preview_query_sql(query_sql),
+        )
+        path = f"/query-studio/pipelines/{pipeline_id}/agents/{agent_id}/execute"
+        response = self.fetch_core_hub(
+            path,
+            method="POST",
+            body={"sql": query_sql},
+            timeout=self.QUERY_STUDIO_TIMEOUT_SECONDS,
+        )
+        if not response:
+            logger.error(
+                "Query Studio execute returned no response for pipeline %s agent %s",
+                pipeline_id, agent_id,
+            )
+            return False
+        if isinstance(response, dict) and response.get("status") == "error":
+            logger.error(
+                "Query Studio execute failed for pipeline %s agent %s: %s",
+                pipeline_id, agent_id, response.get("message"),
+            )
+            return False
+        op_status = None
+        if isinstance(response, dict):
+            op_status = response.get("operation_status")
+        if isinstance(op_status, str) and op_status.lower() in ("error", "failed", "fail"):
+            logger.error(
+                "Query Studio reported failed query for pipeline %s agent %s: %s",
+                pipeline_id, agent_id, op_status,
+            )
+            return False
+        logger.info(
+            "Query Studio execute succeeded for pipeline %s agent %s",
+            pipeline_id, agent_id,
+        )
+        return True
+
+
 class PipelineManager:
     """Manager for pipeline operations"""
     
@@ -1612,6 +1695,14 @@ class PipelineManager:
         logger.info(f"Exiting maintenance mode for pipeline {pipeline_id}")
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.client.exit_maintenance_mode, pipeline_id)
+
+    async def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str) -> bool:
+        """Execute a Query Studio SQL query via CoreHub."""
+        logger.info("Query Studio execute pipeline=%s agent=%s", pipeline_id, agent_id)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.execute_query_studio, pipeline_id, agent_id, query_sql
+        )
 
 
 async def main_async():

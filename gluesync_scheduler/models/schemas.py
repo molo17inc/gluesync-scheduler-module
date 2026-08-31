@@ -28,9 +28,9 @@ import json
 import os
 from enum import Enum
 from croniter import croniter
-from pydantic import BaseModel, Field, validator, field_serializer, ConfigDict
+from pydantic import BaseModel, Field, validator, field_serializer, model_validator, ConfigDict
 
-from gluesync_scheduler.models.models import TaskType, ExecutionMode
+from gluesync_scheduler.models.models import TaskType, ExecutionMode, require_query_studio_fields
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 
@@ -48,8 +48,15 @@ class ChainedEventBase(BaseModel):
     group_ids: Optional[List[str]] = Field(None, description="Group IDs (required for group operations)")
     with_snapshot: bool = Field(False, description="Whether to include a snapshot")
     snapshot_write_method: str = Field("UPSERT", description="Snapshot write method: UPSERT or INSERT", pattern="^(UPSERT|INSERT)$")
+    agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
+    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required when task_type is query_studio)")
     execution_mode: ChainedEventMode = Field(ChainedEventMode.ASYNC, description="async: fire-and-forget; sync: wait for corehub webhook callback before next event")
     webhook_timeout_seconds: int = Field(3600, description="Timeout in seconds for waiting on webhook callback in sync mode (default: 3600 = 1 hour)", ge=1)
+
+    @model_validator(mode="after")
+    def _validate_query_studio(self):
+        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql)
+        return self
 
 
 class ChainedEventCreate(ChainedEventBase):
@@ -114,7 +121,7 @@ class JobBase(BaseModel):
     """Base model for job data with common fields"""
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
-    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline")
+    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent")
     schedule: Optional[ScheduleConfig] = Field(None, description="User-friendly schedule configuration")
     cron_expression: Optional[str] = Field(None, description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight). Not required if schedule is provided.", example="0 0 * * *")
     pipeline_id: str = Field(..., description="ID of the pipeline to operate on", example="pipeline-123")
@@ -122,6 +129,8 @@ class JobBase(BaseModel):
     group_ids: Optional[List[str]] = Field(None, description="List of group IDs to operate on (required for group operations)", example=["group-123", "group-456"])
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
     snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
+    agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
+    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required when task_type is query_studio)")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(
@@ -136,6 +145,11 @@ class JobBase(BaseModel):
             if values["schedule"] is None and values["cron_expression"] is None:
                 raise ValueError("Either schedule or cron_expression must be provided")
         return v
+
+    @model_validator(mode="after")
+    def _validate_query_studio(self):
+        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql)
+        return self
 
 
 class JobCreate(JobBase):
@@ -168,9 +182,17 @@ class JobUpdate(BaseModel):
     group_ids: Optional[List[str]] = Field(None, description="List of group IDs to operate on", example=["group-123", "group-456"])
     with_snapshot: Optional[bool] = Field(None, description="Updated snapshot setting")
     snapshot_write_method: Optional[str] = Field(None, description="Updated write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
+    agent_id: Optional[str] = Field(None, description="Updated Query Studio agent ID")
+    query_sql: Optional[str] = Field(None, description="Updated Query Studio SQL")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(None, description="Replace all chained events with this list (pass empty list to clear)")
+
+    @model_validator(mode="after")
+    def _validate_query_studio(self):
+        if self.task_type == TaskType.QUERY_STUDIO:
+            require_query_studio_fields(self.task_type, self.agent_id, self.query_sql)
+        return self
 
     model_config = ConfigDict(
         json_schema_extra = {

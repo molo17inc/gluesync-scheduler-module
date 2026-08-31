@@ -46,6 +46,33 @@ class TaskType(enum.Enum):
     GROUP_REDO = "group_redo"
     PIPELINE_ENTER_MAINTENANCE = "pipeline_enter_maintenance"
     PIPELINE_EXIT_MAINTENANCE = "pipeline_exit_maintenance"
+    QUERY_STUDIO = "query_studio"
+
+
+QUERY_STUDIO_SQL_PREVIEW_LEN = 200
+
+
+def preview_query_sql(query_sql, limit=QUERY_STUDIO_SQL_PREVIEW_LEN):
+    """Return a truncated SQL preview for logs (never dump huge queries)."""
+    if not query_sql:
+        return ""
+    text = str(query_sql)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
+def require_query_studio_fields(task_type, agent_id, query_sql):
+    """Validate agent_id + query_sql when task_type is QUERY_STUDIO.
+
+    entity_ids / group_ids / with_snapshot are ignored for this task type.
+    """
+    if task_type != TaskType.QUERY_STUDIO:
+        return
+    if not (agent_id and str(agent_id).strip()):
+        raise ValueError("query_studio requires a non-empty agent_id")
+    if not (query_sql and str(query_sql).strip()):
+        raise ValueError("query_studio requires a non-empty query_sql")
 
 
 class ScheduledJob(Base):
@@ -61,6 +88,8 @@ class ScheduledJob(Base):
     group_ids = Column(Text, nullable=True)
     with_snapshot = Column(Boolean, default=False)
     snapshot_write_method = Column(String, nullable=False, default='UPSERT')
+    agent_id = Column(String, nullable=True)
+    query_sql = Column(Text, nullable=True)
     enabled = Column(Boolean, default=True)
     command = Column(Text, nullable=False)
     cron_job_identifier = Column(String, nullable=False, unique=True)
@@ -93,6 +122,8 @@ class ChainedJobEvent(Base):
     group_ids = Column(Text, nullable=True)    # JSON array
     with_snapshot = Column(Boolean, default=False)
     snapshot_write_method = Column(String, nullable=False, default="UPSERT")
+    agent_id = Column(String, nullable=True)
+    query_sql = Column(Text, nullable=True)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     webhook_timeout_seconds = Column(Integer, nullable=False, default=3600)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
@@ -128,6 +159,8 @@ class TriggerFlowEvent(Base):
     group_ids = Column(Text, nullable=True)     # JSON array
     with_snapshot = Column(Boolean, default=False)
     snapshot_write_method = Column(String, nullable=False, default="UPSERT")
+    agent_id = Column(String, nullable=True)
+    query_sql = Column(Text, nullable=True)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))

@@ -47,6 +47,7 @@ The project follows [Semantic Versioning](https://semver.org/) (SemVer) for vers
   - Start/stop entire pipelines
   - Start/stop entity groups
   - Schedule snapshots for entities, pipelines, or groups
+  - Run a Query Studio SQL query (`query_studio`) on schedule, platform event, or webhook
   - More task types can be easily added
 - **Job Management**: View, create, update, disable/enable, and delete scheduled jobs
 - **Containerized Deployment**: Docker support for easy deployment
@@ -393,6 +394,34 @@ http://localhost:1717/redoc
 | `/api/settings/{key}` | `GET` | Get a specific setting |
 | `/api/settings` | `POST` | Create a new setting |
 | `/api/settings/{key}` | `PUT` | Update a setting |
+| `/api/query-studio/agents` | `GET` | List Query Studio agents from CoreHub (UI agent picker) |
+
+## Query Studio on event (`query_studio`)
+
+Chronos can run a Query Studio SQL query when a scheduled job (cron), a platform-event trigger flow, or an incoming webhook trigger flow fires.
+
+Stored fields:
+
+- `pipeline_id` — pipeline that hosts the target agent
+- `agent_id` — Query Studio agent to execute against
+- `query_sql` — SQL text (do **not** put SQL on the crontab command line)
+
+On fire, Chronos calls CoreHub:
+
+```http
+POST {corehub}/query-studio/pipelines/{pipelineId}/agents/{agentId}/execute
+Authorization: Bearer <SDK JWT>
+Content-Type: application/json
+
+{"sql": "<query text>"}
+```
+
+HTTP 2xx with Hub `status` `ERROR` (failed query) is treated as a Chronos job failure. The Hub call uses a 120 second timeout.
+
+The Control Plane Scheduler UI should bind:
+
+- an **agent picker** to `agent_id` (Chronos `GET /api/query-studio/agents` proxies CoreHub `GET /query-studio/agents`)
+- a **SQL code editor** to `query_sql`
 
 ## Scheduling Options
 
