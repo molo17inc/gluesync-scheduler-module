@@ -66,6 +66,13 @@ def _nonempty(value):
     return bool(value and str(value).strip())
 
 
+def coerce_query_read_only(value, default=True) -> bool:
+    """True (SELECT-only) unless the user explicitly opted into writes."""
+    if value is None:
+        return bool(default)
+    return bool(value)
+
+
 def require_query_studio_fields(task_type, agent_id, query_sql, saved_query_id=None):
     """Validate QUERY_STUDIO fields.
 
@@ -99,6 +106,7 @@ class ScheduledJob(Base):
     agent_id = Column(String, nullable=True)
     query_sql = Column(Text, nullable=True)
     saved_query_id = Column(String, nullable=True)
+    query_read_only = Column(Boolean, default=True, nullable=False)
     enabled = Column(Boolean, default=True)
     command = Column(Text, nullable=False)
     cron_job_identifier = Column(String, nullable=False, unique=True)
@@ -134,6 +142,7 @@ class ChainedJobEvent(Base):
     agent_id = Column(String, nullable=True)
     query_sql = Column(Text, nullable=True)
     saved_query_id = Column(String, nullable=True)
+    query_read_only = Column(Boolean, default=True, nullable=False)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     webhook_timeout_seconds = Column(Integer, nullable=False, default=3600)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
@@ -172,6 +181,7 @@ class TriggerFlowEvent(Base):
     agent_id = Column(String, nullable=True)
     query_sql = Column(Text, nullable=True)
     saved_query_id = Column(String, nullable=True)
+    query_read_only = Column(Boolean, default=True, nullable=False)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))

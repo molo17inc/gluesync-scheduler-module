@@ -39,7 +39,7 @@ _CHRONOS_PLATFORM_WEBHOOK_PREFIX = "chronos-platform-"
 import requests
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ChainedJobEvent, ExecutionMode, ScheduledJob, TaskType
+from gluesync_scheduler.models.models import ChainedJobEvent, ExecutionMode, ScheduledJob, TaskType, coerce_query_read_only
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +62,7 @@ class ExecutableEvent:
     agent_id: Optional[str] = None
     query_sql: Optional[str] = None
     saved_query_id: Optional[str] = None
+    query_read_only: bool = True
 
     @staticmethod
     def from_chained(event: "ChainedJobEvent") -> "ExecutableEvent":
@@ -78,6 +79,7 @@ class ExecutableEvent:
             agent_id=getattr(event, "agent_id", None),
             query_sql=getattr(event, "query_sql", None),
             saved_query_id=getattr(event, "saved_query_id", None),
+            query_read_only=coerce_query_read_only(getattr(event, "query_read_only", True)),
         )
 
     @staticmethod
@@ -95,6 +97,7 @@ class ExecutableEvent:
             agent_id=getattr(event, "agent_id", None),
             query_sql=getattr(event, "query_sql", None),
             saved_query_id=getattr(event, "saved_query_id", None),
+            query_read_only=coerce_query_read_only(getattr(event, "query_read_only", True)),
         )
 
 logger = logging.getLogger(__name__)
@@ -1181,7 +1184,11 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
 def _event_payload(event: ExecutableEvent) -> dict:
     """Build the Chronos internal pipeline-API payload for an executable event."""
     if event.task_type == TaskType.QUERY_STUDIO:
-        payload = {"agent_id": event.agent_id, "query_sql": event.query_sql}
+        payload = {
+            "agent_id": event.agent_id,
+            "query_sql": event.query_sql,
+            "query_read_only": coerce_query_read_only(getattr(event, "query_read_only", True)),
+        }
         if event.saved_query_id:
             payload["saved_query_id"] = event.saved_query_id
         return payload

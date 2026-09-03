@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytz
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ExecutionMode, TaskType, TriggerFlow, TriggerFlowEvent, TriggerFlowExecutionLog, require_query_studio_fields
+from gluesync_scheduler.models.models import ExecutionMode, TaskType, TriggerFlow, TriggerFlowEvent, TriggerFlowExecutionLog, require_query_studio_fields, coerce_query_read_only
 from gluesync_scheduler.models.trigger_schemas import (
     TriggerEventCreate,
     TriggerFlowCreate,
@@ -85,6 +85,7 @@ def _events_to_orm(
             agent_id=ev.agent_id,
             query_sql=ev.query_sql,
             saved_query_id=ev.saved_query_id,
+            query_read_only=coerce_query_read_only(getattr(ev, "query_read_only", True)),
             execution_mode=ExecutionMode(ev.execution_mode.value),
         )
         result.append(orm)

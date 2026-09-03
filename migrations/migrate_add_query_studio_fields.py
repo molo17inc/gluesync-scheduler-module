@@ -30,12 +30,15 @@ _COLUMNS = (
     ("scheduled_jobs", "agent_id", "VARCHAR"),
     ("scheduled_jobs", "query_sql", "TEXT"),
     ("scheduled_jobs", "saved_query_id", "VARCHAR"),
+    ("scheduled_jobs", "query_read_only", "BOOLEAN NOT NULL DEFAULT 1"),
     ("chained_job_events", "agent_id", "VARCHAR"),
     ("chained_job_events", "query_sql", "TEXT"),
     ("chained_job_events", "saved_query_id", "VARCHAR"),
+    ("chained_job_events", "query_read_only", "BOOLEAN NOT NULL DEFAULT 1"),
     ("trigger_flow_events", "agent_id", "VARCHAR"),
     ("trigger_flow_events", "query_sql", "TEXT"),
     ("trigger_flow_events", "saved_query_id", "VARCHAR"),
+    ("trigger_flow_events", "query_read_only", "BOOLEAN NOT NULL DEFAULT 1"),
 )
 
 
@@ -75,7 +78,7 @@ def _add_column_if_missing(conn, table_name, column_name, column_type):
 
 
 def add_query_studio_fields(engine):
-    """Add nullable agent_id / query_sql / saved_query_id columns used by Query Studio tasks."""
+    """Add Query Studio columns: agent_id, query_sql, saved_query_id, query_read_only (default true)."""
     with engine.connect() as conn:
         for table_name, column_name, column_type in _COLUMNS:
             _add_column_if_missing(conn, table_name, column_name, column_type)

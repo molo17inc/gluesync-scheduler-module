@@ -51,6 +51,7 @@ class ChainedEventBase(BaseModel):
     agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
     query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
     saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
+    query_read_only: bool = Field(True, description="Query Studio read-only mode. True (default) runs SELECT-only. False allows UPDATE/INSERT/DELETE; the UI must acknowledge harm before sending false.")
     execution_mode: ChainedEventMode = Field(ChainedEventMode.ASYNC, description="async: fire-and-forget; sync: wait for corehub webhook callback before next event")
     webhook_timeout_seconds: int = Field(3600, description="Timeout in seconds for waiting on webhook callback in sync mode (default: 3600 = 1 hour)", ge=1)
 
@@ -133,6 +134,7 @@ class JobBase(BaseModel):
     agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
     query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
     saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
+    query_read_only: bool = Field(True, description="Query Studio read-only mode. True (default) runs SELECT-only. False allows UPDATE/INSERT/DELETE; the UI must acknowledge harm before sending false.")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(
@@ -187,6 +189,7 @@ class JobUpdate(BaseModel):
     agent_id: Optional[str] = Field(None, description="Updated Query Studio agent ID")
     query_sql: Optional[str] = Field(None, description="Updated Query Studio SQL snapshot")
     saved_query_id: Optional[str] = Field(None, description="Updated Query Studio saved-query ID")
+    query_read_only: Optional[bool] = Field(None, description="Updated Query Studio read-only flag (false requires harm acknowledgment in the UI)")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(None, description="Replace all chained events with this list (pass empty list to clear)")

@@ -1270,13 +1270,17 @@ class CoreHubClient:
             return None, None
         return resolved_agent, resolved_sql
 
-    def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str, saved_query_id: str = None) -> bool:
+    def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str, saved_query_id: str = None, query_read_only: bool = True) -> bool:
         """Execute a Query Studio SQL query against a pipeline agent.
 
         If saved_query_id is set, try Hub live SQL first and fall back to query_sql snapshot.
         Hub HTTP 2xx with status ERROR / failed query is treated as failure.
+
+        query_read_only defaults True (SELECT-only). False opts into writes
+        (UPDATE/INSERT/DELETE) via Hub QueryOptions.readOnly / SafetyGate.
         """
-        from gluesync_scheduler.models.models import preview_query_sql
+        from gluesync_scheduler.models.models import preview_query_sql, coerce_query_read_only
+        query_read_only = coerce_query_read_only(query_read_only)
 
         resolved_agent, resolved_sql = self.resolve_query_studio_execution(
             agent_id, query_sql, saved_query_id
@@ -1291,17 +1295,16 @@ class CoreHubClient:
         query_sql = resolved_sql
 
         logger.info(
-            "Executing Query Studio SQL on pipeline %s agent %s: %s",
-            pipeline_id, agent_id, preview_query_sql(query_sql),
+            "Executing Query Studio SQL on pipeline %s agent %s readOnly=%s: %s",
+            pipeline_id, agent_id, query_read_only, preview_query_sql(query_sql),
         )
         path = f"/query-studio/pipelines/{pipeline_id}/agents/{agent_id}/execute"
-        # Hub QueryOptions.readOnly defaults to true and rejects DML.
-        # Chronos is trusted automation: send writable so UPDATE/INSERT/DELETE
-        # match Query Studio UI. EXTERNAL_MODULE needs canRunQueryWritable.
+        # Hub QueryOptions.readOnly defaults true (SELECT). Writable DML is
+        # user-opted via query_read_only=false (UI must acknowledge harm).
         response = self.fetch_core_hub(
             path,
             method="POST",
-            body={"sql": query_sql, "options": {"readOnly": False}},
+            body={"sql": query_sql, "options": {"readOnly": query_read_only}},
             timeout=self.QUERY_STUDIO_TIMEOUT_SECONDS,
         )
         if not response:
@@ -1777,12 +1780,15 @@ class PipelineManager:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.client.exit_maintenance_mode, pipeline_id)
 
-    async def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str, saved_query_id: str = None) -> bool:
+    async def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str, saved_query_id: str = None, query_read_only: bool = True) -> bool:
         """Execute a Query Studio SQL query via CoreHub."""
-        logger.info("Query Studio execute pipeline=%s agent=%s saved_query_id=%s", pipeline_id, agent_id, saved_query_id)
+        logger.info(
+            "Query Studio execute pipeline=%s agent=%s saved_query_id=%s readOnly=%s",
+            pipeline_id, agent_id, saved_query_id, query_read_only,
+        )
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, self.client.execute_query_studio, pipeline_id, agent_id, query_sql, saved_query_id
+            None, self.client.execute_query_studio, pipeline_id, agent_id, query_sql, saved_query_id, query_read_only
         )
 
 

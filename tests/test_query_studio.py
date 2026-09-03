@@ -83,11 +83,13 @@ def test_create_query_studio_job_stores_agent_and_sql(db_session):
     assert created.task_type == TaskType.QUERY_STUDIO
     assert created.agent_id == "agent-9"
     assert created.query_sql == "SELECT 1"
+    assert created.query_read_only is True
 
     stored = db_session.query(ScheduledJob).filter_by(id=created.id).first()
     assert stored is not None
     assert stored.agent_id == "agent-9"
     assert stored.query_sql == "SELECT 1"
+    assert stored.query_read_only is True
 
 
 @pytest.mark.parametrize(
@@ -128,6 +130,7 @@ def test_trigger_flow_query_studio_event_is_persisted(db_session):
     assert evts[0].task_type == TaskType.QUERY_STUDIO
     assert evts[0].agent_id == "agent-42"
     assert evts[0].query_sql == "SELECT name FROM users"
+    assert evts[0].query_read_only is True
 
 
 def test_execute_query_studio_posts_hub_path_and_body():
@@ -145,11 +148,11 @@ def test_execute_query_studio_posts_hub_path_and_body():
     assert ok is True
     assert captured["path"] == "/query-studio/pipelines/pipe-1/agents/agent-9/execute"
     assert captured["method"] == "POST"
-    assert captured["body"] == {"sql": "SELECT 1", "options": {"readOnly": False}}
+    assert captured["body"] == {"sql": "SELECT 1", "options": {"readOnly": True}}
     assert captured["timeout"] == 120
 
 
-def test_execute_query_studio_sends_writable_options_for_dml():
+def test_execute_query_studio_sends_writable_options_when_user_opts_in():
     from gluesync_scheduler.core.play_pause import CoreHubClient
 
     captured = {}
@@ -161,7 +164,8 @@ def test_execute_query_studio_sends_writable_options_for_dml():
     client = CoreHubClient.__new__(CoreHubClient)
     client.fetch_core_hub = fake_fetch
     ok = CoreHubClient.execute_query_studio(
-        client, "pipe-1", "agent-9", "UPDATE dbo.CUSTOMERS SET x = 1"
+        client, "pipe-1", "agent-9", "UPDATE dbo.CUSTOMERS SET x = 1",
+        query_read_only=False,
     )
     assert ok is True
     assert captured["body"]["sql"].startswith("UPDATE")
@@ -213,7 +217,7 @@ def test_job_runner_query_studio_is_not_unknown(monkeypatch):
     )
     assert execute_job(job) is True
     assert posted["url"].endswith("/api/pipelines/pipe-1/query-studio")
-    assert posted["json"] == {"agent_id": "agent-9", "query_sql": "SELECT 1"}
+    assert posted["json"] == {"agent_id": "agent-9", "query_sql": "SELECT 1", "query_read_only": True}
     assert posted["timeout"] == 120
 
 
@@ -366,7 +370,7 @@ def test_execute_query_studio_uses_snapshot_when_hub_fetch_fails():
     post_calls = [c for c in captured if c["method"] == "POST"]
     assert get_calls[0]["path"] == "/query-studio/saved-queries/sq-1"
     assert post_calls[0]["path"] == "/query-studio/pipelines/pipe-1/agents/agent-9/execute"
-    assert post_calls[0]["body"] == {"sql": "SELECT snapshot", "options": {"readOnly": False}}
+    assert post_calls[0]["body"] == {"sql": "SELECT snapshot", "options": {"readOnly": True}}
 
 
 def test_execute_query_studio_prefers_hub_sql_when_fetch_succeeds():
@@ -388,7 +392,7 @@ def test_execute_query_studio_prefers_hub_sql_when_fetch_succeeds():
     assert ok is True
     post_calls = [c for c in captured if c["method"] == "POST"]
     assert post_calls[0]["path"] == "/query-studio/pipelines/pipe-1/agents/agent-live/execute"
-    assert post_calls[0]["body"] == {"sql": "SELECT live FROM hub", "options": {"readOnly": False}}
+    assert post_calls[0]["body"] == {"sql": "SELECT live FROM hub", "options": {"readOnly": True}}
 
 
 def test_execute_query_studio_fails_when_hub_and_snapshot_missing():
@@ -440,6 +444,7 @@ def test_job_runner_includes_saved_query_id_when_present(monkeypatch):
         "agent_id": "agent-9",
         "query_sql": "SELECT snapshot",
         "saved_query_id": "sq-1",
+        "query_read_only": True,
     }
 
 
@@ -465,4 +470,129 @@ def test_chain_event_payload_includes_saved_query_id():
         "agent_id": "agent-9",
         "query_sql": "SELECT snapshot",
         "saved_query_id": "sq-1",
+        "query_read_only": True,
     }
+
+
+def test_create_query_studio_job_persists_query_read_only_false(db_session):
+    with patch("gluesync_scheduler.services.job_service.scheduler_service") as mock_svc:
+        mock_svc.create_job.return_value = "sched-id-writable"
+        svc = JobService(db_session)
+        created = svc.create_job(_job_create(query_read_only=False))
+
+    assert created.query_read_only is False
+    stored = db_session.query(ScheduledJob).filter_by(id=created.id).first()
+    assert stored.query_read_only is False
+
+
+def test_trigger_flow_persists_query_read_only_false(db_session):
+    svc = TriggerFlowService(db_session)
+    data = TriggerFlowCreate(
+        name="qs-writable-flow",
+        events=[
+            TriggerEventCreate(
+                task_type=TaskType.QUERY_STUDIO,
+                pipeline_id="pipe-1",
+                agent_id="agent-42",
+                query_sql="UPDATE t SET x = 1",
+                query_read_only=False,
+                execution_mode="async",
+            )
+        ],
+    )
+    flow, _token = svc.create_flow(data)
+    evts = (
+        db_session.query(TriggerFlowEvent)
+        .filter_by(trigger_flow_id=flow.id)
+        .all()
+    )
+    assert len(evts) == 1
+    assert evts[0].query_read_only is False
+
+
+def test_chained_query_studio_event_persists_query_read_only_false(db_session):
+    from gluesync_scheduler.models.models import ChainedJobEvent
+    from gluesync_scheduler.models.schemas import ChainedEventCreate
+
+    with patch("gluesync_scheduler.services.job_service.scheduler_service") as mock_svc:
+        mock_svc.create_job.return_value = "sched-id-chain-w"
+        svc = JobService(db_session)
+        created = svc.create_job(
+            _job_create(
+                chained_events=[
+                    ChainedEventCreate(
+                        task_type=TaskType.QUERY_STUDIO,
+                        pipeline_id="pipe-1",
+                        agent_id="agent-9",
+                        query_sql="UPDATE t SET x = 1",
+                        query_read_only=False,
+                    )
+                ]
+            )
+        )
+
+    rows = (
+        db_session.query(ChainedJobEvent)
+        .filter_by(parent_job_id=created.id)
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].query_read_only is False
+    assert created.chained_events[0].query_read_only is False
+
+
+def test_job_runner_includes_query_read_only_false(monkeypatch):
+    from gluesync_scheduler.cli.job_runner import execute_job
+
+    posted = {}
+
+    class _Resp:
+        status_code = 200
+        text = '{"success": true}'
+
+    def fake_post(url, json=None, headers=None, verify=None, timeout=None):
+        posted.update(url=url, json=json, timeout=timeout)
+        return _Resp()
+
+    monkeypatch.setattr("gluesync_scheduler.cli.job_runner.requests.post", fake_post)
+
+    job = ScheduledJob(
+        name="qs",
+        task_type=TaskType.QUERY_STUDIO,
+        cron_expression="0 * * * *",
+        pipeline_id="pipe-1",
+        agent_id="agent-9",
+        query_sql="UPDATE t SET x = 1",
+        query_read_only=False,
+        enabled=True,
+        command="pending",
+        cron_job_identifier="gluesync_job_qs_w",
+        snapshot_write_method="UPSERT",
+    )
+    assert execute_job(job) is True
+    assert posted["json"] == {
+        "agent_id": "agent-9",
+        "query_sql": "UPDATE t SET x = 1",
+        "query_read_only": False,
+    }
+
+
+def test_chain_event_payload_includes_query_read_only_false():
+    from gluesync_scheduler.models.models import ExecutionMode
+    from gluesync_scheduler.services.chain_execution_service import ExecutableEvent, _event_payload
+
+    event = ExecutableEvent(
+        id=1,
+        position=0,
+        task_type=TaskType.QUERY_STUDIO,
+        pipeline_id="pipe-1",
+        entity_ids=None,
+        group_ids=None,
+        with_snapshot=False,
+        snapshot_write_method="UPSERT",
+        execution_mode=ExecutionMode.ASYNC,
+        agent_id="agent-9",
+        query_sql="UPDATE t SET x = 1",
+        query_read_only=False,
+    )
+    assert _event_payload(event)["query_read_only"] is False
