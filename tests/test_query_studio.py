@@ -145,8 +145,27 @@ def test_execute_query_studio_posts_hub_path_and_body():
     assert ok is True
     assert captured["path"] == "/query-studio/pipelines/pipe-1/agents/agent-9/execute"
     assert captured["method"] == "POST"
-    assert captured["body"] == {"sql": "SELECT 1"}
+    assert captured["body"] == {"sql": "SELECT 1", "options": {"readOnly": False}}
     assert captured["timeout"] == 120
+
+
+def test_execute_query_studio_sends_writable_options_for_dml():
+    from gluesync_scheduler.core.play_pause import CoreHubClient
+
+    captured = {}
+
+    def fake_fetch(path, method="GET", body=None, params=None, timeout=None, raw=False):
+        captured["body"] = body
+        return {"status": "success", "status_code": 200, "operation_status": "COMPLETED"}
+
+    client = CoreHubClient.__new__(CoreHubClient)
+    client.fetch_core_hub = fake_fetch
+    ok = CoreHubClient.execute_query_studio(
+        client, "pipe-1", "agent-9", "UPDATE dbo.CUSTOMERS SET x = 1"
+    )
+    assert ok is True
+    assert captured["body"]["sql"].startswith("UPDATE")
+    assert captured["body"]["options"] == {"readOnly": False}
 
 
 def test_execute_query_studio_treats_hub_status_error_as_failure():
@@ -347,7 +366,7 @@ def test_execute_query_studio_uses_snapshot_when_hub_fetch_fails():
     post_calls = [c for c in captured if c["method"] == "POST"]
     assert get_calls[0]["path"] == "/query-studio/saved-queries/sq-1"
     assert post_calls[0]["path"] == "/query-studio/pipelines/pipe-1/agents/agent-9/execute"
-    assert post_calls[0]["body"] == {"sql": "SELECT snapshot"}
+    assert post_calls[0]["body"] == {"sql": "SELECT snapshot", "options": {"readOnly": False}}
 
 
 def test_execute_query_studio_prefers_hub_sql_when_fetch_succeeds():
@@ -369,7 +388,7 @@ def test_execute_query_studio_prefers_hub_sql_when_fetch_succeeds():
     assert ok is True
     post_calls = [c for c in captured if c["method"] == "POST"]
     assert post_calls[0]["path"] == "/query-studio/pipelines/pipe-1/agents/agent-live/execute"
-    assert post_calls[0]["body"] == {"sql": "SELECT live FROM hub"}
+    assert post_calls[0]["body"] == {"sql": "SELECT live FROM hub", "options": {"readOnly": False}}
 
 
 def test_execute_query_studio_fails_when_hub_and_snapshot_missing():

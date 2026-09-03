@@ -1295,10 +1295,13 @@ class CoreHubClient:
             pipeline_id, agent_id, preview_query_sql(query_sql),
         )
         path = f"/query-studio/pipelines/{pipeline_id}/agents/{agent_id}/execute"
+        # Hub QueryOptions.readOnly defaults to true and rejects DML.
+        # Chronos is trusted automation: send writable so UPDATE/INSERT/DELETE
+        # match Query Studio UI. EXTERNAL_MODULE needs canRunQueryWritable.
         response = self.fetch_core_hub(
             path,
             method="POST",
-            body={"sql": query_sql},
+            body={"sql": query_sql, "options": {"readOnly": False}},
             timeout=self.QUERY_STUDIO_TIMEOUT_SECONDS,
         )
         if not response:
