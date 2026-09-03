@@ -27,9 +27,10 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 import pytz
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator, validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, validator
 
-from gluesync_scheduler.models.models import TaskType, require_query_studio_fields
+from gluesync_scheduler.models.models import TaskType
+from gluesync_scheduler.models.schemas import QueryStudioValidatorMixin
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 
@@ -42,7 +43,7 @@ class TriggerEventMode(str, Enum):
     SYNC = "sync"
 
 
-class TriggerEventBase(BaseModel):
+class TriggerEventBase(QueryStudioValidatorMixin, BaseModel):
     task_type: TaskType = Field(..., description="Type of task to perform")
     pipeline_id: str = Field(..., min_length=1, description="Pipeline ID to operate on")
     entity_ids: Optional[List[str]] = Field(None, description="Entity IDs (required for entity operations)")
@@ -61,12 +62,6 @@ class TriggerEventBase(BaseModel):
         TriggerEventMode.ASYNC,
         description="async: fire-and-forget; sync: wait for corehub webhook callback before next event",
     )
-
-    @model_validator(mode="after")
-    def _validate_query_studio(self):
-        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
-        return self
-
 
 class TriggerEventCreate(TriggerEventBase):
     """Schema used when creating trigger events (no extra fields)."""

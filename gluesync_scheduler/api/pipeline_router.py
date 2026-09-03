@@ -80,6 +80,43 @@ def _handle_operation_failure(message: str, cron_job_identifier: Optional[str]) 
         detail=message,
     )
 
+
+def _mark_job_succeeded(cron_job_identifier: Optional[str]) -> None:
+    """Best-effort update of the cron job row to success. Never raises."""
+    if not cron_job_identifier:
+        return
+    try:
+        from gluesync_scheduler.cli.job_runner import update_job_status
+        update_job_status(cron_job_identifier, True)
+        logger.info("Updated job status for %s", cron_job_identifier)
+    except Exception:
+        logger.exception("Error updating job status")
+
+
+def _parse_query_studio_body(body: Optional[dict]):
+    """Validate the internal Query Studio execute body and return its fields."""
+    from gluesync_scheduler.models.models import (
+        QUERY_STUDIO_AGENT_ID,
+        QUERY_STUDIO_READ_ONLY,
+        QUERY_STUDIO_SAVED_ID,
+        QUERY_STUDIO_SQL,
+        coerce_query_read_only,
+        stripped_or_none,
+    )
+    body = body or {}
+    agent_id = body.get(QUERY_STUDIO_AGENT_ID)
+    query_sql = body.get(QUERY_STUDIO_SQL)
+    saved_query_id = body.get(QUERY_STUDIO_SAVED_ID)
+    query_read_only = coerce_query_read_only(body.get(QUERY_STUDIO_READ_ONLY, True))
+    if not stripped_or_none(agent_id) or not (
+        stripped_or_none(query_sql) or stripped_or_none(saved_query_id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="query_studio requires non-empty agent_id and query_sql or saved_query_id",
+        )
+    return agent_id, query_sql, saved_query_id, query_read_only
+
 # Security dependency to ensure requests only come from localhost
 async def verify_localhost(request: Request):
     """
@@ -924,22 +961,10 @@ async def execute_query_studio(
     ``saved_query_id`` is optional; when set, live Hub SQL is preferred over the snapshot.
     ``query_read_only`` defaults true (SELECT-only). False opts into writable DML.
     """
-    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
-    body = body or {}
-    agent_id = body.get("agent_id")
-    query_sql = body.get("query_sql")
-    saved_query_id = body.get("saved_query_id")
-    from gluesync_scheduler.models.models import coerce_query_read_only, preview_query_sql
-    query_read_only = coerce_query_read_only(body.get("query_read_only", True))
-    has_agent = bool(agent_id and str(agent_id).strip())
-    has_sql = bool(query_sql and str(query_sql).strip())
-    has_saved = bool(saved_query_id and str(saved_query_id).strip())
-    if not has_agent or (not has_sql and not has_saved):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="query_studio requires non-empty agent_id and query_sql or saved_query_id",
-        )
+    from gluesync_scheduler.models.models import preview_query_sql
 
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    agent_id, query_sql, saved_query_id, query_read_only = _parse_query_studio_body(body)
     logger.info(
         "Received Query Studio request for pipeline %s agent %s saved_query_id=%s readOnly=%s: %s",
         pipeline_id, agent_id, saved_query_id, query_read_only, preview_query_sql(query_sql),
@@ -958,15 +983,7 @@ async def execute_query_studio(
         )
         if not result:
             _handle_operation_failure(message, cron_job_identifier)
-
-        if cron_job_identifier:
-            try:
-                from gluesync_scheduler.cli.job_runner import update_job_status
-                update_job_status(cron_job_identifier, True)
-                logger.info("Updated job status for %s", cron_job_identifier)
-            except Exception:
-                logger.exception("Error updating job status")
-
+        _mark_job_succeeded(cron_job_identifier)
         return {
             "success": True,
             "message": message,
@@ -976,12 +993,7 @@ async def execute_query_studio(
         raise
     except Exception as e:
         logger.exception("Error executing Query Studio query")
-        if cron_job_identifier:
-            try:
-                from gluesync_scheduler.cli.job_runner import update_job_status
-                update_job_status(cron_job_identifier, False, str(e))
-            except Exception:
-                logger.exception("Error updating job status to failed")
+        _mark_job_failed(cron_job_identifier, str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error executing Query Studio query: {str(e)}",

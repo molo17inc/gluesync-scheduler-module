@@ -39,7 +39,7 @@ _CHRONOS_PLATFORM_WEBHOOK_PREFIX = "chronos-platform-"
 import requests
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ChainedJobEvent, ExecutionMode, ScheduledJob, TaskType, coerce_query_read_only
+from gluesync_scheduler.models.models import ChainedJobEvent, ExecutionMode, ScheduledJob, TaskType, query_read_only_of, query_studio_http_payload
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +66,7 @@ class ExecutableEvent:
 
     @staticmethod
     def from_chained(event: "ChainedJobEvent") -> "ExecutableEvent":
+        """Project a chained or trigger-flow event onto the shared execution unit."""
         return ExecutableEvent(
             id=event.id,
             position=event.position,
@@ -79,26 +80,13 @@ class ExecutableEvent:
             agent_id=getattr(event, "agent_id", None),
             query_sql=getattr(event, "query_sql", None),
             saved_query_id=getattr(event, "saved_query_id", None),
-            query_read_only=coerce_query_read_only(getattr(event, "query_read_only", True)),
+            query_read_only=query_read_only_of(event),
         )
 
     @staticmethod
     def from_trigger(event) -> "ExecutableEvent":
-        return ExecutableEvent(
-            id=event.id,
-            position=event.position,
-            task_type=event.task_type,
-            pipeline_id=event.pipeline_id,
-            entity_ids=event.entity_ids,
-            group_ids=event.group_ids,
-            with_snapshot=event.with_snapshot,
-            snapshot_write_method=event.snapshot_write_method,
-            execution_mode=event.execution_mode,
-            agent_id=getattr(event, "agent_id", None),
-            query_sql=getattr(event, "query_sql", None),
-            saved_query_id=getattr(event, "saved_query_id", None),
-            query_read_only=coerce_query_read_only(getattr(event, "query_read_only", True)),
-        )
+        """Project a trigger-flow event; same attribute names as chained events."""
+        return ExecutableEvent.from_chained(event)
 
 logger = logging.getLogger(__name__)
 
@@ -193,8 +181,6 @@ def _task_type_to_webhook_events(task_type: TaskType) -> list:
         TaskType.PIPELINE_EXIT_MAINTENANCE: ["PIPELINE_EXIT_MAINTENANCE"],
         TaskType.QUERY_STUDIO: [],
     }
-    if task_type == TaskType.QUERY_STUDIO:
-        return []
     return mapping.get(task_type, ["ENTITY_SNAPSHOT_COMPLETED", "ENTITY_CDC_STARTED", "ENTITY_CDC_STOPPED"])
 
 
@@ -1161,6 +1147,7 @@ chain_execution_service = ChainExecutionService()
 # ---------------------------------------------------------------------------
 
 def _task_type_to_action(task_type: TaskType) -> Optional[str]:
+    """Map a TaskType to the Chronos internal pipeline-API action path segment."""
     mapping = {
         TaskType.ENTITY_START: "play",
         TaskType.PIPELINE_START: "play",
@@ -1184,14 +1171,7 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
 def _event_payload(event: ExecutableEvent) -> dict:
     """Build the Chronos internal pipeline-API payload for an executable event."""
     if event.task_type == TaskType.QUERY_STUDIO:
-        payload = {
-            "agent_id": event.agent_id,
-            "query_sql": event.query_sql,
-            "query_read_only": coerce_query_read_only(getattr(event, "query_read_only", True)),
-        }
-        if event.saved_query_id:
-            payload["saved_query_id"] = event.saved_query_id
-        return payload
+        return query_studio_http_payload(event)
     payload: dict = {}
     entity_ids = _parse_json_list(event.entity_ids)
     group_ids = _parse_json_list(event.group_ids)

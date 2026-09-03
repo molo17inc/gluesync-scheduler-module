@@ -132,6 +132,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _first_nonempty_field(data, keys):
+    """Return the first non-empty string field from data, or None."""
+    for key in keys:
+        val = data.get(key)
+        if val and str(val).strip():
+            return str(val)
+    return None
+
+
 def _extract_saved_query_fields(payload):
     """Return (sql, agent_id) from a CoreHub saved-query payload, or (None, None)."""
     if not isinstance(payload, dict) or payload.get("status") == "error":
@@ -139,21 +148,40 @@ def _extract_saved_query_fields(payload):
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     if not isinstance(data, dict):
         return None, None
-    sql = None
-    for key in ("sql", "querySql", "query_sql", "query"):
-        val = data.get(key)
-        if val and str(val).strip():
-            sql = str(val)
-            break
+    sql = _first_nonempty_field(data, ("sql", "querySql", "query_sql", "query"))
     if not sql:
         return None, None
-    agent = None
-    for key in ("agentId", "agent_id", "agent"):
-        val = data.get(key)
-        if val and str(val).strip():
-            agent = str(val)
-            break
+    agent = _first_nonempty_field(data, ("agentId", "agent_id", "agent"))
     return sql, agent
+
+
+def _query_studio_execute_succeeded(response, pipeline_id, agent_id) -> bool:
+    """Log Hub execute outcome and return True only for a successful query."""
+    if not response:
+        logger.error(
+            "Query Studio execute returned no response for pipeline %s agent %s",
+            pipeline_id, agent_id,
+        )
+        return False
+    if isinstance(response, dict) and response.get("status") == "error":
+        logger.error(
+            "Query Studio execute failed for pipeline %s agent %s: %s",
+            pipeline_id, agent_id, response.get("message"),
+        )
+        return False
+    op_status = response.get("operation_status") if isinstance(response, dict) else None
+    if isinstance(op_status, str) and op_status.lower() in ("error", "failed", "fail"):
+        logger.error(
+            "Query Studio reported failed query for pipeline %s agent %s: %s",
+            pipeline_id, agent_id, op_status,
+        )
+        return False
+    logger.info(
+        "Query Studio execute succeeded for pipeline %s agent %s",
+        pipeline_id, agent_id,
+    )
+    return True
+
 
 
 class CoreHubClient:
@@ -359,15 +387,22 @@ class CoreHubClient:
         if prepared is None:
             return None
         url, headers, verify = prepared
+        ctx = {
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "body": body,
+            "params": params,
+            "verify": verify,
+            "timeout": timeout,
+            "raw": raw,
+        }
 
         try:
             response = self._do_request(method, url, headers, body, params, verify, timeout=timeout)
             if response is None:
                 return None
-            return self._interpret_response(
-                response, method, url, headers, body, params, verify,
-                timeout=timeout, raw=raw,
-            )
+            return self._interpret_response(response, ctx)
         except Exception as e:
             logger.exception("Request failed with exception")
             return {
@@ -461,17 +496,14 @@ class CoreHubClient:
             return False
         return True
 
-    def _interpret_response(self, response, method, url, headers, body, params, verify, timeout=None, raw=False):
+    def _interpret_response(self, response, ctx):
         """Turn a raw ``requests.Response`` into the standard result dict."""
         if response.status_code in (200, 201, 202, 204):
-            if raw:
+            if ctx.get("raw"):
                 return _raw_success_payload(response)
             return _build_success_response(response)
         if response.status_code == 401:
-            return self._handle_unauthorized(
-                response, method, url, headers, body, params, verify,
-                timeout=timeout, raw=raw,
-            )
+            return self._handle_unauthorized(response, ctx)
         logger.error(
             f"Request failed with status code {response.status_code}: {response.text}"
         )
@@ -500,7 +532,7 @@ class CoreHubClient:
         logger.error(f"Unsupported HTTP method: {method}")
         return None
 
-    def _handle_unauthorized(self, response, method, url, headers, body, params, verify, timeout=None, raw=False):
+    def _handle_unauthorized(self, response, ctx):
         """Handle a 401 from CoreHub: optionally refresh the SDK token and retry once."""
         self._last_status_code = 401
         error_message = _extract_error_message(
@@ -513,9 +545,7 @@ class CoreHubClient:
         ).lower() in ('true', '1', 't')
 
         if refresh_enabled:
-            retry_result = self._refresh_and_retry(
-                method, url, headers, body, params, verify, timeout=timeout, raw=raw,
-            )
+            retry_result = self._refresh_and_retry(ctx)
             if retry_result is not None:
                 return retry_result
 
@@ -529,7 +559,7 @@ class CoreHubClient:
             "message": error_message,
         }
 
-    def _refresh_and_retry(self, method, url, headers, body, params, verify, timeout=None, raw=False):
+    def _refresh_and_retry(self, ctx):
         """Force an SDK re-login and retry the original request exactly once.
 
         Returns the retry result dict, or None if refresh/retry was not attempted
@@ -547,14 +577,15 @@ class CoreHubClient:
                 return None
 
             logger.info("Successfully refreshed SDK token after 401. Retrying request...")
-            retry_headers = headers.copy()
+            retry_headers = ctx["headers"].copy()
             retry_headers['Authorization'] = f'Bearer {new_token}'
             retry_response = self._do_request(
-                method, url, retry_headers, body, params, verify, timeout=timeout,
+                ctx["method"], ctx["url"], retry_headers, ctx["body"], ctx["params"],
+                ctx["verify"], timeout=ctx.get("timeout"),
             )
             if retry_response is None:
                 return None
-            return self._process_retry_response(retry_response, raw=raw)
+            return self._process_retry_response(retry_response, ctx.get("raw", False))
         except Exception:
             logger.exception("Error during SDK token refresh or retry")
             return None
@@ -1235,37 +1266,44 @@ class CoreHubClient:
         path = f"/query-studio/saved-queries/{quote(str(saved_query_id), safe='')}"
         return self.fetch_core_hub(path, method="GET", raw=True)
 
+    def _fetch_saved_query_payload(self, saved_query_id):
+        """GET a saved query; return payload or None if the Hub call fails."""
+        try:
+            return self.fetch_saved_query(saved_query_id)
+        except Exception:
+            logger.exception(
+                "Failed to fetch Query Studio saved query %s; using snapshot", saved_query_id
+            )
+            return None
+
+    def _live_saved_query(self, saved_query_id, snapshot_sql, snapshot_agent):
+        """Prefer live Hub SQL/agent; keep snapshot values when live SQL is missing."""
+        payload = self._fetch_saved_query_payload(saved_query_id)
+        live_sql, live_agent = _extract_saved_query_fields(payload)
+        if live_sql:
+            logger.info("Using live SQL from Query Studio saved query %s", saved_query_id)
+            return live_sql, live_agent or snapshot_agent
+        logger.warning(
+            "Query Studio saved query %s unavailable (404/403/failure); falling back to stored snapshot",
+            saved_query_id,
+        )
+        return snapshot_sql, snapshot_agent
+
     def resolve_query_studio_execution(self, agent_id, query_sql, saved_query_id=None):
         """Prefer live Hub SQL for a saved query; fall back to stored snapshot.
 
         Returns (agent_id, query_sql) or (None, None) if neither live nor snapshot SQL is available.
         On 404/403/failure fetching the saved query, uses the stored query_sql snapshot.
         """
-        snapshot_sql = query_sql if query_sql and str(query_sql).strip() else None
-        resolved_agent = agent_id if agent_id and str(agent_id).strip() else None
-        resolved_sql = snapshot_sql
+        from gluesync_scheduler.models.models import stripped_or_none
 
-        sid = str(saved_query_id).strip() if saved_query_id and str(saved_query_id).strip() else None
+        resolved_sql = stripped_or_none(query_sql)
+        resolved_agent = stripped_or_none(agent_id)
+        sid = stripped_or_none(saved_query_id)
         if sid:
-            try:
-                payload = self.fetch_saved_query(sid)
-            except Exception:
-                logger.exception(
-                    "Failed to fetch Query Studio saved query %s; using snapshot", sid
-                )
-                payload = None
-            live_sql, live_agent = _extract_saved_query_fields(payload)
-            if live_sql:
-                resolved_sql = live_sql
-                if live_agent:
-                    resolved_agent = live_agent
-                logger.info("Using live SQL from Query Studio saved query %s", sid)
-            else:
-                logger.warning(
-                    "Query Studio saved query %s unavailable (404/403/failure); falling back to stored snapshot",
-                    sid,
-                )
-
+            resolved_sql, resolved_agent = self._live_saved_query(
+                sid, resolved_sql, resolved_agent
+            )
         if not resolved_sql or not resolved_agent:
             return None, None
         return resolved_agent, resolved_sql
@@ -1307,32 +1345,7 @@ class CoreHubClient:
             body={"sql": query_sql, "options": {"readOnly": query_read_only}},
             timeout=self.QUERY_STUDIO_TIMEOUT_SECONDS,
         )
-        if not response:
-            logger.error(
-                "Query Studio execute returned no response for pipeline %s agent %s",
-                pipeline_id, agent_id,
-            )
-            return False
-        if isinstance(response, dict) and response.get("status") == "error":
-            logger.error(
-                "Query Studio execute failed for pipeline %s agent %s: %s",
-                pipeline_id, agent_id, response.get("message"),
-            )
-            return False
-        op_status = None
-        if isinstance(response, dict):
-            op_status = response.get("operation_status")
-        if isinstance(op_status, str) and op_status.lower() in ("error", "failed", "fail"):
-            logger.error(
-                "Query Studio reported failed query for pipeline %s agent %s: %s",
-                pipeline_id, agent_id, op_status,
-            )
-            return False
-        logger.info(
-            "Query Studio execute succeeded for pipeline %s agent %s",
-            pipeline_id, agent_id,
-        )
-        return True
+        return _query_studio_execute_succeeded(response, pipeline_id, agent_id)
 
 
 class PipelineManager:

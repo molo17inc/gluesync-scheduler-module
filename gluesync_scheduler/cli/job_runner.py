@@ -215,14 +215,8 @@ def execute_job(job: ScheduledJob) -> bool:
         json_data = {}
         request_timeout = 30
         if job.task_type == TaskType.QUERY_STUDIO:
-            from gluesync_scheduler.models.models import coerce_query_read_only
-            json_data = {
-                "agent_id": job.agent_id,
-                "query_sql": job.query_sql,
-                "query_read_only": coerce_query_read_only(getattr(job, "query_read_only", True)),
-            }
-            if getattr(job, "saved_query_id", None):
-                json_data["saved_query_id"] = job.saved_query_id
+            from gluesync_scheduler.models.models import query_studio_http_payload
+            json_data = query_studio_http_payload(job)
             request_timeout = 120
         
         # Add entity_ids to the payload if present
@@ -271,14 +265,8 @@ def execute_job(job: ScheduledJob) -> bool:
         # Add timeout to prevent hanging requests
         log_payload = json_data
         if job.task_type == TaskType.QUERY_STUDIO:
-            from gluesync_scheduler.models.models import preview_query_sql, coerce_query_read_only
-            log_payload = {
-                "agent_id": job.agent_id,
-                "query_sql": preview_query_sql(job.query_sql),
-                "query_read_only": coerce_query_read_only(getattr(job, "query_read_only", True)),
-            }
-            if getattr(job, "saved_query_id", None):
-                log_payload["saved_query_id"] = job.saved_query_id
+            from gluesync_scheduler.models.models import query_studio_http_payload
+            log_payload = query_studio_http_payload(job, preview=True)
         logger.info(f"JSON Payload: {log_payload}")
 
         response = requests.post(

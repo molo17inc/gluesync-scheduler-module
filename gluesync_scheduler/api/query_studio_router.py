@@ -51,7 +51,7 @@ router = APIRouter(
 
 @router.get("/agents", summary="List Query Studio agents from CoreHub")
 async def list_query_studio_agents(
-    user: Annotated[CurrentUser, Depends(current_user)],
+    _user: Annotated[CurrentUser, Depends(current_user)],
 ):
     """Proxy CoreHub ``GET /query-studio/agents`` for the Scheduler UI agent picker.
 

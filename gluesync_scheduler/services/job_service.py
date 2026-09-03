@@ -35,7 +35,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ScheduledJob, TaskType, Setting, ChainedJobEvent, ExecutionMode, require_query_studio_fields, preview_query_sql, coerce_query_read_only
+from gluesync_scheduler.models.models import ScheduledJob, TaskType, Setting, ChainedJobEvent, ExecutionMode, require_query_studio_fields, query_read_only_of, query_studio_http_payload, QUERY_STUDIO_AGENT_ID, QUERY_STUDIO_SQL, QUERY_STUDIO_SAVED_ID
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
@@ -459,7 +459,7 @@ class JobService:
                 agent_id=job_data.agent_id,
                 query_sql=job_data.query_sql,
                 saved_query_id=job_data.saved_query_id,
-                query_read_only=coerce_query_read_only(getattr(job_data, "query_read_only", True)),
+                query_read_only=query_read_only_of(job_data),
                 enabled=job_data.enabled,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
@@ -508,7 +508,7 @@ class JobService:
                         agent_id=ce.agent_id,
                         query_sql=ce.query_sql,
                         saved_query_id=ce.saved_query_id,
-                        query_read_only=coerce_query_read_only(getattr(ce, "query_read_only", True)),
+                        query_read_only=query_read_only_of(ce),
                         execution_mode=ExecutionMode(ce.execution_mode.value),
                         webhook_timeout_seconds=ce.webhook_timeout_seconds,
                     )
@@ -608,9 +608,9 @@ class JobService:
                         detail=f"Task type {final_task_type} requires group_ids to be provided"
                     )
 
-            final_agent_id = update_data.get("agent_id", db_job.agent_id)
-            final_query_sql = update_data.get("query_sql", db_job.query_sql)
-            final_saved_query_id = update_data.get("saved_query_id", db_job.saved_query_id)
+            final_agent_id = update_data.get(QUERY_STUDIO_AGENT_ID, db_job.agent_id)
+            final_query_sql = update_data.get(QUERY_STUDIO_SQL, db_job.query_sql)
+            final_saved_query_id = update_data.get(QUERY_STUDIO_SAVED_ID, db_job.saved_query_id)
             require_query_studio_fields(final_task_type, final_agent_id, final_query_sql, final_saved_query_id)
             if job_data.chained_events:
                 for ce in job_data.chained_events:
@@ -865,7 +865,7 @@ class JobService:
                             agent_id=ce.agent_id,
                             query_sql=ce.query_sql,
                             saved_query_id=ce.saved_query_id,
-                            query_read_only=coerce_query_read_only(getattr(ce, "query_read_only", True)),
+                            query_read_only=query_read_only_of(ce),
                             execution_mode=ExecutionMode(ce.execution_mode.value),
                             webhook_timeout_seconds=ce.webhook_timeout_seconds,
                         )
@@ -1181,13 +1181,7 @@ class JobService:
             # Prepare the JSON payload similar to CLI job runner
             json_data = {}
             if job.task_type == TaskType.QUERY_STUDIO:
-                json_data = {
-                    "agent_id": job.agent_id,
-                    "query_sql": job.query_sql,
-                    "query_read_only": coerce_query_read_only(getattr(job, "query_read_only", True)),
-                }
-                if getattr(job, "saved_query_id", None):
-                    json_data["saved_query_id"] = job.saved_query_id
+                json_data = query_studio_http_payload(job)
 
             if job.task_type != TaskType.QUERY_STUDIO and entity_ids:
                 json_data["entity_ids"] = entity_ids
@@ -1216,13 +1210,7 @@ class JobService:
             logger.info(f"Endpoint: {method} {endpoint}")
             log_payload = json_data
             if job.task_type == TaskType.QUERY_STUDIO:
-                log_payload = {
-                    "agent_id": job.agent_id,
-                    "query_sql": preview_query_sql(job.query_sql),
-                    "query_read_only": coerce_query_read_only(getattr(job, "query_read_only", True)),
-                }
-                if getattr(job, "saved_query_id", None):
-                    log_payload["saved_query_id"] = job.saved_query_id
+                log_payload = query_studio_http_payload(job, preview=True)
             logger.info(f"JSON Payload: {log_payload}")
             
             try:
@@ -1474,7 +1462,7 @@ def _rows_to_chained_responses(rows: list) -> list:
             agent_id=row.agent_id,
             query_sql=row.query_sql,
             saved_query_id=row.saved_query_id,
-            query_read_only=coerce_query_read_only(getattr(row, "query_read_only", True)),
+            query_read_only=query_read_only_of(row),
             execution_mode=row.execution_mode.value,
         )
         result.append(resp)

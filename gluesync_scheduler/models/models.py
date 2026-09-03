@@ -52,6 +52,12 @@ class TaskType(enum.Enum):
 QUERY_STUDIO_SQL_PREVIEW_LEN = 200
 
 
+QUERY_STUDIO_AGENT_ID = "agent_id"
+QUERY_STUDIO_SQL = "query_sql"
+QUERY_STUDIO_SAVED_ID = "saved_query_id"
+QUERY_STUDIO_READ_ONLY = "query_read_only"
+
+
 def preview_query_sql(query_sql, limit=QUERY_STUDIO_SQL_PREVIEW_LEN):
     """Return a truncated SQL preview for logs (never dump huge queries)."""
     if not query_sql:
@@ -62,8 +68,17 @@ def preview_query_sql(query_sql, limit=QUERY_STUDIO_SQL_PREVIEW_LEN):
     return text[:limit] + "..."
 
 
+def stripped_or_none(value):
+    """Return a stripped string, or None if the value is empty/missing."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _nonempty(value):
-    return bool(value and str(value).strip())
+    """True when value has non-whitespace content."""
+    return bool(stripped_or_none(value))
 
 
 def coerce_query_read_only(value, default=True) -> bool:
@@ -71,6 +86,25 @@ def coerce_query_read_only(value, default=True) -> bool:
     if value is None:
         return bool(default)
     return bool(value)
+
+
+def query_read_only_of(obj, default=True) -> bool:
+    """Read query_read_only from a job/event-like object, defaulting True."""
+    return coerce_query_read_only(getattr(obj, QUERY_STUDIO_READ_ONLY, default), default)
+
+
+def query_studio_http_payload(obj, preview=False):
+    """Build the internal Chronos Query Studio JSON body from a job/event object."""
+    sql = getattr(obj, QUERY_STUDIO_SQL, None)
+    payload = {
+        QUERY_STUDIO_AGENT_ID: getattr(obj, QUERY_STUDIO_AGENT_ID, None),
+        QUERY_STUDIO_SQL: preview_query_sql(sql) if preview else sql,
+        QUERY_STUDIO_READ_ONLY: query_read_only_of(obj),
+    }
+    saved = getattr(obj, QUERY_STUDIO_SAVED_ID, None)
+    if saved:
+        payload[QUERY_STUDIO_SAVED_ID] = saved
+    return payload
 
 
 def require_query_studio_fields(task_type, agent_id, query_sql, saved_query_id=None):

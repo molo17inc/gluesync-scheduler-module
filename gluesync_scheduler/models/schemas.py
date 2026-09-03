@@ -34,13 +34,23 @@ from gluesync_scheduler.models.models import TaskType, ExecutionMode, require_qu
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 
+class QueryStudioValidatorMixin:
+    """Shared post-init validation for Query Studio identifiers."""
+
+    @model_validator(mode="after")
+    def _validate_query_studio(self):
+        """Reject QUERY_STUDIO tasks that are missing agent/SQL identifiers."""
+        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
+        return self
+
+
 class ChainedEventMode(str, Enum):
     """Execution mode for a chained event"""
     ASYNC = "async"   # fire-and-forget; don't wait for completion
     SYNC = "sync"     # register a corehub webhook and wait for callback before proceeding
 
 
-class ChainedEventBase(BaseModel):
+class ChainedEventBase(QueryStudioValidatorMixin, BaseModel):
     """Fields shared by create and response schemas for chained events"""
     task_type: TaskType = Field(..., description="Type of task to perform")
     pipeline_id: str = Field(..., description="Pipeline ID to operate on")
@@ -54,11 +64,6 @@ class ChainedEventBase(BaseModel):
     query_read_only: bool = Field(True, description="Query Studio read-only mode. True (default) runs SELECT-only. False allows UPDATE/INSERT/DELETE; the UI must acknowledge harm before sending false.")
     execution_mode: ChainedEventMode = Field(ChainedEventMode.ASYNC, description="async: fire-and-forget; sync: wait for corehub webhook callback before next event")
     webhook_timeout_seconds: int = Field(3600, description="Timeout in seconds for waiting on webhook callback in sync mode (default: 3600 = 1 hour)", ge=1)
-
-    @model_validator(mode="after")
-    def _validate_query_studio(self):
-        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
-        return self
 
 
 class ChainedEventCreate(ChainedEventBase):
@@ -119,7 +124,7 @@ class ScheduleConfig(BaseModel):
         return v
 
 
-class JobBase(BaseModel):
+class JobBase(QueryStudioValidatorMixin, BaseModel):
     """Base model for job data with common fields"""
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
@@ -149,12 +154,6 @@ class JobBase(BaseModel):
             if values["schedule"] is None and values["cron_expression"] is None:
                 raise ValueError("Either schedule or cron_expression must be provided")
         return v
-
-    @model_validator(mode="after")
-    def _validate_query_studio(self):
-        require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
-        return self
-
 
 class JobCreate(JobBase):
     """Model for creating a new job (inherits all fields from JobBase)"""
@@ -196,6 +195,7 @@ class JobUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_query_studio(self):
+        """Validate Query Studio fields only when the update sets task_type to query_studio."""
         if self.task_type == TaskType.QUERY_STUDIO:
             require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
         return self
