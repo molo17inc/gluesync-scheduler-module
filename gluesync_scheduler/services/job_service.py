@@ -47,6 +47,7 @@ _DOW_MAP = {
     "thursday": 4, "friday": 5, "saturday": 6,
 }
 _REVERSE_DOW_MAP = {str(v): k for k, v in _DOW_MAP.items()}
+_ISO_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 _GROUP_TASK_TYPES = [
     TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO,
 ]
@@ -261,7 +262,7 @@ class JobService:
                             # Convert to the configured timezone
                             dt = dt.astimezone(tz)
                             # Format with timezone info
-                            job_model.next_run = dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+                            job_model.next_run = dt.strftime(_ISO_DATETIME_FORMAT)
                     except Exception as e:
                         logger.warning(f"Error processing next_run timezone: {e}")
                         
@@ -271,7 +272,7 @@ class JobService:
                         if '+' in job_model.start_time or 'Z' in job_model.start_time:
                             dt = datetime.fromisoformat(job_model.start_time.replace('Z', '+00:00'))
                             dt = dt.astimezone(tz)
-                            job_model.start_time = dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+                            job_model.start_time = dt.strftime(_ISO_DATETIME_FORMAT)
                     except Exception as e:
                         logger.warning(f"Error processing start_time timezone: {e}")
             except Exception as e:
@@ -450,7 +451,7 @@ class JobService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Failed to convert schedule to cron expression: {e}")
+            logger.exception("Failed to convert schedule to cron expression")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Failed to convert schedule to cron expression: {str(e)}"
@@ -471,11 +472,11 @@ class JobService:
                 next_run_datetime = tz.localize(next_run_datetime)
             elif str(next_run_datetime.tzinfo) != str(tz):
                 next_run_datetime = next_run_datetime.astimezone(tz)
-            next_run_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
+            next_run_time = next_run_datetime.strftime(_ISO_DATETIME_FORMAT)
             logger.info(f"Calculated next run time: {next_run_time} in timezone {current_timezone}")
             return next_run_time, next_run_datetime
         except Exception as e:
-            logger.error(f"Error calculating next run time: {e}")
+            logger.exception("Error calculating next run time")
             return None, None
 
     def _validate_group_task_type(self, task_type, group_ids) -> None:
@@ -762,7 +763,7 @@ class JobService:
                 next_run_datetime = next_run_datetime.astimezone(tz)
             weekday_name = next_run_datetime.strftime("%A").lower()
             logger.info(f"Next run calculated for: {next_run_datetime}, which is a {weekday_name}")
-            db_job.start_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
+            db_job.start_time = next_run_datetime.strftime(_ISO_DATETIME_FORMAT)
             db_job.next_run = next_run_datetime
             db_job.timezone_name = current_timezone
             logger.info(

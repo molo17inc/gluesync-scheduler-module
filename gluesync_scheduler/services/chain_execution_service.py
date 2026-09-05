@@ -222,6 +222,9 @@ class ChainExecutionService:
     # Created lazily per-event-loop because the chain runs in a separate thread.
     _webhook_list_lock: Optional[asyncio.Lock] = None
 
+    # Strong refs for fire-and-forget asyncio tasks (prevent GC before completion).
+    _background_tasks: Set[asyncio.Task] = set()
+
     def _get_webhook_list_lock(self) -> asyncio.Lock:
         """Get or create the asyncio.Lock for the current event loop."""
         if self._webhook_list_lock is None:
@@ -279,7 +282,9 @@ class ChainExecutionService:
             )
             if event.execution_mode == ExecutionMode.ASYNC:
                 # Fire-and-forget: trigger the event but don't await its HTTP result
-                asyncio.ensure_future(self._execute_chained_event(event, db))
+                task = asyncio.create_task(self._execute_chained_event(event, db))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
                 continue
 
             # Sync: wait for preceding step's callback, then fire the event.
@@ -304,8 +309,8 @@ class ChainExecutionService:
                 parent.last_error_message = "; ".join(errors)
                 parent.last_run_error_time = datetime.now(timezone.utc)
                 db.commit()
-        except Exception as exc:
-            logger.error("Failed to persist chain error to DB: %s", exc)
+        except Exception:
+            logger.exception("Failed to persist chain error to DB")
 
     async def execute_chain(self, job: ScheduledJob, db: Session) -> dict:
         """Called after the parent job executes successfully.
@@ -371,7 +376,9 @@ class ChainExecutionService:
                 event.position, event.task_type, event.execution_mode, event.pipeline_id,
             )
             if event.execution_mode == ExecutionMode.ASYNC:
-                asyncio.ensure_future(self._execute_event(event))
+                task = asyncio.create_task(self._execute_event(event))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
             else:
                 success = await self._execute_event(event)
                 if not success:
