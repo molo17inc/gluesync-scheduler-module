@@ -475,7 +475,7 @@ class JobService:
             next_run_time = next_run_datetime.strftime(_ISO_DATETIME_FORMAT)
             logger.info(f"Calculated next run time: {next_run_time} in timezone {current_timezone}")
             return next_run_time, next_run_datetime
-        except Exception as e:
+        except Exception:
             logger.exception("Error calculating next run time")
             return None, None
 
