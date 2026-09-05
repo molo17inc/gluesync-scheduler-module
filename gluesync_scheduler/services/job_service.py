@@ -42,6 +42,112 @@ from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 logger = logging.getLogger(__name__)
 
+_DOW_MAP = {
+    "sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3,
+    "thursday": 4, "friday": 5, "saturday": 6,
+}
+_REVERSE_DOW_MAP = {str(v): k for k, v in _DOW_MAP.items()}
+_GROUP_TASK_TYPES = [
+    TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO,
+]
+_SNAPSHOT_FLAG_TASKS = [
+    TaskType.PIPELINE_START,
+    TaskType.ENTITY_START,
+    TaskType.PIPELINE_REDO,
+    TaskType.ENTITY_REDO,
+    TaskType.GROUP_REDO,
+]
+_SNAPSHOT_WRITE_METHOD_TASKS = [
+    TaskType.PIPELINE_SNAPSHOT,
+    TaskType.ENTITY_SNAPSHOT,
+    TaskType.PIPELINE_REDO,
+    TaskType.ENTITY_REDO,
+    TaskType.GROUP_REDO,
+]
+
+
+def _day_to_str(day) -> str:
+    return day.lower() if isinstance(day, str) else day.value.lower()
+
+
+def _days_of_week_to_cron_values(days_of_week) -> list:
+    """Convert day names/enums to cron DOW numbers as strings."""
+    if not days_of_week:
+        return ["*"]
+    dow_values = []
+    for day in days_of_week:
+        day_str = _day_to_str(day)
+        if day_str in _DOW_MAP:
+            dow_values.append(str(_DOW_MAP[day_str]))
+    return dow_values
+
+
+def _build_cron_from_schedule_parts(minute, hour, days_of_week) -> str:
+    if minute is None or hour is None:
+        raise ValueError("Schedule must include both hour and minute")
+    dow_string = ",".join(_days_of_week_to_cron_values(days_of_week))
+    return f"{minute} {hour} * * {dow_string}"
+
+
+def _parse_json_list_field(raw_value, field_name: str, warn: bool = True) -> list:
+    if not raw_value:
+        return []
+    try:
+        return json.loads(raw_value)
+    except json.JSONDecodeError as e:
+        if warn:
+            logger.warning(f"Could not parse {field_name} JSON: {raw_value}, error: {e}")
+        return []
+
+
+def _chained_event_orm(parent_job_id: int, pos: int, ce) -> ChainedJobEvent:
+    return ChainedJobEvent(
+        parent_job_id=parent_job_id,
+        position=pos,
+        task_type=ce.task_type,
+        pipeline_id=ce.pipeline_id,
+        entity_ids=json.dumps(ce.entity_ids) if ce.entity_ids else None,
+        group_ids=json.dumps(ce.group_ids) if ce.group_ids else None,
+        with_snapshot=ce.with_snapshot,
+        snapshot_write_method=ce.snapshot_write_method,
+        agent_id=ce.agent_id,
+        query_sql=ce.query_sql,
+        saved_query_id=ce.saved_query_id,
+        query_read_only=query_read_only_of(ce),
+        execution_mode=ExecutionMode(ce.execution_mode.value),
+        webhook_timeout_seconds=ce.webhook_timeout_seconds,
+    )
+
+
+def _validate_query_studio_chain(task_type, agent_id, query_sql, saved_query_id, chained_events) -> None:
+    require_query_studio_fields(task_type, agent_id, query_sql, saved_query_id)
+    if chained_events:
+        for ce in chained_events:
+            require_query_studio_fields(ce.task_type, ce.agent_id, ce.query_sql, ce.saved_query_id)
+
+
+def _task_type_to_action(task_type) -> Optional[str]:
+    if task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.GROUP_START]:
+        return "play"
+    if task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP, TaskType.GROUP_STOP]:
+        return "pause"
+    if task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
+        return "one-time-snapshot"
+    if task_type in [TaskType.GROUP_SNAPSHOT]:
+        return "one-time-snapshot-group"
+    if task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
+        return "redo"
+    if task_type == TaskType.GROUP_REDO:
+        return "redo-group"
+    if task_type == TaskType.PIPELINE_ENTER_MAINTENANCE:
+        return "enter-maintenance"
+    if task_type == TaskType.PIPELINE_EXIT_MAINTENANCE:
+        return "exit-maintenance"
+    if task_type == TaskType.QUERY_STUDIO:
+        return "query-studio"
+    return None
+
+
 class JobService:
     """Service for managing scheduled jobs"""
 
@@ -322,6 +428,81 @@ class JobService:
         """
         return self.get_job_by_id(job_id)
 
+    def _ensure_cron_expression_from_schedule(self, job_data: JobCreate) -> None:
+        """Ensure job_data.cron_expression is set, converting from schedule if needed."""
+        if job_data.cron_expression:
+            return
+        if not job_data.schedule:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A cron expression or schedule is required for job creation"
+            )
+        try:
+            logger.info(f"Schedule data received: {job_data.schedule}")
+            schedule_dict = job_data.schedule.dict()
+            minute = schedule_dict.get('minute')
+            hour = schedule_dict.get('hour')
+            days_of_week = schedule_dict.get('days_of_week', [])
+            logger.info(f"Schedule components: hour={hour}, minute={minute}, days={days_of_week}")
+            cron_expression = _build_cron_from_schedule_parts(minute, hour, days_of_week)
+            job_data.cron_expression = cron_expression
+            logger.info(f"Generated cron expression from schedule: {job_data.cron_expression}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to convert schedule to cron expression: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to convert schedule to cron expression: {str(e)}"
+            )
+
+    def _calculate_next_run_times(self, cron_expression: str):
+        """Return (next_run_time_str, next_run_dt) or (None, None) on failure."""
+        if not cron_expression:
+            return None, None
+        try:
+            current_timezone = self._get_configured_timezone()
+            tz = pytz.timezone(current_timezone)
+            logger.info(f"Using timezone for calculation: {current_timezone}")
+            now = datetime.now(tz)
+            cron_iter = croniter(cron_expression, now)
+            next_run_datetime = cron_iter.get_next(datetime)
+            if next_run_datetime.tzinfo is None:
+                next_run_datetime = tz.localize(next_run_datetime)
+            elif str(next_run_datetime.tzinfo) != str(tz):
+                next_run_datetime = next_run_datetime.astimezone(tz)
+            next_run_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
+            logger.info(f"Calculated next run time: {next_run_time} in timezone {current_timezone}")
+            return next_run_time, next_run_datetime
+        except Exception as e:
+            logger.error(f"Error calculating next run time: {e}")
+            return None, None
+
+    def _validate_group_task_type(self, task_type, group_ids) -> None:
+        if task_type not in _GROUP_TASK_TYPES:
+            return
+        if not group_ids or len(group_ids) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Task type {task_type} requires group_ids to be provided"
+            )
+        logger.info(f"Creating group job with {len(group_ids)} groups: {group_ids}")
+
+    def _persist_new_chained_events(self, db_job: ScheduledJob, chained_events) -> None:
+        if not chained_events:
+            return
+        for pos, ce in enumerate(chained_events):
+            self.db.add(_chained_event_orm(db_job.id, pos, ce))
+        self.db.commit()
+        created_events = (
+            self.db.query(ChainedJobEvent)
+            .filter(ChainedJobEvent.parent_job_id == db_job.id)
+            .order_by(ChainedJobEvent.position)
+            .all()
+        )
+        from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+        chain_execution_service.sync_register_webhooks_for_events(created_events, db_job.task_type)
+
     def create_job(self, job_data: JobCreate) -> Job:
         """
         Create a new scheduled job
@@ -336,116 +517,16 @@ class JobService:
             HTTPException: If there's an error creating the job
         """
         try:
-            # Validate that cron_expression is provided (required by database schema)
-            if not job_data.cron_expression:
-                # If no cron_expression, check if we have a schedule to convert to cron
-                if job_data.schedule:
-                    # Convert schedule to cron expression
-                    try:
-                        # Log the received schedule for debugging
-                        logger.info(f"Schedule data received: {job_data.schedule}")
-                        
-                        # Access schedule components directly
-                        schedule_dict = job_data.schedule.dict()
-                        minute = schedule_dict.get('minute')
-                        hour = schedule_dict.get('hour')
-                        days_of_week = schedule_dict.get('days_of_week', [])
-                        
-                        # Validate required fields
-                        if minute is None or hour is None:
-                            raise ValueError("Schedule must include both hour and minute")
-                            
-                        logger.info(f"Schedule components: hour={hour}, minute={minute}, days={days_of_week}")
-                        
-                        # Convert days of week to cron format (0-6, where 0 is Sunday)
-                        dow_map = {
-                            "sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3,
-                            "thursday": 4, "friday": 5, "saturday": 6
-                        }
-                        
-                        # Handle days of week (could be strings or DayOfWeek enums)
-                        if days_of_week:
-                            dow_values = []
-                            for day in days_of_week:
-                                # Handle both string and enum values
-                                day_str = day.lower() if isinstance(day, str) else day.value.lower()
-                                if day_str in dow_map:
-                                    dow_values.append(str(dow_map[day_str]))
-                        else:
-                            dow_values = ["*"]  # All days
-                            
-                        dow_string = ",".join(dow_values)
-                        
-                        # Create cron expression (minute hour * * day_of_week)
-                        cron_expression = f"{minute} {hour} * * {dow_string}"
-                        job_data.cron_expression = cron_expression
-                        
-                        logger.info(f"Generated cron expression from schedule: {job_data.cron_expression}")
-                    except Exception as e:
-                        logger.error(f"Failed to convert schedule to cron expression: {e}")
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Failed to convert schedule to cron expression: {str(e)}"
-                        )
-                else:
-                    # Neither cron_expression nor schedule provided
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="A cron expression or schedule is required for job creation"
-                    )
-            # Calculate the next run time based on cron expression for start_time
-            next_run_time = None
-            next_run_dt = None
-            if job_data.cron_expression:
-                try:
-                    from croniter import croniter
-                    # Get the current configured timezone from database
-                    current_timezone = self._get_configured_timezone()
-                    tz = pytz.timezone(current_timezone)
-                    logger.info(f"Using timezone for calculation: {current_timezone}")
-                    
-                    now = datetime.now(tz)
-                    
-                    # Use croniter to calculate the next run time
-                    cron_iter = croniter(job_data.cron_expression, now)
-                    next_run_datetime = cron_iter.get_next(datetime)
-                    
-                    # Make sure the datetime has the correct timezone
-                    if next_run_datetime.tzinfo is None:
-                        next_run_datetime = tz.localize(next_run_datetime)
-                    elif str(next_run_datetime.tzinfo) != str(tz):
-                        # Convert to the configured timezone
-                        next_run_datetime = next_run_datetime.astimezone(tz)
-                    
-                    # Format the start_time in the required format with explicit timezone info
-                    next_run_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
-                    # Keep the tz-aware datetime to persist into the next_run DB column
-                    next_run_dt = next_run_datetime
-                    # Store the timezone name as well for reference
-                    next_run_tz = current_timezone
-                    logger.info(f"Calculated next run time: {next_run_time} in timezone {next_run_tz}")
-                except Exception as e:
-                    logger.error(f"Error calculating next run time: {e}")
-                    # If calculation fails, we'll leave start_time as None
-            
-            # Determine if job was created with cron expression or schedule
+            self._ensure_cron_expression_from_schedule(job_data)
+            next_run_time, next_run_dt = self._calculate_next_run_times(job_data.cron_expression)
             is_cron_expression = bool(job_data.cron_expression and not job_data.schedule)
-            
-            # Validate group jobs have group_ids
-            if job_data.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
-                if not job_data.group_ids or len(job_data.group_ids) == 0:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Task type {job_data.task_type} requires group_ids to be provided"
-                    )
-                logger.info(f"Creating group job with {len(job_data.group_ids)} groups: {job_data.group_ids}")
 
-            require_query_studio_fields(job_data.task_type, job_data.agent_id, job_data.query_sql, job_data.saved_query_id)
-            if job_data.chained_events:
-                for ce in job_data.chained_events:
-                    require_query_studio_fields(ce.task_type, ce.agent_id, ce.query_sql, ce.saved_query_id)
-            
-            # Create the database record
+            self._validate_group_task_type(job_data.task_type, job_data.group_ids)
+            _validate_query_studio_chain(
+                job_data.task_type, job_data.agent_id, job_data.query_sql,
+                job_data.saved_query_id, job_data.chained_events,
+            )
+
             db_job = ScheduledJob(
                 name=job_data.name,
                 description=job_data.description,
@@ -463,72 +544,30 @@ class JobService:
                 enabled=job_data.enabled,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
-                # Set a placeholder command to satisfy NOT NULL constraint
                 command="pending",
-                # Set start_time to the calculated next run time
                 start_time=next_run_time,
-                # Persist the next run time so list views don't recompute it per request
                 next_run=next_run_dt,
-                # Always store the configured timezone name
                 timezone_name=self._get_configured_timezone(),
-                # Set the flag to track if job was created with cron expression
                 is_cron_expression=is_cron_expression
             )
-            
-            # Generate a unique identifier for the cron job
+
             db_job.cron_job_identifier = f"gluesync_job_{uuid.uuid4().hex[:8]}"
-            
-            # Add to database and refresh to get the ID
             self.db.add(db_job)
             self.db.commit()
             self.db.refresh(db_job)
-            
-            # Create the actual scheduled job if enabled
+
             if db_job.enabled:
                 job_id = self.scheduler_service.create_job(db_job)
-                
-                # Update the job_id in the database
                 db_job.command = f"Scheduled job ID: {job_id}"
                 self.db.commit()
                 self.db.refresh(db_job)
-            
-            # Persist chained events
-            if job_data.chained_events:
-                created_events = []
-                for pos, ce in enumerate(job_data.chained_events):
-                    chained = ChainedJobEvent(
-                        parent_job_id=db_job.id,
-                        position=pos,
-                        task_type=ce.task_type,
-                        pipeline_id=ce.pipeline_id,
-                        entity_ids=json.dumps(ce.entity_ids) if ce.entity_ids else None,
-                        group_ids=json.dumps(ce.group_ids) if ce.group_ids else None,
-                        with_snapshot=ce.with_snapshot,
-                        snapshot_write_method=ce.snapshot_write_method,
-                        agent_id=ce.agent_id,
-                        query_sql=ce.query_sql,
-                        saved_query_id=ce.saved_query_id,
-                        query_read_only=query_read_only_of(ce),
-                        execution_mode=ExecutionMode(ce.execution_mode.value),
-                        webhook_timeout_seconds=ce.webhook_timeout_seconds,
-                    )
-                    self.db.add(chained)
-                self.db.commit()
-                # Refresh to get the auto-generated IDs
-                created_events = (
-                    self.db.query(ChainedJobEvent)
-                    .filter(ChainedJobEvent.parent_job_id == db_job.id)
-                    .order_by(ChainedJobEvent.position)
-                    .all()
-                )
-                # Register persistent webhooks for SYNC events
-                from gluesync_scheduler.services.chain_execution_service import chain_execution_service
-                chain_execution_service.sync_register_webhooks_for_events(created_events, db_job.task_type)
+
+            self._persist_new_chained_events(db_job, job_data.chained_events)
 
             result = Job.from_orm(db_job)
             result.chained_events = _load_chained_events(self.db, db_job.id)
             return result
-            
+
         except HTTPException:
             self.db.rollback()
             raise
@@ -546,6 +585,233 @@ class JobService:
                 detail=f"Error creating job: {str(e)}"
             )
 
+    def _normalize_update_json_fields(self, update_data: dict) -> None:
+        if "entity_ids" in update_data:
+            update_data["entity_ids"] = json.dumps(update_data["entity_ids"]) if update_data["entity_ids"] else None
+        if "group_ids" in update_data:
+            update_data["group_ids"] = json.dumps(update_data["group_ids"]) if update_data["group_ids"] else None
+        if "snapshot_write_method" in update_data and update_data["snapshot_write_method"] is None:
+            update_data["snapshot_write_method"] = 'UPSERT'
+
+    def _validate_group_ids_for_update(self, final_task_type, final_group_ids) -> None:
+        if final_task_type not in _GROUP_TASK_TYPES:
+            return
+        if isinstance(final_group_ids, str) and final_group_ids:
+            try:
+                parsed_group_ids = json.loads(final_group_ids)
+                if not parsed_group_ids or len(parsed_group_ids) == 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Task type {final_task_type} requires group_ids to be provided"
+                    )
+            except json.JSONDecodeError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid group_ids format - must be valid JSON array"
+                )
+        elif not final_group_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Task type {final_task_type} requires group_ids to be provided"
+            )
+
+    def _extract_schedule_parts(self, schedule):
+        """Return (minute, hour, days_of_week) from a ScheduleConfig or dict."""
+        if isinstance(schedule, dict):
+            try:
+                schedule_obj = ScheduleConfig(**schedule)
+                return schedule_obj.minute, schedule_obj.hour, schedule_obj.days_of_week
+            except Exception as e:
+                logger.error(f"Error converting schedule dict to ScheduleConfig: {e}")
+                minute = schedule.get('minute', 0) if 'minute' in schedule else 0
+                hour = schedule.get('hour', 0) if 'hour' in schedule else 0
+                days_of_week = schedule.get('days_of_week', []) if 'days_of_week' in schedule else []
+                return minute, hour, days_of_week
+        return schedule.minute, schedule.hour, schedule.days_of_week
+
+    def _cron_dow_to_day_names(self, dow_string: str) -> list:
+        return [_REVERSE_DOW_MAP[part] for part in dow_string.split(',') if part in _REVERSE_DOW_MAP]
+
+    def _append_missing_dow_values(self, missing_days, dow_values) -> str:
+        logger.error(f"Days missing in cron expression: {missing_days}")
+        for day in missing_days:
+            if day in _DOW_MAP:
+                dow_values.append(str(_DOW_MAP[day]))
+        return ','.join(dow_values)
+
+    def _validate_and_fix_cron_dow(self, days_of_week, dow_values, dow_string: str) -> str:
+        """Validate DOW round-trip and append any missing days; return final dow_string."""
+        for day in days_of_week:
+            day_str = _day_to_str(day)
+            if day_str in _DOW_MAP and str(_DOW_MAP[day_str]) not in dow_string:
+                logger.error(f"Day validation failed: {day_str} should be in cron expression but isn't")
+
+        test_days = self._cron_dow_to_day_names(dow_string)
+        expected_days = [_day_to_str(day) for day in days_of_week]
+        logger.info(f"Day validation - expected: {expected_days}, extracted: {test_days}")
+
+        missing_days = [day for day in expected_days if day not in test_days]
+        if missing_days:
+            dow_string = self._append_missing_dow_values(missing_days, dow_values)
+        return dow_string
+
+    def _map_update_days_to_cron(self, days_of_week) -> tuple:
+        """Map schedule days to cron DOW values; return (dow_values, dow_string)."""
+        logger.info(f"Converting days of week: {days_of_week} to cron format")
+        if not days_of_week:
+            return ["*"], "*"
+        dow_values = []
+        for day in days_of_week:
+            day_str = _day_to_str(day)
+            if day_str in _DOW_MAP:
+                dow_values.append(str(_DOW_MAP[day_str]))
+                logger.info(f"Day {day_str} mapped to cron value {_DOW_MAP[day_str]}")
+            else:
+                logger.warning(f"Unknown day of week: {day}")
+        return dow_values, ",".join(dow_values)
+
+    def _convert_update_schedule(self, update_data: dict) -> None:
+        """Convert update_data['schedule'] into cron_expression (mutates update_data)."""
+        logger.info(f"Update includes schedule: {update_data['schedule']}")
+        minute, hour, days_of_week = self._extract_schedule_parts(update_data['schedule'])
+        if minute is None or hour is None:
+            raise ValueError("Schedule must include both hour and minute")
+        logger.info(f"Schedule components in update: hour={hour}, minute={minute}, days={days_of_week}")
+        dow_values, dow_string = self._map_update_days_to_cron(days_of_week)
+        cron_expression = f"{minute} {hour} * * {dow_string}"
+        update_data["cron_expression"] = cron_expression
+        update_data["is_cron_expression"] = False
+        logger.info(f"Generated cron expression from update schedule: {cron_expression}")
+        # Original behavior: validate/fix dow_string for logging; cron_expression
+        # was already set above and is not rewritten after missing-day repairs.
+        self._validate_and_fix_cron_dow(days_of_week, dow_values, dow_string)
+
+    def _apply_schedule_to_update_data(self, update_data: dict) -> bool:
+        """Convert schedule/cron fields in update_data. Returns whether cron was updated."""
+        if "schedule" in update_data and update_data["schedule"]:
+            try:
+                self._convert_update_schedule(update_data)
+                return True
+            except Exception as e:
+                logger.error(f"Failed to convert schedule to cron expression in update: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to convert schedule to cron expression: {str(e)}"
+                )
+        if "cron_expression" in update_data:
+            update_data["is_cron_expression"] = True
+            return True
+        return "cron_expression" in update_data
+
+    def _log_schedule_original_days(self, value) -> None:
+        if isinstance(value, dict):
+            days_of_week = value.get('days_of_week', [])
+        else:
+            days_of_week = value.days_of_week if hasattr(value, 'days_of_week') else []
+        original_days = [_day_to_str(d) for d in days_of_week] if days_of_week else []
+        logger.info(f"Setting schedule with original days: {original_days}")
+
+    def _apply_update_fields_to_job(self, db_job: ScheduledJob, update_data: dict) -> None:
+        for key, value in update_data.items():
+            if key == "chained_events":
+                continue
+            if key == "schedule" and value is not None:
+                self._log_schedule_original_days(value)
+            setattr(db_job, key, value)
+        db_job.updated_at = datetime.now(timezone.utc)
+
+    def _expand_cron_dow_part(self, part: str) -> list:
+        """Expand a single cron DOW token (N or N-M) into day names."""
+        days = []
+        if "-" in part:
+            start, end = part.split("-")
+            for d in range(int(start), int(end) + 1):
+                if str(d) in _REVERSE_DOW_MAP:
+                    days.append(_REVERSE_DOW_MAP[str(d)])
+            return days
+        if part in _REVERSE_DOW_MAP:
+            days.append(_REVERSE_DOW_MAP[part])
+        return days
+
+    def _log_cron_actual_days(self, cron_expression: str) -> None:
+        cron_parts = cron_expression.split()
+        if len(cron_parts) != 5:
+            return
+        dow_part = cron_parts[4]
+        logger.info(f"Cron day of week part: {dow_part}")
+        actual_days = []
+        if dow_part != "*":
+            for part in dow_part.split(','):
+                actual_days.extend(self._expand_cron_dow_part(part))
+        logger.info(f"Actual days job will run based on cron: {actual_days}")
+
+    def _recalculate_job_next_run(self, db_job: ScheduledJob, job_id: int) -> None:
+        if not db_job.cron_expression:
+            return
+        try:
+            current_timezone = self._get_configured_timezone()
+            tz = pytz.timezone(current_timezone)
+            logger.info(f"Using timezone for calculation: {current_timezone}")
+            now = datetime.now(tz)
+            self._log_cron_actual_days(db_job.cron_expression)
+            cron_iter = croniter(db_job.cron_expression, now)
+            next_run_datetime = cron_iter.get_next(datetime)
+            if next_run_datetime.tzinfo is None:
+                next_run_datetime = tz.localize(next_run_datetime)
+            elif str(next_run_datetime.tzinfo) != str(tz):
+                next_run_datetime = next_run_datetime.astimezone(tz)
+            weekday_name = next_run_datetime.strftime("%A").lower()
+            logger.info(f"Next run calculated for: {next_run_datetime}, which is a {weekday_name}")
+            db_job.start_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
+            db_job.next_run = next_run_datetime
+            db_job.timezone_name = current_timezone
+            logger.info(
+                f"Recalculated next run time for job {job_id}: {db_job.start_time} "
+                f"in timezone {db_job.timezone_name}"
+            )
+        except Exception as e:
+            logger.error(f"Error recalculating next run time: {e}")
+
+    def _sync_scheduler_after_job_update(self, db_job: ScheduledJob) -> None:
+        if db_job.enabled:
+            scheduled_id = self.scheduler_service.update_job(db_job)
+            db_job.command = f"Scheduled job ID: {scheduled_id}"
+            self.db.commit()
+            self.db.refresh(db_job)
+            return
+        self.scheduler_service.remove_job(db_job.id)
+        if db_job.command is None:
+            db_job.command = "disabled"
+            self.db.commit()
+            self.db.refresh(db_job)
+
+    def _replace_chained_events(self, db_job: ScheduledJob, chained_events) -> None:
+        old_events = self.db.query(ChainedJobEvent).filter(
+            ChainedJobEvent.parent_job_id == db_job.id
+        ).all()
+        old_event_ids = [e.id for e in old_events]
+        if old_event_ids:
+            from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+            chain_execution_service.sync_delete_webhooks_for_events(old_event_ids)
+
+        self.db.query(ChainedJobEvent).filter(
+            ChainedJobEvent.parent_job_id == db_job.id
+        ).delete()
+        self.db.commit()
+        if not chained_events:
+            return
+        for pos, ce in enumerate(chained_events):
+            self.db.add(_chained_event_orm(db_job.id, pos, ce))
+        self.db.commit()
+        new_events = (
+            self.db.query(ChainedJobEvent)
+            .filter(ChainedJobEvent.parent_job_id == db_job.id)
+            .order_by(ChainedJobEvent.position)
+            .all()
+        )
+        from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+        chain_execution_service.sync_register_webhooks_for_events(new_events, db_job.task_type)
+
     def update_job(self, job_id: int, job_data: JobUpdate) -> Job:
         """
         Update an existing job
@@ -560,332 +826,46 @@ class JobService:
         Raises:
             HTTPException: If job not found or error updating
         """
-        # Get the existing job
         db_job = self.db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
         if not db_job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Job with ID {job_id} not found"
             )
-            
+
         try:
-            # Update the job fields that are provided
             update_data = job_data.dict(exclude_unset=True)
-            
-            # Special handling for entity_ids (convert to JSON string)
-            if "entity_ids" in update_data:
-                update_data["entity_ids"] = json.dumps(update_data["entity_ids"]) if update_data["entity_ids"] else None
-            
-            # Special handling for group_ids (convert to JSON string)
-            if "group_ids" in update_data:
-                update_data["group_ids"] = json.dumps(update_data["group_ids"]) if update_data["group_ids"] else None
-            
-            # snapshot_write_method column is NOT NULL; default to UPSERT when sent as null
-            if "snapshot_write_method" in update_data and update_data["snapshot_write_method"] is None:
-                update_data["snapshot_write_method"] = 'UPSERT'
-            
-            # Validate group jobs have group_ids (check both new task_type and existing)
+            self._normalize_update_json_fields(update_data)
+
             final_task_type = update_data.get("task_type", db_job.task_type)
-            if final_task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
-                final_group_ids = update_data.get("group_ids", db_job.group_ids)
-                # Parse group_ids if it's a JSON string
-                if isinstance(final_group_ids, str) and final_group_ids:
-                    try:
-                        parsed_group_ids = json.loads(final_group_ids)
-                        if not parsed_group_ids or len(parsed_group_ids) == 0:
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail=f"Task type {final_task_type} requires group_ids to be provided"
-                            )
-                    except json.JSONDecodeError:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Invalid group_ids format - must be valid JSON array"
-                        )
-                elif not final_group_ids:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Task type {final_task_type} requires group_ids to be provided"
-                    )
+            final_group_ids = update_data.get("group_ids", db_job.group_ids)
+            self._validate_group_ids_for_update(final_task_type, final_group_ids)
 
             final_agent_id = update_data.get(QUERY_STUDIO_AGENT_ID, db_job.agent_id)
             final_query_sql = update_data.get(QUERY_STUDIO_SQL, db_job.query_sql)
             final_saved_query_id = update_data.get(QUERY_STUDIO_SAVED_ID, db_job.saved_query_id)
-            require_query_studio_fields(final_task_type, final_agent_id, final_query_sql, final_saved_query_id)
-            if job_data.chained_events:
-                for ce in job_data.chained_events:
-                    require_query_studio_fields(ce.task_type, ce.agent_id, ce.query_sql, ce.saved_query_id)
-            
-            # Handle schedule conversion to cron_expression if schedule is provided
-            if "schedule" in update_data and update_data["schedule"]:
-                try:
-                    # Log the received schedule for debugging
-                    logger.info(f"Update includes schedule: {update_data['schedule']}")
-                    
-                    # Convert schedule to ScheduleConfig if it's a dict
-                    schedule = update_data['schedule']
-                    if isinstance(schedule, dict):
-                        try:
-                            schedule = ScheduleConfig(**schedule)
-                            minute = schedule.minute
-                            hour = schedule.hour
-                            days_of_week = schedule.days_of_week
-                        except Exception as e:
-                            logger.error(f"Error converting schedule dict to ScheduleConfig: {e}")
-                            # Ensure we have the required fields with proper defaults
-                            minute = schedule.get('minute', 0) if 'minute' in schedule else 0
-                            hour = schedule.get('hour', 0) if 'hour' in schedule else 0
-                            days_of_week = schedule.get('days_of_week', []) if 'days_of_week' in schedule else []
-                    else:
-                        minute = schedule.minute
-                        hour = schedule.hour
-                        days_of_week = schedule.days_of_week
-                    
-                    # Validate required fields
-                    if minute is None or hour is None:
-                        raise ValueError("Schedule must include both hour and minute")
-                        
-                    logger.info(f"Schedule components in update: hour={hour}, minute={minute}, days={days_of_week}")
-                    
-                    # Convert days of week to cron format (0-6, where 0 is Sunday)
-                    dow_map = {
-                        "sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3,
-                        "thursday": 4, "friday": 5, "saturday": 6
-                    }
-                    
-                    # Create reverse lookup for verification
-                    reverse_dow_map = {str(v): k for k, v in dow_map.items()}
-                    
-                    # Log the actual day of week values for debugging
-                    logger.info(f"Converting days of week: {days_of_week} to cron format")
-                    
-                    # Handle days of week (could be strings or DayOfWeek enums)
-                    if days_of_week:
-                        dow_values = []
-                        for day in days_of_week:
-                            # Handle both string and enum values 
-                            day_str = day.lower() if isinstance(day, str) else day.value.lower()
-                            if day_str in dow_map:
-                                dow_values.append(str(dow_map[day_str]))
-                                logger.info(f"Day {day_str} mapped to cron value {dow_map[day_str]}")
-                            else:
-                                logger.warning(f"Unknown day of week: {day}")
-                    else:
-                        dow_values = ["*"]  # All days
-                        
-                    dow_string = ",".join(dow_values)
-                    
-                    # Create cron expression (minute hour * * day_of_week)
-                    cron_expression = f"{minute} {hour} * * {dow_string}"
-                    update_data["cron_expression"] = cron_expression
-                    
-                    # Set flag to false since we're using a schedule
-                    update_data["is_cron_expression"] = False
-                    
-                    logger.info(f"Generated cron expression from update schedule: {cron_expression}")
-                    
-                    # Add validation to ensure cron expression correctly represents the requested schedule
-                    # This helps identify any issues with day mapping
-                    for day in days_of_week:
-                        day_str = day.lower() if isinstance(day, str) else day.value.lower()
-                        if day_str in dow_map and str(dow_map[day_str]) not in dow_string:
-                            logger.error(f"Day validation failed: {day_str} should be in cron expression but isn't")
-                            
-                    # Perform a reverse check to validate we can extract the correct days from the cron
-                    # This validates our round-trip conversion
-                    test_days = []
-                    for part in dow_string.split(','):
-                        if part in reverse_dow_map:
-                            test_days.append(reverse_dow_map[part])
-                    
-                    expected_days = [day.lower() if isinstance(day, str) else day.value.lower() for day in days_of_week]
-                    logger.info(f"Day validation - expected: {expected_days}, extracted: {test_days}")
-                    
-                    # If expected days don't match extracted days, log an error
-                    missing_days = [day for day in expected_days if day not in test_days]
-                    if missing_days:
-                        logger.error(f"Days missing in cron expression: {missing_days}")
-                        # Update dow_string to include the missing days
-                        for day in missing_days:
-                            if day in dow_map:
-                                dow_values.append(str(dow_map[day]))
-                        # Regenerate the dow_string
-                        dow_string = ','.join(dow_values)
-                    
-                    cron_updated = True
-                except Exception as e:
-                    logger.error(f"Failed to convert schedule to cron expression in update: {e}")
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Failed to convert schedule to cron expression: {str(e)}"
-                    )
-            elif "cron_expression" in update_data:
-                # Set flag to true since we're using a cron expression
-                update_data["is_cron_expression"] = True
-                cron_updated = True
-            else:
-                # Check if cron_expression is being updated
-                cron_updated = "cron_expression" in update_data
-            
-            # Update the job record  (skip chained_events — handled separately below)
-            for key, value in update_data.items():
-                if key == "chained_events":
-                    continue
-                # Special handling for schedule to preserve original days
-                if key == "schedule" and value is not None:
-                    # Store original schedule days for validation
-                    if isinstance(value, dict):
-                        days_of_week = value.get('days_of_week', [])
-                    else:
-                        days_of_week = value.days_of_week if hasattr(value, 'days_of_week') else []
-                    
-                    original_days = [d.lower() if isinstance(d, str) else d.value.lower() 
-                                    for d in days_of_week] if days_of_week else []
-                    logger.info(f"Setting schedule with original days: {original_days}")
-                
-                setattr(db_job, key, value)
-                
-            # Always update the updated_at timestamp
-            db_job.updated_at = datetime.now(timezone.utc)
-            
-            # Recalculate start_time if cron_expression was updated
-            if cron_updated and db_job.cron_expression:
-                try:
-                    from croniter import croniter
-                    # Get the current configured timezone from database
-                    current_timezone = self._get_configured_timezone()
-                    tz = pytz.timezone(current_timezone)
-                    logger.info(f"Using timezone for calculation: {current_timezone}")
-                    
-                    now = datetime.now(tz)
-                    
-                    # Parse the cron expression to verify day of week values
-                    cron_parts = db_job.cron_expression.split()
-                    if len(cron_parts) == 5:
-                        dow_part = cron_parts[4]  # 5th part is day of week
-                        logger.info(f"Cron day of week part: {dow_part}")
-                        
-                        # Map from cron day nums (0-6) to day names for validation
-                        reverse_day_map = {
-                            "0": "sunday", "1": "monday", "2": "tuesday", "3": "wednesday",
-                            "4": "thursday", "5": "friday", "6": "saturday"
-                        }
-                        
-                        # Determine which days this cron will actually run on (for validation)
-                        actual_days = []
-                        if dow_part != "*":
-                            for part in dow_part.split(','):
-                                if "-" in part:
-                                    start, end = part.split("-")
-                                    for d in range(int(start), int(end) + 1):
-                                        if str(d) in reverse_day_map:
-                                            actual_days.append(reverse_day_map[str(d)])
-                                elif part in reverse_day_map:
-                                    actual_days.append(reverse_day_map[part])
-                        
-                        logger.info(f"Actual days job will run based on cron: {actual_days}")
-                    
-                    # Use croniter to calculate the next run time
-                    cron_iter = croniter(db_job.cron_expression, now)
-                    next_run_datetime = cron_iter.get_next(datetime)
-                    
-                    # Make sure the datetime has the correct timezone
-                    if next_run_datetime.tzinfo is None:
-                        next_run_datetime = tz.localize(next_run_datetime)
-                    elif str(next_run_datetime.tzinfo) != str(tz):
-                        # Convert to the configured timezone
-                        next_run_datetime = next_run_datetime.astimezone(tz)
-                    
-                    # Log the day of week from the calculated next run - this helps debug timezone shift issues
-                    weekday_name = next_run_datetime.strftime("%A").lower()
-                    logger.info(f"Next run calculated for: {next_run_datetime}, which is a {weekday_name}")
-                    
-                    # Format the start_time in the required format with explicit timezone info
-                    db_job.start_time = next_run_datetime.strftime("%Y-%m-%dT%H:%M:%S%z")
-                    # Persist the tz-aware next run time so list views don't recompute it
-                    db_job.next_run = next_run_datetime
-                    # Store the timezone name as well
-                    db_job.timezone_name = current_timezone
-                    logger.info(f"Recalculated next run time for job {job_id}: {db_job.start_time} in timezone {db_job.timezone_name}")
-                except Exception as e:
-                    logger.error(f"Error recalculating next run time: {e}")
-                    # If calculation fails, we won't update start_time
-            
-            # Update in database
+            _validate_query_studio_chain(
+                final_task_type, final_agent_id, final_query_sql,
+                final_saved_query_id, job_data.chained_events,
+            )
+
+            cron_updated = self._apply_schedule_to_update_data(update_data)
+            self._apply_update_fields_to_job(db_job, update_data)
+
+            if cron_updated:
+                self._recalculate_job_next_run(db_job, job_id)
+
             self.db.commit()
             self.db.refresh(db_job)
-            
-            # Update the scheduled job
-            if db_job.enabled:
-                # Update the job in the scheduler
-                job_id = self.scheduler_service.update_job(db_job)
-                
-                # Use consistent command format for all jobs to ensure they're treated the same
-                db_job.command = f"Scheduled job ID: {job_id}"
-                self.db.commit()
-                self.db.refresh(db_job)
-            else:
-                # Remove from scheduler if disabled
-                self.scheduler_service.remove_job(db_job.id)
-                
-                # Ensure command is not NULL when disabled
-                if db_job.command is None:
-                    db_job.command = "disabled"
-                    self.db.commit()
-                    self.db.refresh(db_job)
-            
-            # Replace chained events when the caller provides a list (even empty)
+            self._sync_scheduler_after_job_update(db_job)
+
             if "chained_events" in job_data.dict(exclude_unset=True):
-                # Collect old event IDs for webhook cleanup
-                old_events = self.db.query(ChainedJobEvent).filter(
-                    ChainedJobEvent.parent_job_id == db_job.id
-                ).all()
-                old_event_ids = [e.id for e in old_events]
-
-                # Delete old webhooks from CoreHub
-                if old_event_ids:
-                    from gluesync_scheduler.services.chain_execution_service import chain_execution_service
-                    chain_execution_service.sync_delete_webhooks_for_events(old_event_ids)
-
-                self.db.query(ChainedJobEvent).filter(
-                    ChainedJobEvent.parent_job_id == db_job.id
-                ).delete()
-                self.db.commit()
-                if job_data.chained_events:
-                    for pos, ce in enumerate(job_data.chained_events):
-                        chained = ChainedJobEvent(
-                            parent_job_id=db_job.id,
-                            position=pos,
-                            task_type=ce.task_type,
-                            pipeline_id=ce.pipeline_id,
-                            entity_ids=json.dumps(ce.entity_ids) if ce.entity_ids else None,
-                            group_ids=json.dumps(ce.group_ids) if ce.group_ids else None,
-                            with_snapshot=ce.with_snapshot,
-                            snapshot_write_method=ce.snapshot_write_method,
-                            agent_id=ce.agent_id,
-                            query_sql=ce.query_sql,
-                            saved_query_id=ce.saved_query_id,
-                            query_read_only=query_read_only_of(ce),
-                            execution_mode=ExecutionMode(ce.execution_mode.value),
-                            webhook_timeout_seconds=ce.webhook_timeout_seconds,
-                        )
-                        self.db.add(chained)
-                    self.db.commit()
-
-                    # Register persistent webhooks for new SYNC events
-                    new_events = (
-                        self.db.query(ChainedJobEvent)
-                        .filter(ChainedJobEvent.parent_job_id == db_job.id)
-                        .order_by(ChainedJobEvent.position)
-                        .all()
-                    )
-                    from gluesync_scheduler.services.chain_execution_service import chain_execution_service
-                    chain_execution_service.sync_register_webhooks_for_events(new_events, db_job.task_type)
+                self._replace_chained_events(db_job, job_data.chained_events)
 
             result = Job.from_orm(db_job)
             result.chained_events = _load_chained_events(self.db, db_job.id)
             return result
-            
+
         except HTTPException:
             self.db.rollback()
             raise
@@ -1100,6 +1080,96 @@ class JobService:
                 "timestamp": datetime.now().isoformat()
             }
 
+    def _internal_api_base_url(self) -> tuple:
+        """Return (base_url, protocol, ssl_enabled) for internal scheduler API calls."""
+        ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+        protocol = "https" if ssl_enabled else "http"
+        internal_host = os.getenv('SCHEDULER_INTERNAL_HOST', 'localhost')
+        default_internal_port = os.getenv('SCHEDULER_INTERNAL_PORT')
+        if default_internal_port is None:
+            default_internal_port = os.getenv('PORT', '8000')
+        internal_port = int(default_internal_port)
+        base_url = f"{protocol}://{internal_host}:{internal_port}/api"
+        logger.info(f"Using internal API URL: {base_url} (SSL: {ssl_enabled})")
+        return base_url, protocol, ssl_enabled
+
+    def _build_execute_payload(self, job, entity_ids: list, group_ids: list) -> dict:
+        json_data = {}
+        if job.task_type == TaskType.QUERY_STUDIO:
+            json_data = query_studio_http_payload(job)
+
+        if job.task_type != TaskType.QUERY_STUDIO and entity_ids:
+            json_data["entity_ids"] = entity_ids
+
+        if group_ids and job.task_type == TaskType.GROUP_REDO:
+            json_data["group_ids"] = group_ids
+
+        if job.with_snapshot and job.task_type in _SNAPSHOT_FLAG_TASKS:
+            json_data["with_snapshot"] = True
+
+        if job.snapshot_write_method and job.task_type in _SNAPSHOT_WRITE_METHOD_TASKS:
+            json_data["snapshot_write_method"] = job.snapshot_write_method
+
+        return json_data
+
+    def _http_ssl_options(self, protocol: str):
+        """Return (verify, cert) for requests."""
+        if protocol != "https":
+            return True, None
+        ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
+        verify = not ssl_skip_verify
+        logger.info(f"Using HTTPS with SSL verification: {verify}")
+        cert = None
+        cert_file = os.environ.get('SSL_CERT_FILE')
+        key_file = os.environ.get('SSL_KEY_FILE')
+        if cert_file and os.path.exists(cert_file) and key_file and os.path.exists(key_file):
+            cert = (cert_file, key_file)
+            logger.info(f"Using certificate files for HTTPS request: {cert_file} and {key_file}")
+        return verify, cert
+
+    def _interpret_execute_response(self, response) -> tuple:
+        if response.status_code in [200, 201, 202]:
+            success_msg = f"Job executed successfully with status code {response.status_code}"
+            logger.info(success_msg)
+            result = {
+                "status": "success",
+                "code": str(response.status_code),
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            }
+            return True, success_msg, result
+
+        truncated_response = response.text[:100] + '...' if len(response.text) > 100 else response.text
+        error_msg = f"Job execution failed with status {response.status_code}"
+        logger.error(f"{error_msg}: {truncated_response}")
+        result = {
+            "status_code": response.status_code,
+            "success": False,
+            "error": truncated_response,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        return False, error_msg, result
+
+    def _parse_job_entity_and_group_ids(self, job) -> tuple:
+        entity_ids = []
+        if job.entity_ids:
+            try:
+                entity_ids = json.loads(job.entity_ids)
+                logger.info(f"Parsed entity_ids: {entity_ids}")
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
+
+        group_ids = []
+        logger.info(f"Raw job.group_ids from database: {repr(job.group_ids)} (type: {type(job.group_ids)})")
+        if job.group_ids:
+            try:
+                group_ids = json.loads(job.group_ids)
+                logger.info(f"Successfully parsed group_ids: {group_ids} (count: {len(group_ids)})")
+            except json.JSONDecodeError as e:
+                logger.warning(f"Could not parse group_ids JSON: {job.group_ids}, error: {e}")
+        else:
+            logger.info("No group_ids found in job - job.group_ids is None or empty")
+        return entity_ids, group_ids
+
     def _execute_job_logic(self, job) -> tuple:
         """
         Execute the job logic and return results
@@ -1109,135 +1179,30 @@ class JobService:
         """
         try:
             logger.info(f"Starting execution of job {job.id}: {job.name} (type: {job.task_type})")
-            
-            # Parse entity_ids if present
-            entity_ids = []
-            if job.entity_ids:
-                try:
-                    entity_ids = json.loads(job.entity_ids)
-                    logger.info(f"Parsed entity_ids: {entity_ids}")
-                except json.JSONDecodeError:
-                    logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
-            
-            # Parse group_ids if present
-            group_ids = []
-            logger.info(f"Raw job.group_ids from database: {repr(job.group_ids)} (type: {type(job.group_ids)})")
-            if job.group_ids:
-                try:
-                    group_ids = json.loads(job.group_ids)
-                    logger.info(f"Successfully parsed group_ids: {group_ids} (count: {len(group_ids)})")
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Could not parse group_ids JSON: {job.group_ids}, error: {e}")
-            else:
-                logger.info("No group_ids found in job - job.group_ids is None or empty")
-            
-            # Use localhost for internal API calls, not the binding address (0.0.0.0)
-            # Use HTTPS protocol when SSL is enabled
-            ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
-            protocol = "https" if ssl_enabled else "http"
-            internal_host = os.getenv('SCHEDULER_INTERNAL_HOST', 'localhost')
-            default_internal_port = os.getenv('SCHEDULER_INTERNAL_PORT')
-            if default_internal_port is None:
-                default_internal_port = os.getenv('PORT', '8000')
-            internal_port = int(default_internal_port)
-            base_url = f"{protocol}://{internal_host}:{internal_port}/api"
-            
-            # Clean log output to remove any potential hidden characters
-            logger.info(f"Using internal API URL: {base_url} (SSL: {ssl_enabled})")
-            
-            # Determine the endpoint based on task type and set the HTTP method
-            method = "POST"  # All our endpoints use POST method
-            
-            # Determine the action for the endpoint path
-            if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.GROUP_START]:
-                action = "play"
-            elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP, TaskType.GROUP_STOP]:
-                action = "pause"
-            elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
-                action = "one-time-snapshot"
-            elif job.task_type in [TaskType.GROUP_SNAPSHOT]:
-                action = "one-time-snapshot-group"
-            elif job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
-                action = "redo"
-            elif job.task_type == TaskType.GROUP_REDO:
-                action = "redo-group"
-            elif job.task_type == TaskType.PIPELINE_ENTER_MAINTENANCE:
-                action = "enter-maintenance"
-            elif job.task_type == TaskType.PIPELINE_EXIT_MAINTENANCE:
-                action = "exit-maintenance"
-            elif job.task_type == TaskType.QUERY_STUDIO:
-                action = "query-studio"
-            else:
+            entity_ids, group_ids = self._parse_job_entity_and_group_ids(job)
+            base_url, protocol, _ssl_enabled = self._internal_api_base_url()
+
+            method = "POST"
+            action = _task_type_to_action(job.task_type)
+            if action is None:
                 error_msg = f"Unknown task type: {job.task_type}"
                 logger.error(error_msg)
                 return False, error_msg, {}
 
-            # For group-level operations we directly invoke CoreHub client, preserving legacy behavior
-            if job.task_type in [TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO]:
+            if job.task_type in _GROUP_TASK_TYPES:
                 return self._execute_group_operation(job, group_ids, action)
 
             endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
-
-            # Prepare the JSON payload similar to CLI job runner
-            json_data = {}
-            if job.task_type == TaskType.QUERY_STUDIO:
-                json_data = query_studio_http_payload(job)
-
-            if job.task_type != TaskType.QUERY_STUDIO and entity_ids:
-                json_data["entity_ids"] = entity_ids
-
-            if group_ids and job.task_type == TaskType.GROUP_REDO:
-                json_data["group_ids"] = group_ids
-
-            if job.with_snapshot and job.task_type in [
-                TaskType.PIPELINE_START,
-                TaskType.ENTITY_START,
-                TaskType.PIPELINE_REDO,
-                TaskType.ENTITY_REDO,
-                TaskType.GROUP_REDO,
-            ]:
-                json_data["with_snapshot"] = True
-
-            if job.snapshot_write_method and job.task_type in [
-                TaskType.PIPELINE_SNAPSHOT,
-                TaskType.ENTITY_SNAPSHOT,
-                TaskType.PIPELINE_REDO,
-                TaskType.ENTITY_REDO,
-                TaskType.GROUP_REDO,
-            ]:
-                json_data["snapshot_write_method"] = job.snapshot_write_method
+            json_data = self._build_execute_payload(job, entity_ids, group_ids)
 
             logger.info(f"Endpoint: {method} {endpoint}")
             log_payload = json_data
             if job.task_type == TaskType.QUERY_STUDIO:
                 log_payload = query_studio_http_payload(job, preview=True)
             logger.info(f"JSON Payload: {log_payload}")
-            
+
             try:
-                # Determine SSL verification settings
-                # For HTTPS, we may need to skip verification if using self-signed certs
-                if protocol == "https":
-                    # Skip verification if SSL_SKIP_VERIFY is enabled
-                    ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
-                    verify = not ssl_skip_verify
-                    logger.info(f"Using HTTPS with SSL verification: {verify}")
-                else:
-                    # For HTTP, verification is not applicable
-                    verify = True
-                
-                # Add certificate paths if available and using HTTPS
-                cert = None
-                if protocol == "https":
-                    cert_file = os.environ.get('SSL_CERT_FILE')
-                    key_file = os.environ.get('SSL_KEY_FILE')
-                    if cert_file and os.path.exists(cert_file) and key_file and os.path.exists(key_file):
-                        cert = (cert_file, key_file)
-                        logger.info(f"Using certificate files for HTTPS request: {cert_file} and {key_file}")
-                
-                # Make the HTTP request.
-                # Timeout is configurable via SCHEDULER_INTERNAL_HTTP_TIMEOUT (seconds).
-                # The previous hard-coded 30s caused false "Read timed out" failures when
-                # multiple cron jobs on the same pipeline collided (e.g. at :00 and :30).
+                verify, cert = self._http_ssl_options(protocol)
                 internal_http_timeout = int(os.getenv('SCHEDULER_INTERNAL_HTTP_TIMEOUT', '120'))
                 response = requests.request(
                     method=method,
@@ -1245,61 +1210,24 @@ class JobService:
                     json=json_data,
                     headers={"Content-Type": "application/json"},
                     timeout=internal_http_timeout,
-                    verify=verify,  # Control SSL certificate verification
-                    cert=cert  # Include certificates for client authentication if available
+                    verify=verify,
+                    cert=cert
                 )
                 logger.info(f"Response status code: {response.status_code}")
                 logger.info(f"Response headers: {response.headers}")
-                
-                # Log a limited preview of the response for debugging
-                # This prevents large responses from flooding the logs
                 response_preview = response.text[:100] + '...' if len(response.text) > 100 else response.text
                 logger.info(f"Response preview: {response_preview}")
             except requests.exceptions.RequestException as e:
                 logger.error(f"HTTP request failed: {str(e)}")
                 return False, f"HTTP request failed: {str(e)}", {}
-            
-            # Check the response
-            if response.status_code in [200, 201, 202]:
-                # Don't try to parse the response JSON, just return a simple success message
-                # This completely avoids any potential recursion issues
-                success_msg = f"Job executed successfully with status code {response.status_code}"
-                logger.info(success_msg)
-                
-                # Create a new, completely flat response with only primitive types
-                # This completely eliminates the possibility of recursion errors
-                result = {
-                    "status": "success",
-                    "code": str(response.status_code),
-                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                }
-                
-                # We don't even include the response preview in the result
-                # Just log it and return a simple success flag
-                
-                return True, success_msg, result
-            else:
-                # For error responses, just log the status code and a truncated response
-                truncated_response = response.text[:100] + '...' if len(response.text) > 100 else response.text
-                error_msg = f"Job execution failed with status {response.status_code}"
-                logger.error(f"{error_msg}: {truncated_response}")
-                
-                # Return a minimal response with just primitive types
-                # Avoid including any complex objects that might cause recursion
-                result = {
-                    "status_code": response.status_code,
-                    "success": False,
-                    "error": truncated_response,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                
-                return False, error_msg, result
-                
+
+            return self._interpret_execute_response(response)
+
         except Exception as e:
             error_msg = f"Error executing job: {str(e)}"
             logger.error(error_msg)
             return False, error_msg, {"exception": str(e)}
-    
+
     def _execute_group_operation(self, job: ScheduledJob, group_ids: list, action: str) -> tuple[bool, str, dict]:
         """Execute group operations using CoreHub client directly"""
         from ..core.play_pause import CoreHubClient

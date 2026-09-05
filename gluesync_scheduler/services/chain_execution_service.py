@@ -232,6 +232,81 @@ class ChainExecutionService:
     # Public entry points
     # ---------------------------------------------------------------------------
 
+    def _open_sync_listening_window(self, events: List[ChainedJobEvent], job: ScheduledJob) -> Set[str]:
+        """Register SYNC event keys so callbacks are accepted during this chain run."""
+        sync_event_keys: Set[str] = set()
+        for event in events:
+            if event.execution_mode == ExecutionMode.SYNC:
+                key = str(event.id)
+                sync_event_keys.add(key)
+                # Clean up any stale pre-arrival buffer from a previous run
+                self._pre_arrival.pop(key, None)
+
+        self._active_listeners.update(sync_event_keys)
+        logger.info(
+            "Active listening window opened for job %d: %d sync event(s) %s",
+            job.id, len(sync_event_keys), sorted(sync_event_keys) if sync_event_keys else "[]",
+        )
+        return sync_event_keys
+
+    def _close_sync_listening_window(self, sync_event_keys: Set[str], job_id: int) -> None:
+        """Close the listening window and clear pre-arrival buffers for these keys."""
+        self._active_listeners.difference_update(sync_event_keys)
+        for key in sync_event_keys:
+            self._pre_arrival.pop(key, None)
+        logger.info("Active listening window closed for job %d", job_id)
+
+    def _sync_event_failure_message(self, event: ChainedJobEvent) -> str:
+        webhook_detail = getattr(self, '_last_webhook_error', None)
+        if webhook_detail:
+            return (
+                f"Chained event pos={event.position} "
+                f"({event.task_type}) failed: {webhook_detail}"
+            )
+        return (
+            f"Chained event pos={event.position} "
+            f"({event.task_type}) failed or timed out"
+        )
+
+    async def _run_chained_events(
+        self, job: ScheduledJob, events: List[ChainedJobEvent], db: Session, errors: list
+    ) -> None:
+        """Execute chained events sequentially; append to errors and stop on SYNC failure."""
+        for index, event in enumerate(events):
+            logger.info(
+                "Chained event pos=%d type=%s mode=%s pipeline=%s",
+                event.position, event.task_type, event.execution_mode, event.pipeline_id,
+            )
+            if event.execution_mode == ExecutionMode.ASYNC:
+                # Fire-and-forget: trigger the event but don't await its HTTP result
+                asyncio.ensure_future(self._execute_chained_event(event, db))
+                continue
+
+            # Sync: wait for preceding step's callback, then fire the event.
+            # QUERY_STUDIO has no Hub completion webhook — skip wait and use HTTP.
+            preceding = job.task_type if index == 0 else events[index - 1].task_type
+            success = await self._execute_sync_event(event, db, preceding)
+            if not success:
+                err_msg = self._sync_event_failure_message(event)
+                logger.error(err_msg)
+                errors.append(err_msg)
+                break
+
+    def _persist_chain_errors(self, job: ScheduledJob, db: Session, errors: list) -> None:
+        """Persist chain errors onto the parent job so the UI can surface them."""
+        if not errors:
+            return
+        try:
+            parent = db.query(ScheduledJob).filter(
+                ScheduledJob.id == job.id
+            ).first()
+            if parent:
+                parent.last_error_message = "; ".join(errors)
+                parent.last_run_error_time = datetime.now(timezone.utc)
+                db.commit()
+        except Exception as exc:
+            logger.error("Failed to persist chain error to DB: %s", exc)
+
     async def execute_chain(self, job: ScheduledJob, db: Session) -> dict:
         """Called after the parent job executes successfully.
 
@@ -254,80 +329,16 @@ class ChainExecutionService:
             job.id, job.name, len(events)
         )
 
-        # Determine which events are SYNC and set up the active listening window.
-        # Only SYNC events wait for webhook callbacks, so only their correlation
-        # keys are added to _active_listeners.  This ensures that callbacks
-        # arriving outside the scheduled execution window are rejected.
-        sync_event_keys: Set[str] = set()
-        for event in events:
-            if event.execution_mode == ExecutionMode.SYNC:
-                key = str(event.id)
-                sync_event_keys.add(key)
-                # Clean up any stale pre-arrival buffer from a previous run
-                self._pre_arrival.pop(key, None)
-
-        self._active_listeners.update(sync_event_keys)
-        logger.info(
-            "Active listening window opened for job %d: %d sync event(s) %s",
-            job.id, len(sync_event_keys), sorted(sync_event_keys) if sync_event_keys else "[]",
-        )
-
+        sync_event_keys = self._open_sync_listening_window(events, job)
         errors: list[str] = []
 
         try:
-            for index, event in enumerate(events):
-                logger.info(
-                    "Chained event pos=%d type=%s mode=%s pipeline=%s",
-                    event.position, event.task_type, event.execution_mode, event.pipeline_id,
-                )
-                if event.execution_mode == ExecutionMode.ASYNC:
-                    # Fire-and-forget: trigger the event but don't await its HTTP result
-                    asyncio.ensure_future(self._execute_chained_event(event, db))
-                else:
-                    # Sync: wait for preceding step's callback, then fire the event.
-                    # QUERY_STUDIO has no Hub completion webhook — skip wait and use HTTP.
-                    preceding = job.task_type if index == 0 else events[index - 1].task_type
-                    success = await self._execute_sync_event(event, db, preceding)
-                    if not success:
-                        webhook_detail = getattr(self, '_last_webhook_error', None)
-                        if webhook_detail:
-                            err_msg = (
-                                f"Chained event pos={event.position} "
-                                f"({event.task_type}) failed: {webhook_detail}"
-                            )
-                        else:
-                            err_msg = (
-                                f"Chained event pos={event.position} "
-                                f"({event.task_type}) failed or timed out"
-                            )
-                        logger.error(err_msg)
-                        errors.append(err_msg)
-                        break
+            await self._run_chained_events(job, events, db, errors)
         finally:
-            # Close the active listening window
-            self._active_listeners.difference_update(sync_event_keys)
-            # Clean up any remaining pre-arrival entries for these keys
-            for key in sync_event_keys:
-                self._pre_arrival.pop(key, None)
-            logger.info(
-                "Active listening window closed for job %d", job.id,
-            )
+            self._close_sync_listening_window(sync_event_keys, job.id)
 
         chain_success = len(errors) == 0
-
-        # Persist chain errors to the parent job so the UI can see them
-        if errors:
-            try:
-                parent = db.query(ScheduledJob).filter(
-                    ScheduledJob.id == job.id
-                ).first()
-                if parent:
-                    parent.last_error_message = "; ".join(errors)
-                    parent.last_run_error_time = datetime.now(timezone.utc)
-                    db.commit()
-            except Exception as exc:
-                logger.error("Failed to persist chain error to DB: %s", exc)
-
+        self._persist_chain_errors(job, db, errors)
         return {"started": True, "success": chain_success, "errors": errors}
 
     async def execute_trigger_flow(self, flow_id: int, events: list) -> bool:
