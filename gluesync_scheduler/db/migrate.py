@@ -66,6 +66,7 @@ def run_migrations():
             ("migrate_add_platform_event", "add_platform_event_column"),
             ("migrate_add_execution_logs", "create_execution_logs_table"),
             ("migrate_add_settings_updated_at", "add_settings_updated_at_column"),
+            ("migrate_add_query_studio_fields", "add_query_studio_fields"),
         ]
 
         # Import the database engine from the main app

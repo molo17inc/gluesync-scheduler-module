@@ -47,6 +47,7 @@ The project follows [Semantic Versioning](https://semver.org/) (SemVer) for vers
   - Start/stop entire pipelines
   - Start/stop entity groups
   - Schedule snapshots for entities, pipelines, or groups
+  - Run a Query Studio SQL query (`query_studio`) on schedule, platform event, or webhook
   - More task types can be easily added
 - **Job Management**: View, create, update, disable/enable, and delete scheduled jobs
 - **Containerized Deployment**: Docker support for easy deployment
@@ -155,8 +156,8 @@ Configure the application using environment variables:
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
 | `CHRONOS_SDK_TOKEN_REFRESH_ON_401` | Whether to automatically refresh the SDK token on 401 Unauthorized and retry outbound CoreHub calls exactly once | `True` |
-| `CHRONOS_REDO_PAUSE_TIMEOUT` | Maximum seconds to wait for entities to leave the Active state (Hold or Error accepted) before issuing a redo command. See [Pause before redo](#pause-before-redo). | `60` |
-| `CHRONOS_REDO_POLL_INTERVAL` | Seconds between CoreHub `entities-status` checks while polling for entities to leave the Active state (Hold or Error accepted) before a redo. See [Pause before redo](#pause-before-redo). | `5` |
+| `CHRONOS_REDO_PAUSE_TIMEOUT` | Maximum seconds to wait for entities to leave the Active state (Hold, Error, or Warning accepted) before issuing a redo command. See [Pause before redo](#pause-before-redo). | `60` |
+| `CHRONOS_REDO_POLL_INTERVAL` | Seconds between CoreHub `entities-status` checks while polling for entities to leave the Active state (Hold, Error, or Warning accepted) before a redo. See [Pause before redo](#pause-before-redo). | `5` |
 | `TZ` | Preferred timezone environment variable for job scheduling. If set, it takes precedence over `TIMEZONE`. | `UTC` |
 | `TIMEZONE` | Deprecated timezone environment variable for job scheduling. Used only as fallback when `TZ` is not set. | `UTC` |
 
@@ -393,6 +394,45 @@ http://localhost:1717/redoc
 | `/api/settings/{key}` | `GET` | Get a specific setting |
 | `/api/settings` | `POST` | Create a new setting |
 | `/api/settings/{key}` | `PUT` | Update a setting |
+| `/api/query-studio/agents` | `GET` | List Query Studio agents from CoreHub (UI agent picker) |
+
+## Query Studio on event (`query_studio`)
+
+Chronos can run a Query Studio SQL query when a scheduled job (cron), a platform-event trigger flow, or an incoming webhook trigger flow fires.
+
+Stored fields:
+
+- `pipeline_id` — pipeline that hosts the target agent
+- `agent_id` — Query Studio agent to execute against
+- `query_sql` — SQL text (do **not** put SQL on the crontab command line). Required for a **custom query**. For a **saved query** this is a snapshot of the SQL at save time (the UI always sends it).
+- `saved_query_id` — optional CoreHub saved-query id. When set, Chronos targets that saved query rather than custom SQL only.
+- `query_read_only` — default `true`. Query Studio is read-only (SELECT) unless the user opts into writes. `false` allows UPDATE/INSERT/DELETE via Hub SafetyGate; the UI **must** require an explicit acknowledgment of harm before sending `query_read_only: false`.
+
+A Query Studio task can target either:
+
+- **Custom SQL**: `saved_query_id` null, `query_sql` required
+- **Saved query**: `saved_query_id` set; `query_sql` is stored as a snapshot. If Hub is reachable, Chronos executes the live SQL from `GET {corehub}/query-studio/saved-queries/{id}` (and Hub `agentId` when present). On 404/403/failure it falls back to the stored snapshot. If both the live query and the snapshot are missing, the job fails.
+
+On fire, Chronos calls CoreHub:
+
+```http
+POST {corehub}/query-studio/pipelines/{pipelineId}/agents/{agentId}/execute
+Authorization: Bearer <SDK JWT>
+Content-Type: application/json
+
+{"sql": "<query text>", "options": {"readOnly": <query_read_only>}}
+```
+
+`readOnly: true` (the default) is SELECT-only. `readOnly: false` is writable DML and must be user-commanded with UI harm acknowledgment — Chronos does not always send writable.
+
+HTTP 2xx with Hub `status` `ERROR` (failed query) is treated as a Chronos job failure. The Hub call uses a 120 second timeout.
+
+The Control Plane Scheduler UI should bind:
+
+- an **agent picker** to `agent_id` (Chronos `GET /api/query-studio/agents` proxies CoreHub `GET /query-studio/agents`)
+- a **saved-query picker** to `saved_query_id` (optional; omit for custom SQL)
+- a **SQL code editor** to `query_sql` (custom SQL, or snapshot when targeting a saved query)
+- a **read-only toggle** to `query_read_only` (default on; turning it off requires harm acknowledgment)
 
 ## Scheduling Options
 
@@ -635,15 +675,15 @@ The module automatically retrieves the CoreHub URL from the SDK after discovery,
 
 ### Pause before redo
 
-All redo operations (`entity_redo`, `pipeline_redo`, `group_redo`) now pause their target objects **before** sending the redo command to CoreHub, so the target is fully stopped before the redo is applied. Instead of waiting a fixed number of seconds, Chronos polls CoreHub for the runtime status of the affected entities and only proceeds once every target entity is no longer **Active** — i.e. it reports either **Hold** (paused) or **Error**. Both states are acceptable to move forward with the redo; only an entity that is still syncing or snapshotting (`isSyncActive` or `isMigrationActive` true) keeps the poller waiting.
+All redo operations (`entity_redo`, `pipeline_redo`, `group_redo`) now pause their target objects **before** sending the redo command to CoreHub, so the target is fully stopped before the redo is applied. Instead of waiting a fixed number of seconds, Chronos polls CoreHub for the runtime status of the affected entities and only proceeds once every target entity is no longer **Active** — i.e. it reports either **Hold** (paused), **Error**, or **Warning**. Those states are acceptable to move forward with the redo; only an entity that is still **Active** (syncing or snapshotting, with no error/warning) keeps the poller waiting.
 
-The polling uses CoreHub's `GET /pipelines/{pipeline_id}/entities-status` endpoint, which returns the same runtime status the MPP UI uses to render Active / Hold / Error. An entity is considered settled (ready to proceed) when both `isSyncActive` and `isMigrationActive` are false — regardless of whether `errorState` is set. This mirrors the CoreHub / MPP UI computation, where an entity is `active` only while syncing or snapshotting, and otherwise resolves to `hold` or `error`.
+The polling uses CoreHub's `GET /pipelines/{pipeline_id}/entities-status` endpoint, which returns the same runtime status the MPP UI uses to render Active / Hold / Error / Warning. An entity is considered settled (ready to proceed) when it reports Hold, Error, or Warning. Hub !2219 puts Warning on `errorState.severity` (`WARNING` vs `ERROR`). Warning and Error remain settled even if `isSyncActive` / `isMigrationActive` are still true — an entity can keep running while Warning, same as Error.
 
 | Redo operation | Pause target | What is polled |
 |----------------|--------------|----------------|
-| `entity_redo` | The single entity (`stop` with `entity` param) | That entity leaving Active (Hold or Error) |
-| `pipeline_redo` | The whole pipeline (`stop`) | All entities in the pipeline leaving Active (Hold or Error) |
-| `group_redo` | The group (`stop-group`) | All entities belonging to the group leaving Active (Hold or Error) |
+| `entity_redo` | The single entity (`stop` with `entity` param) | That entity leaving Active (Hold, Error, or Warning) |
+| `pipeline_redo` | The whole pipeline (`stop`) | All entities in the pipeline leaving Active (Hold, Error, or Warning) |
+| `group_redo` | The group (`stop-group`) | All entities belonging to the group leaving Active (Hold, Error, or Warning) |
 
 If the pause call itself fails, the redo is aborted. If polling times out before every target entity leaves the Active state, the redo is also aborted and an error is logged. When the affected entity IDs cannot be resolved (for example the config endpoint returns nothing), Chronos proceeds with the redo and logs a warning rather than blocking indefinitely.
 

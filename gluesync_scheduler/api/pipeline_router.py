@@ -80,6 +80,43 @@ def _handle_operation_failure(message: str, cron_job_identifier: Optional[str]) 
         detail=message,
     )
 
+
+def _mark_job_succeeded(cron_job_identifier: Optional[str]) -> None:
+    """Best-effort update of the cron job row to success. Never raises."""
+    if not cron_job_identifier:
+        return
+    try:
+        from gluesync_scheduler.cli.job_runner import update_job_status
+        update_job_status(cron_job_identifier, True)
+        logger.info("Updated job status for %s", cron_job_identifier)
+    except Exception:
+        logger.exception("Error updating job status")
+
+
+def _parse_query_studio_body(body: Optional[dict]):
+    """Validate the internal Query Studio execute body and return its fields."""
+    from gluesync_scheduler.models.models import (
+        QUERY_STUDIO_AGENT_ID,
+        QUERY_STUDIO_READ_ONLY,
+        QUERY_STUDIO_SAVED_ID,
+        QUERY_STUDIO_SQL,
+        coerce_query_read_only,
+        stripped_or_none,
+    )
+    body = body or {}
+    agent_id = body.get(QUERY_STUDIO_AGENT_ID)
+    query_sql = body.get(QUERY_STUDIO_SQL)
+    saved_query_id = body.get(QUERY_STUDIO_SAVED_ID)
+    query_read_only = coerce_query_read_only(body.get(QUERY_STUDIO_READ_ONLY, True))
+    if not stripped_or_none(agent_id) or not (
+        stripped_or_none(query_sql) or stripped_or_none(saved_query_id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="query_studio requires non-empty agent_id and query_sql or saved_query_id",
+        )
+    return agent_id, query_sql, saved_query_id, query_read_only
+
 # Security dependency to ensure requests only come from localhost
 async def verify_localhost(request: Request):
     """
@@ -909,3 +946,56 @@ async def exit_maintenance_mode(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error exiting maintenance mode: {str(e)}"
         )
+
+
+@router.post("/{pipeline_id}/query-studio", response_model=OperationResponse, summary="Execute a Query Studio SQL query")
+async def execute_query_studio(
+    request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline hosting the agent"),
+    body: dict = Body(default=None),
+):
+    """Execute a Query Studio SQL query against a pipeline agent via CoreHub.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers (cron, chains).
+    Body: ``{"agent_id": "...", "query_sql": "...", "saved_query_id": "...", "query_read_only": true}``.
+    ``saved_query_id`` is optional; when set, live Hub SQL is preferred over the snapshot.
+    ``query_read_only`` defaults true (SELECT-only). False opts into writable DML.
+    """
+    from gluesync_scheduler.models.models import preview_query_sql
+
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    agent_id, query_sql, saved_query_id, query_read_only = _parse_query_studio_body(body)
+    logger.info(
+        "Received Query Studio request for pipeline %s agent %s saved_query_id=%s readOnly=%s: %s",
+        pipeline_id, agent_id, saved_query_id, query_read_only, preview_query_sql(query_sql),
+    )
+    if cron_job_identifier:
+        logger.info("Cron job identifier: %s", cron_job_identifier)
+
+    try:
+        pipeline_manager = PipelineManager()
+        result = await pipeline_manager.execute_query_studio(
+            pipeline_id, agent_id, query_sql, saved_query_id, query_read_only
+        )
+        message = (
+            f"Query Studio query executed successfully on pipeline {pipeline_id}"
+            if result else f"Query Studio query failed on pipeline {pipeline_id}"
+        )
+        if not result:
+            _handle_operation_failure(message, cron_job_identifier)
+        _mark_job_succeeded(cron_job_identifier)
+        return {
+            "success": True,
+            "message": message,
+            "data": {"pipeline_id": pipeline_id, "agent_id": agent_id},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error executing Query Studio query")
+        _mark_job_failed(cron_job_identifier, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error executing Query Studio query: {str(e)}",
+        )
+

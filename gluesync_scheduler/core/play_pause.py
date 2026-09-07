@@ -54,6 +54,17 @@ def _copy_success_payload_fields(safe, json_data):
             safe[key] = json_data[key]
 
 
+def _raw_success_payload(response):
+    """Return the Hub JSON body as-is (lists/dicts/empty)."""
+    if not response.text:
+        return None
+    try:
+        return response.json()
+    except json.JSONDecodeError:
+        logger.warning("Raw Hub response is not valid JSON: %s...", response.text[:100])
+        return response.text
+
+
 def _build_success_response(response):
     """Build the safe success dict returned to callers of ``fetch_core_hub``.
 
@@ -119,6 +130,58 @@ logging.basicConfig(
     force=True  # Apply even if the root logger is already configured
 )
 logger = logging.getLogger(__name__)
+
+
+def _first_nonempty_field(data, keys):
+    """Return the first non-empty string field from data, or None."""
+    for key in keys:
+        val = data.get(key)
+        if val and str(val).strip():
+            return str(val)
+    return None
+
+
+def _extract_saved_query_fields(payload):
+    """Return (sql, agent_id) from a CoreHub saved-query payload, or (None, None)."""
+    if not isinstance(payload, dict) or payload.get("status") == "error":
+        return None, None
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if not isinstance(data, dict):
+        return None, None
+    sql = _first_nonempty_field(data, ("sql", "querySql", "query_sql", "query"))
+    if not sql:
+        return None, None
+    agent = _first_nonempty_field(data, ("agentId", "agent_id", "agent"))
+    return sql, agent
+
+
+def _query_studio_execute_succeeded(response, pipeline_id, agent_id) -> bool:
+    """Log Hub execute outcome and return True only for a successful query."""
+    if not response:
+        logger.error(
+            "Query Studio execute returned no response for pipeline %s agent %s",
+            pipeline_id, agent_id,
+        )
+        return False
+    if isinstance(response, dict) and response.get("status") == "error":
+        logger.error(
+            "Query Studio execute failed for pipeline %s agent %s: %s",
+            pipeline_id, agent_id, response.get("message"),
+        )
+        return False
+    op_status = response.get("operation_status") if isinstance(response, dict) else None
+    if isinstance(op_status, str) and op_status.lower() in ("error", "failed", "fail"):
+        logger.error(
+            "Query Studio reported failed query for pipeline %s agent %s: %s",
+            pipeline_id, agent_id, op_status,
+        )
+        return False
+    logger.info(
+        "Query Studio execute succeeded for pipeline %s agent %s",
+        pipeline_id, agent_id,
+    )
+    return True
+
 
 
 class CoreHubClient:
@@ -305,7 +368,7 @@ class CoreHubClient:
         logger.error("Token retrieval result: FAILED (no token available)")
         return None, False  # Return tuple: (token, from_sdk)
     
-    def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None):
+    def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None, timeout=None, raw: bool = False):
         """
         Make an HTTP request to the CoreHub API.
 
@@ -314,6 +377,8 @@ class CoreHubClient:
             method: HTTP method (GET, POST, PUT, DELETE)
             body: Request body as dictionary
             params: URL parameters as dictionary
+            timeout: Optional request timeout in seconds
+            raw: When True, return the Hub JSON payload as-is on HTTP 2xx
 
         Returns:
             Response data as dictionary or None if request failed
@@ -322,12 +387,22 @@ class CoreHubClient:
         if prepared is None:
             return None
         url, headers, verify = prepared
+        ctx = {
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "body": body,
+            "params": params,
+            "verify": verify,
+            "timeout": timeout,
+            "raw": raw,
+        }
 
         try:
-            response = self._do_request(method, url, headers, body, params, verify)
+            response = self._do_request(method, url, headers, body, params, verify, timeout=timeout)
             if response is None:
                 return None
-            return self._interpret_response(response, method, url, headers, body, params, verify)
+            return self._interpret_response(response, ctx)
         except Exception as e:
             logger.exception("Request failed with exception")
             return {
@@ -421,12 +496,14 @@ class CoreHubClient:
             return False
         return True
 
-    def _interpret_response(self, response, method, url, headers, body, params, verify):
+    def _interpret_response(self, response, ctx):
         """Turn a raw ``requests.Response`` into the standard result dict."""
         if response.status_code in (200, 201, 202, 204):
+            if ctx.get("raw"):
+                return _raw_success_payload(response)
             return _build_success_response(response)
         if response.status_code == 401:
-            return self._handle_unauthorized(response, method, url, headers, body, params, verify)
+            return self._handle_unauthorized(response, ctx)
         logger.error(
             f"Request failed with status code {response.status_code}: {response.text}"
         )
@@ -438,21 +515,24 @@ class CoreHubClient:
         }
 
     @staticmethod
-    def _do_request(method, url, headers, body, params, verify):
+    def _do_request(method, url, headers, body, params, verify, timeout=None):
         """Dispatch a single HTTP call using `requests`. Returns None on unsupported method."""
         method = method.upper()
+        kwargs = {"headers": headers, "params": params, "verify": verify}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         if method == 'GET':
-            return requests.get(url, headers=headers, params=params, verify=verify)
+            return requests.get(url, **kwargs)
         if method == 'POST':
-            return requests.post(url, headers=headers, json=body, params=params, verify=verify)
+            return requests.post(url, json=body, **kwargs)
         if method == 'PUT':
-            return requests.put(url, headers=headers, json=body, params=params, verify=verify)
+            return requests.put(url, json=body, **kwargs)
         if method == 'DELETE':
-            return requests.delete(url, headers=headers, json=body, params=params, verify=verify)
+            return requests.delete(url, json=body, **kwargs)
         logger.error(f"Unsupported HTTP method: {method}")
         return None
 
-    def _handle_unauthorized(self, response, method, url, headers, body, params, verify):
+    def _handle_unauthorized(self, response, ctx):
         """Handle a 401 from CoreHub: optionally refresh the SDK token and retry once."""
         self._last_status_code = 401
         error_message = _extract_error_message(
@@ -465,7 +545,7 @@ class CoreHubClient:
         ).lower() in ('true', '1', 't')
 
         if refresh_enabled:
-            retry_result = self._refresh_and_retry(method, url, headers, body, params, verify)
+            retry_result = self._refresh_and_retry(ctx)
             if retry_result is not None:
                 return retry_result
 
@@ -479,7 +559,7 @@ class CoreHubClient:
             "message": error_message,
         }
 
-    def _refresh_and_retry(self, method, url, headers, body, params, verify):
+    def _refresh_and_retry(self, ctx):
         """Force an SDK re-login and retry the original request exactly once.
 
         Returns the retry result dict, or None if refresh/retry was not attempted
@@ -497,12 +577,15 @@ class CoreHubClient:
                 return None
 
             logger.info("Successfully refreshed SDK token after 401. Retrying request...")
-            retry_headers = headers.copy()
+            retry_headers = ctx["headers"].copy()
             retry_headers['Authorization'] = f'Bearer {new_token}'
-            retry_response = self._do_request(method, url, retry_headers, body, params, verify)
+            retry_response = self._do_request(
+                ctx["method"], ctx["url"], retry_headers, ctx["body"], ctx["params"],
+                ctx["verify"], timeout=ctx.get("timeout"),
+            )
             if retry_response is None:
                 return None
-            return self._process_retry_response(retry_response)
+            return self._process_retry_response(retry_response, ctx.get("raw", False))
         except Exception:
             logger.exception("Error during SDK token refresh or retry")
             return None
@@ -526,10 +609,12 @@ class CoreHubClient:
         else:
             asyncio.run(gluesync_sdk_client.initialize())
 
-    def _process_retry_response(self, retry_response):
+    def _process_retry_response(self, retry_response, raw=False):
         """Convert a retry response into the standard result dict."""
         if retry_response.status_code in (200, 201, 202, 204):
             logger.info("Retry successful after token refresh!")
+            if raw:
+                return _raw_success_payload(retry_response)
             return _build_success_response(retry_response)
 
         if retry_response.status_code == 401:
@@ -593,7 +678,7 @@ class CoreHubClient:
 
         Calls the CoreHub ``GET /pipelines/{pipeline_id}/entities-status`` endpoint,
         which returns the same status data the MPP UI uses to render Active / Hold /
-        Error. Each entry carries ``isSyncActive``, ``isMigrationActive``,
+        Error / Warning. Each entry carries ``isSyncActive``, ``isMigrationActive``,
         ``isBusy`` and ``errorState`` flags.
 
         Returns:
@@ -621,37 +706,61 @@ class CoreHubClient:
         return None
 
     @staticmethod
-    def _entity_has_error(entry: Dict[str, Any]) -> bool:
-        """Return True when ``errorState`` denotes an actual error.
-
-        Mirrors the CoreHub / MPP UI computation: an error is present only when
-        ``errorState`` is a non-null **and non-empty** object. An empty ``{}``
-        (cleared error) is treated as no error, matching the Kotlin MCP code.
-        """
-        error_state = entry.get('errorState') if isinstance(entry, dict) else None
-        if error_state is None:
+    def _has_nonempty_state(entry: Dict[str, Any], key: str) -> bool:
+        """True when ``entry[key]`` is a non-null, non-empty payload."""
+        if not isinstance(entry, dict):
             return False
-        if isinstance(error_state, dict):
-            return len(error_state) > 0
-        # A non-null, non-dict value (e.g. a non-empty string) also counts as an error.
-        return bool(error_state)
+        state = entry.get(key)
+        if state is None:
+            return False
+        if isinstance(state, dict):
+            return len(state) > 0
+        return bool(state)
+
+    @staticmethod
+    def _entity_has_error(entry: Dict[str, Any]) -> bool:
+        """Return True when ``errorState`` denotes an actual error or warning.
+
+        Mirrors the CoreHub / MPP UI computation: an issue is present only when
+        ``errorState`` is a non-null **and non-empty** object. An empty ``{}``
+        (cleared issue) is treated as no error, matching the Kotlin MCP code.
+        Hub !2219 stores WARNING vs ERROR on ``errorState.severity``.
+        """
+        return CoreHubClient._has_nonempty_state(entry, "errorState")
+
+    @staticmethod
+    def _error_state_severity(entry: Dict[str, Any]) -> Optional[str]:
+        """Return ``errorState.severity`` uppercased, or None."""
+        if not isinstance(entry, dict):
+            return None
+        state = entry.get("errorState")
+        if not isinstance(state, dict):
+            return None
+        raw = state.get("severity")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().upper()
+        return None
+
+    @staticmethod
+    def _entity_has_warning(entry: Dict[str, Any]) -> bool:
+        """Return True when Hub reports ``errorState.severity == WARNING``."""
+        return CoreHubClient._error_state_severity(entry) == "WARNING"
 
     @staticmethod
     def _is_entity_settled(entry: Dict[str, Any]) -> bool:
-        """Return True when an entity is no longer actively running.
+        """Return True when redo may proceed for this entity.
 
-        Both Hold (paused) and Error are acceptable states to move forward with
-        the following command — only Active (syncing or snapshotting) keeps us
-        waiting. This mirrors the CoreHub / MPP UI computation where an entity is
-        ``active`` if ``isSyncActive`` or ``isMigrationActive`` is true, and
-        otherwise resolves to ``hold`` or ``error``.
+        Hold (paused), Error, and Warning are acceptable. Warning and Error
+        remain settled even if Hub still reports ``isSyncActive`` /
+        ``isMigrationActive`` (Hub !2219: an entity can keep running while
+        Warning, same as Error).
         """
         if not isinstance(entry, dict):
             return False
-        # Active = still syncing or migrating; keep waiting.
-        if entry.get('isSyncActive') or entry.get('isMigrationActive'):
+        if CoreHubClient._entity_has_error(entry) or CoreHubClient._entity_has_warning(entry):
+            return True
+        if entry.get("isSyncActive") or entry.get("isMigrationActive"):
             return False
-        # Not active: either Hold (paused) or Error — both are good to proceed.
         return True
 
     def _pending_settled_ids(self, statuses, target_ids):
@@ -669,7 +778,7 @@ class CoreHubClient:
         return pending
 
     def _wait_targets_or_proceed(self, pipeline_id, entity_ids, timeout_error, missing_warning) -> bool:
-        """Wait for Hold/Error, or continue without polling when IDs cannot be resolved."""
+        """Wait for Hold/Error/Warning, or continue without polling when IDs cannot be resolved."""
         if entity_ids:
             if not self._wait_for_entities_settled(pipeline_id, entity_ids):
                 logger.error(timeout_error)
@@ -683,10 +792,9 @@ class CoreHubClient:
                                    poll_interval: Optional[float] = None) -> bool:
         """Poll CoreHub until every entity in ``entity_ids`` is no longer Active.
 
-        An entity is considered ready to proceed when it reports either Hold
-        (paused) or Error — i.e. it is not actively syncing or snapshotting.
-        Only the Active state (``isSyncActive`` or ``isMigrationActive`` true)
-        keeps the poller waiting.
+        An entity is considered ready to proceed when it reports Hold (paused),
+        Error, or Warning. Only the Active state (``isSyncActive`` or
+        ``isMigrationActive`` true, with no error/warning) keeps the poller waiting.
 
         Args:
             pipeline_id: Pipeline hosting the entities.
@@ -697,7 +805,7 @@ class CoreHubClient:
                 ``CHRONOS_REDO_POLL_INTERVAL`` or 5s).
 
         Returns:
-            True if all entities reached Hold/Error within the timeout, False otherwise.
+            True if all entities reached Hold/Error/Warning within the timeout, False otherwise.
         """
         if not entity_ids:
             return True
@@ -713,7 +821,7 @@ class CoreHubClient:
 
         logger.info(
             f"Waiting for {len(target_ids)} entity(ies) in pipeline {pipeline_id} "
-            f"to leave the Active state (Hold or Error accepted) "
+            f"to leave the Active state (Hold, Error, or Warning accepted) "
             f"(timeout={timeout}s, poll={poll_interval}s)"
         )
 
@@ -725,7 +833,7 @@ class CoreHubClient:
             if not pending:
                 logger.info(
                     f"All {len(target_ids)} target entity(ies) in pipeline "
-                    f"{pipeline_id} are now settled (Hold or Error)"
+                    f"{pipeline_id} are now settled (Hold, Error, or Warning)"
                 )
                 return True
 
@@ -1166,6 +1274,101 @@ class CoreHubClient:
         except Exception as e:
             logger.error(f"Error exiting maintenance mode for pipeline {pipeline_id}: {str(e)}")
             return False
+
+
+
+    QUERY_STUDIO_TIMEOUT_SECONDS = 120
+
+    def list_query_studio_agents(self):
+        """Return CoreHub Query Studio agents payload as-is."""
+        return self.fetch_core_hub("/query-studio/agents", method="GET", raw=True)
+
+    def fetch_saved_query(self, saved_query_id: str):
+        """GET CoreHub Query Studio saved query by id (raw Hub payload)."""
+        from urllib.parse import quote
+        path = f"/query-studio/saved-queries/{quote(str(saved_query_id), safe='')}"
+        return self.fetch_core_hub(path, method="GET", raw=True)
+
+    def _fetch_saved_query_payload(self, saved_query_id):
+        """GET a saved query; return payload or None if the Hub call fails."""
+        try:
+            return self.fetch_saved_query(saved_query_id)
+        except Exception:
+            logger.exception(
+                "Failed to fetch Query Studio saved query %s; using snapshot", saved_query_id
+            )
+            return None
+
+    def _live_saved_query(self, saved_query_id, snapshot_sql, snapshot_agent):
+        """Prefer live Hub SQL/agent; keep snapshot values when live SQL is missing."""
+        payload = self._fetch_saved_query_payload(saved_query_id)
+        live_sql, live_agent = _extract_saved_query_fields(payload)
+        if live_sql:
+            logger.info("Using live SQL from Query Studio saved query %s", saved_query_id)
+            return live_sql, live_agent or snapshot_agent
+        logger.warning(
+            "Query Studio saved query %s unavailable (404/403/failure); falling back to stored snapshot",
+            saved_query_id,
+        )
+        return snapshot_sql, snapshot_agent
+
+    def resolve_query_studio_execution(self, agent_id, query_sql, saved_query_id=None):
+        """Prefer live Hub SQL for a saved query; fall back to stored snapshot.
+
+        Returns (agent_id, query_sql) or (None, None) if neither live nor snapshot SQL is available.
+        On 404/403/failure fetching the saved query, uses the stored query_sql snapshot.
+        """
+        from gluesync_scheduler.models.models import stripped_or_none
+
+        resolved_sql = stripped_or_none(query_sql)
+        resolved_agent = stripped_or_none(agent_id)
+        sid = stripped_or_none(saved_query_id)
+        if sid:
+            resolved_sql, resolved_agent = self._live_saved_query(
+                sid, resolved_sql, resolved_agent
+            )
+        if not resolved_sql or not resolved_agent:
+            return None, None
+        return resolved_agent, resolved_sql
+
+    def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str, saved_query_id: str = None, query_read_only: bool = True) -> bool:
+        """Execute a Query Studio SQL query against a pipeline agent.
+
+        If saved_query_id is set, try Hub live SQL first and fall back to query_sql snapshot.
+        Hub HTTP 2xx with status ERROR / failed query is treated as failure.
+
+        query_read_only defaults True (SELECT-only). False opts into writes
+        (UPDATE/INSERT/DELETE) via Hub QueryOptions.readOnly / SafetyGate.
+        """
+        from gluesync_scheduler.models.models import preview_query_sql, coerce_query_read_only
+        query_read_only = coerce_query_read_only(query_read_only)
+
+        resolved_agent, resolved_sql = self.resolve_query_studio_execution(
+            agent_id, query_sql, saved_query_id
+        )
+        if not resolved_agent or not resolved_sql:
+            logger.error(
+                "Query Studio execute missing agent_id/SQL for pipeline %s (saved_query_id=%s)",
+                pipeline_id, saved_query_id,
+            )
+            return False
+        agent_id = resolved_agent
+        query_sql = resolved_sql
+
+        logger.info(
+            "Executing Query Studio SQL on pipeline %s agent %s readOnly=%s: %s",
+            pipeline_id, agent_id, query_read_only, preview_query_sql(query_sql),
+        )
+        path = f"/query-studio/pipelines/{pipeline_id}/agents/{agent_id}/execute"
+        # Hub QueryOptions.readOnly defaults true (SELECT). Writable DML is
+        # user-opted via query_read_only=false (UI must acknowledge harm).
+        response = self.fetch_core_hub(
+            path,
+            method="POST",
+            body={"sql": query_sql, "options": {"readOnly": query_read_only}},
+            timeout=self.QUERY_STUDIO_TIMEOUT_SECONDS,
+        )
+        return _query_studio_execute_succeeded(response, pipeline_id, agent_id)
 
 
 class PipelineManager:
@@ -1612,6 +1815,17 @@ class PipelineManager:
         logger.info(f"Exiting maintenance mode for pipeline {pipeline_id}")
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.client.exit_maintenance_mode, pipeline_id)
+
+    async def execute_query_studio(self, pipeline_id: str, agent_id: str, query_sql: str, saved_query_id: str = None, query_read_only: bool = True) -> bool:
+        """Execute a Query Studio SQL query via CoreHub."""
+        logger.info(
+            "Query Studio execute pipeline=%s agent=%s saved_query_id=%s readOnly=%s",
+            pipeline_id, agent_id, saved_query_id, query_read_only,
+        )
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.execute_query_studio, pipeline_id, agent_id, query_sql, saved_query_id, query_read_only
+        )
 
 
 async def main_async():

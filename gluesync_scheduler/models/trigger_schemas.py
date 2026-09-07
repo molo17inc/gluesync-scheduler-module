@@ -30,6 +30,7 @@ import pytz
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, validator
 
 from gluesync_scheduler.models.models import TaskType
+from gluesync_scheduler.models.schemas import QueryStudioValidatorMixin
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 from gluesync_scheduler.services.origin_routing import (
     ROUTING_BROADCAST,
@@ -54,7 +55,7 @@ class TriggerRouting(str, Enum):
     BROADCAST = ROUTING_BROADCAST
 
 
-class TriggerEventBase(BaseModel):
+class TriggerEventBase(QueryStudioValidatorMixin, BaseModel):
     task_type: TaskType = Field(..., description="Type of task to perform")
     pipeline_id: str = Field(..., min_length=1, description="Pipeline ID to operate on")
     entity_ids: Optional[List[str]] = Field(None, description="Entity IDs (required for entity operations)")
@@ -65,11 +66,14 @@ class TriggerEventBase(BaseModel):
         description="Snapshot write method: UPSERT or INSERT",
         pattern="^(UPSERT|INSERT)$",
     )
+    agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
+    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
+    saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
+    query_read_only: bool = Field(True, description="Query Studio read-only mode. True (default) runs SELECT-only. False allows UPDATE/INSERT/DELETE; the UI must acknowledge harm before sending false.")
     execution_mode: TriggerEventMode = Field(
         TriggerEventMode.ASYNC,
         description="async: fire-and-forget; sync: wait for corehub webhook callback before next event",
     )
-
 
 class TriggerEventCreate(TriggerEventBase):
     """Schema used when creating trigger events (no extra fields)."""
