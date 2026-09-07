@@ -28,14 +28,20 @@ import json
 import os
 from enum import Enum
 from croniter import croniter
-from pydantic import BaseModel, Field, validator, field_serializer, model_validator, ConfigDict
+from pydantic import BaseModel, Field, validator, field_validator, field_serializer, model_validator, ConfigDict
 
-from gluesync_scheduler.models.models import TaskType, ExecutionMode, require_query_studio_fields
+from gluesync_scheduler.models.models import TaskType, ExecutionMode, require_query_studio_fields, coerce_query_read_only
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 
 class QueryStudioValidatorMixin:
     """Shared post-init validation for Query Studio identifiers."""
+
+    @field_validator("query_read_only", mode="before")
+    @classmethod
+    def _coerce_query_read_only(cls, v):
+        """UI may send null for non-Query-Studio jobs; coerce to True (SELECT-only default)."""
+        return coerce_query_read_only(v, True)
 
     @model_validator(mode="after")
     def _validate_query_studio(self):
