@@ -46,6 +46,82 @@ class TaskType(enum.Enum):
     GROUP_REDO = "group_redo"
     PIPELINE_ENTER_MAINTENANCE = "pipeline_enter_maintenance"
     PIPELINE_EXIT_MAINTENANCE = "pipeline_exit_maintenance"
+    QUERY_STUDIO = "query_studio"
+
+
+QUERY_STUDIO_SQL_PREVIEW_LEN = 200
+
+
+QUERY_STUDIO_AGENT_ID = "agent_id"
+QUERY_STUDIO_SQL = "query_sql"
+QUERY_STUDIO_SAVED_ID = "saved_query_id"
+QUERY_STUDIO_READ_ONLY = "query_read_only"
+
+
+def preview_query_sql(query_sql, limit=QUERY_STUDIO_SQL_PREVIEW_LEN):
+    """Return a truncated SQL preview for logs (never dump huge queries)."""
+    if not query_sql:
+        return ""
+    text = str(query_sql)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
+def stripped_or_none(value):
+    """Return a stripped string, or None if the value is empty/missing."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _nonempty(value):
+    """True when value has non-whitespace content."""
+    return bool(stripped_or_none(value))
+
+
+def coerce_query_read_only(value, default=True) -> bool:
+    """True (SELECT-only) unless the user explicitly opted into writes."""
+    if value is None:
+        return bool(default)
+    return bool(value)
+
+
+def query_read_only_of(obj, default=True) -> bool:
+    """Read query_read_only from a job/event-like object, defaulting True."""
+    return coerce_query_read_only(getattr(obj, QUERY_STUDIO_READ_ONLY, default), default)
+
+
+def query_studio_http_payload(obj, preview=False):
+    """Build the internal Chronos Query Studio JSON body from a job/event object."""
+    sql = getattr(obj, QUERY_STUDIO_SQL, None)
+    payload = {
+        QUERY_STUDIO_AGENT_ID: getattr(obj, QUERY_STUDIO_AGENT_ID, None),
+        QUERY_STUDIO_SQL: preview_query_sql(sql) if preview else sql,
+        QUERY_STUDIO_READ_ONLY: query_read_only_of(obj),
+    }
+    saved = getattr(obj, QUERY_STUDIO_SAVED_ID, None)
+    if saved:
+        payload[QUERY_STUDIO_SAVED_ID] = saved
+    return payload
+
+
+def require_query_studio_fields(task_type, agent_id, query_sql, saved_query_id=None):
+    """Validate QUERY_STUDIO fields.
+
+    agent_id is always required. Either query_sql or saved_query_id (or both)
+    must be non-empty. Custom query: saved_query_id null + query_sql required.
+    Saved query: saved_query_id set; query_sql is an optional snapshot of the
+    SQL at save time (the UI always sends it, but missing SQL is still accepted).
+    entity_ids / group_ids / with_snapshot are ignored for this task type.
+    """
+    if task_type != TaskType.QUERY_STUDIO:
+        return
+    if not _nonempty(agent_id):
+        raise ValueError("query_studio requires a non-empty agent_id")
+    if not _nonempty(query_sql) and not _nonempty(saved_query_id):
+        raise ValueError("query_studio requires a non-empty query_sql or saved_query_id")
 
 
 class ScheduledJob(Base):
@@ -61,6 +137,10 @@ class ScheduledJob(Base):
     group_ids = Column(Text, nullable=True)
     with_snapshot = Column(Boolean, default=False)
     snapshot_write_method = Column(String, nullable=False, default='UPSERT')
+    agent_id = Column(String, nullable=True)
+    query_sql = Column(Text, nullable=True)
+    saved_query_id = Column(String, nullable=True)
+    query_read_only = Column(Boolean, default=True, nullable=False)
     enabled = Column(Boolean, default=True)
     command = Column(Text, nullable=False)
     cron_job_identifier = Column(String, nullable=False, unique=True)
@@ -93,6 +173,10 @@ class ChainedJobEvent(Base):
     group_ids = Column(Text, nullable=True)    # JSON array
     with_snapshot = Column(Boolean, default=False)
     snapshot_write_method = Column(String, nullable=False, default="UPSERT")
+    agent_id = Column(String, nullable=True)
+    query_sql = Column(Text, nullable=True)
+    saved_query_id = Column(String, nullable=True)
+    query_read_only = Column(Boolean, default=True, nullable=False)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     webhook_timeout_seconds = Column(Integer, nullable=False, default=3600)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
@@ -128,6 +212,10 @@ class TriggerFlowEvent(Base):
     group_ids = Column(Text, nullable=True)     # JSON array
     with_snapshot = Column(Boolean, default=False)
     snapshot_write_method = Column(String, nullable=False, default="UPSERT")
+    agent_id = Column(String, nullable=True)
+    query_sql = Column(Text, nullable=True)
+    saved_query_id = Column(String, nullable=True)
+    query_read_only = Column(Boolean, default=True, nullable=False)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))

@@ -167,115 +167,137 @@ def update_job_status(job_identifier: str, success: bool, error_message: Optiona
         logger.error(f"Error updating job status: {str(e)}")
         return False
 
+
+def _parse_json_id_list(raw_value, field_name: str) -> list:
+    """Parse a JSON list field from the job row; return [] on missing/invalid."""
+    if not raw_value:
+        return []
+    try:
+        return json.loads(raw_value)
+    except json.JSONDecodeError:
+        logger.warning(f"Could not parse {field_name} JSON: {raw_value}")
+        return []
+
+
+def _job_runner_base_url() -> tuple:
+    """Return (base_url, ssl_enabled) for internal API calls."""
+    ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+    protocol = "https" if ssl_enabled else "http"
+    host = os.getenv('HOST', '0.0.0.0')
+    port = int(os.getenv('PORT', '8000'))
+    base_url = f"{protocol}://{host}:{port}/api"
+    logger.info(f"Using API URL: {base_url} (SSL: {ssl_enabled})")
+    return base_url, ssl_enabled
+
+
+def _endpoint_for_job(base_url: str, job: ScheduledJob) -> Optional[str]:
+    """Map task type to pipeline API endpoint; return None if unknown."""
+    if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
+        return f"{base_url}/pipelines/{job.pipeline_id}/play"
+    if job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
+        return f"{base_url}/pipelines/{job.pipeline_id}/pause"
+    if job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
+        return f"{base_url}/pipelines/{job.pipeline_id}/one-time-snapshot"
+    if job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
+        return f"{base_url}/pipelines/{job.pipeline_id}/redo"
+    if job.task_type == TaskType.GROUP_REDO:
+        return f"{base_url}/pipelines/{job.pipeline_id}/redo-group"
+    if job.task_type == TaskType.QUERY_STUDIO:
+        return f"{base_url}/pipelines/{job.pipeline_id}/query-studio"
+    logger.error(f"Unknown task type: {job.task_type}")
+    return None
+
+
+_SNAPSHOT_TASKS = [
+    TaskType.PIPELINE_START,
+    TaskType.ENTITY_START,
+    TaskType.PIPELINE_REDO,
+    TaskType.ENTITY_REDO,
+    TaskType.GROUP_REDO,
+]
+_SNAPSHOT_WRITE_METHOD_TASKS = [
+    TaskType.PIPELINE_SNAPSHOT,
+    TaskType.ENTITY_SNAPSHOT,
+    TaskType.PIPELINE_REDO,
+    TaskType.ENTITY_REDO,
+    TaskType.GROUP_REDO,
+]
+
+
+def _payload_for_job(job: ScheduledJob, entity_ids: list, group_ids: list) -> tuple:
+    """Build JSON payload and request timeout for the job."""
+    json_data = {}
+    request_timeout = 30
+    if job.task_type == TaskType.QUERY_STUDIO:
+        from gluesync_scheduler.models.models import query_studio_http_payload
+        json_data = query_studio_http_payload(job)
+        request_timeout = 120
+
+    if job.task_type != TaskType.QUERY_STUDIO and entity_ids:
+        json_data["entity_ids"] = entity_ids
+
+    if group_ids and job.task_type == TaskType.GROUP_REDO:
+        json_data["group_ids"] = group_ids
+
+    if job.with_snapshot and job.task_type in _SNAPSHOT_TASKS:
+        json_data["with_snapshot"] = True
+
+    if job.snapshot_write_method and job.task_type in _SNAPSHOT_WRITE_METHOD_TASKS:
+        json_data["snapshot_write_method"] = job.snapshot_write_method
+
+    return json_data, request_timeout
+
+
+def _ssl_verify_flag(ssl_enabled: bool) -> bool:
+    ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
+    verify = not ssl_skip_verify if ssl_enabled else True
+    logger.info(f"SSL verification: {verify}")
+    return verify
+
+
 def execute_job(job: ScheduledJob) -> bool:
     """Execute the job based on its type and parameters"""
     try:
-        # Parse entity_ids if present
-        entity_ids = []
-        if job.entity_ids:
-            try:
-                entity_ids = json.loads(job.entity_ids)
-            except json.JSONDecodeError:
-                logger.warning(f"Could not parse entity_ids JSON: {job.entity_ids}")
+        entity_ids = _parse_json_id_list(job.entity_ids, "entity_ids")
+        group_ids = _parse_json_id_list(job.group_ids, "group_ids")
 
-        # Parse group_ids if present
-        group_ids = []
-        if job.group_ids:
-            try:
-                group_ids = json.loads(job.group_ids)
-            except json.JSONDecodeError:
-                logger.warning(f"Could not parse group_ids JSON: {job.group_ids}")
-        
-        # Use HTTPS protocol when SSL is enabled
-        ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
-        protocol = "https" if ssl_enabled else "http"
-        host = os.getenv('HOST', '0.0.0.0')
-        port = int(os.getenv('PORT', '8000'))
-        base_url = f"{protocol}://{host}:{port}/api"
-        logger.info(f"Using API URL: {base_url} (SSL: {ssl_enabled})")
-        
-        # Determine the endpoint based on task type
-        if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/play"
-        elif job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/pause"
-        elif job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/one-time-snapshot"
-        elif job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo"
-        elif job.task_type == TaskType.GROUP_REDO:
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/redo-group"
-        else:
-            logger.error(f"Unknown task type: {job.task_type}")
+        base_url, ssl_enabled = _job_runner_base_url()
+        endpoint = _endpoint_for_job(base_url, job)
+        if endpoint is None:
             return False
-        
-        # Prepare the JSON payload
-        json_data = {}
-        
-        # Add entity_ids to the payload if present
-        if entity_ids:
-            json_data["entity_ids"] = entity_ids
 
-        # Add group_ids for group redo operations
-        if group_ids and job.task_type == TaskType.GROUP_REDO:
-            json_data["group_ids"] = group_ids
+        json_data, request_timeout = _payload_for_job(job, entity_ids, group_ids)
 
-        # Add with_snapshot for operations that support snapshot flag
-        if job.with_snapshot and job.task_type in [
-            TaskType.PIPELINE_START,
-            TaskType.ENTITY_START,
-            TaskType.PIPELINE_REDO,
-            TaskType.ENTITY_REDO,
-            TaskType.GROUP_REDO,
-        ]:
-            json_data["with_snapshot"] = True
-
-        # Include snapshot_write_method where applicable (snapshot, redo)
-        if job.snapshot_write_method:
-            if job.task_type in [
-                TaskType.PIPELINE_SNAPSHOT,
-                TaskType.ENTITY_SNAPSHOT,
-                TaskType.PIPELINE_REDO,
-                TaskType.ENTITY_REDO,
-                TaskType.GROUP_REDO,
-            ]:
-                json_data["snapshot_write_method"] = job.snapshot_write_method
-        
-        # Log the request details
         logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
         logger.info(f"Endpoint: POST {endpoint}")
-        logger.info(f"JSON Payload: {json_data}")
-        
-        # Make the API request with JSON payload
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        # Skip SSL verification if SSL_SKIP_VERIFY is enabled
-        ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
-        verify = not ssl_skip_verify if ssl_enabled else True
-        logger.info(f"SSL verification: {verify}")
-        
-        # Add timeout to prevent hanging requests
+
+        headers = {"Content-Type": "application/json"}
+        verify = _ssl_verify_flag(ssl_enabled)
+
+        log_payload = json_data
+        if job.task_type == TaskType.QUERY_STUDIO:
+            from gluesync_scheduler.models.models import query_studio_http_payload
+            log_payload = query_studio_http_payload(job, preview=True)
+        logger.info(f"JSON Payload: {log_payload}")
+
         response = requests.post(
-            endpoint, 
-            json=json_data, 
-            headers=headers, 
+            endpoint,
+            json=json_data,
+            headers=headers,
             verify=verify,
-            timeout=30
+            timeout=request_timeout
         )
-        
-        # Check the response
+
         if response.status_code in [200, 202]:
             logger.info(f"Job executed successfully: {response.text}")
             return True
-        else:
-            logger.error(f"Job execution failed with status {response.status_code}: {response.text}")
-            return False
-            
+        logger.error(f"Job execution failed with status {response.status_code}: {response.text}")
+        return False
+
     except Exception as e:
         logger.error(f"Error executing job: {str(e)}")
         return False
+
 
 def run_job(job_identifier: str) -> bool:
     """Run a job by its identifier"""

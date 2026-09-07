@@ -47,6 +47,7 @@ The project follows [Semantic Versioning](https://semver.org/) (SemVer) for vers
   - Start/stop entire pipelines
   - Start/stop entity groups
   - Schedule snapshots for entities, pipelines, or groups
+  - Run a Query Studio SQL query (`query_studio`) on schedule, platform event, or webhook
   - More task types can be easily added
 - **Job Management**: View, create, update, disable/enable, and delete scheduled jobs
 - **Containerized Deployment**: Docker support for easy deployment
@@ -393,6 +394,45 @@ http://localhost:1717/redoc
 | `/api/settings/{key}` | `GET` | Get a specific setting |
 | `/api/settings` | `POST` | Create a new setting |
 | `/api/settings/{key}` | `PUT` | Update a setting |
+| `/api/query-studio/agents` | `GET` | List Query Studio agents from CoreHub (UI agent picker) |
+
+## Query Studio on event (`query_studio`)
+
+Chronos can run a Query Studio SQL query when a scheduled job (cron), a platform-event trigger flow, or an incoming webhook trigger flow fires.
+
+Stored fields:
+
+- `pipeline_id` — pipeline that hosts the target agent
+- `agent_id` — Query Studio agent to execute against
+- `query_sql` — SQL text (do **not** put SQL on the crontab command line). Required for a **custom query**. For a **saved query** this is a snapshot of the SQL at save time (the UI always sends it).
+- `saved_query_id` — optional CoreHub saved-query id. When set, Chronos targets that saved query rather than custom SQL only.
+- `query_read_only` — default `true`. Query Studio is read-only (SELECT) unless the user opts into writes. `false` allows UPDATE/INSERT/DELETE via Hub SafetyGate; the UI **must** require an explicit acknowledgment of harm before sending `query_read_only: false`.
+
+A Query Studio task can target either:
+
+- **Custom SQL**: `saved_query_id` null, `query_sql` required
+- **Saved query**: `saved_query_id` set; `query_sql` is stored as a snapshot. If Hub is reachable, Chronos executes the live SQL from `GET {corehub}/query-studio/saved-queries/{id}` (and Hub `agentId` when present). On 404/403/failure it falls back to the stored snapshot. If both the live query and the snapshot are missing, the job fails.
+
+On fire, Chronos calls CoreHub:
+
+```http
+POST {corehub}/query-studio/pipelines/{pipelineId}/agents/{agentId}/execute
+Authorization: Bearer <SDK JWT>
+Content-Type: application/json
+
+{"sql": "<query text>", "options": {"readOnly": <query_read_only>}}
+```
+
+`readOnly: true` (the default) is SELECT-only. `readOnly: false` is writable DML and must be user-commanded with UI harm acknowledgment — Chronos does not always send writable.
+
+HTTP 2xx with Hub `status` `ERROR` (failed query) is treated as a Chronos job failure. The Hub call uses a 120 second timeout.
+
+The Control Plane Scheduler UI should bind:
+
+- an **agent picker** to `agent_id` (Chronos `GET /api/query-studio/agents` proxies CoreHub `GET /query-studio/agents`)
+- a **saved-query picker** to `saved_query_id` (optional; omit for custom SQL)
+- a **SQL code editor** to `query_sql` (custom SQL, or snapshot when targeting a saved query)
+- a **read-only toggle** to `query_read_only` (default on; turning it off requires harm acknowledgment)
 
 ## Scheduling Options
 
