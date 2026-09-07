@@ -46,7 +46,7 @@ from gluesync_scheduler.security.user_role import UserRole
 TEST_DB_URL = "sqlite:///:memory:"
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def db_session():
     engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)
@@ -240,7 +240,7 @@ def test_list_query_studio_agents_forwards_to_hub():
     saved = CoreHubClient._instance
     CoreHubClient._instance = None
     try:
-        with patch.object(CoreHubClient, "__init__", lambda self, provided_url=None: None), patch.object(
+        with patch.object(CoreHubClient, "__init__", return_value=None), patch.object(
             CoreHubClient, "fetch_core_hub", fake_fetch
         ):
             client = TestClient(app, raise_server_exceptions=False)
