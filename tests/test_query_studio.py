@@ -92,6 +92,27 @@ def test_create_query_studio_job_stores_agent_and_sql(db_session):
     assert stored.query_read_only is True
 
 
+def test_job_create_coerces_null_query_read_only_for_entity_snapshot():
+    """UI posts query_read_only=null for non-Query-Studio jobs; must coerce to True."""
+    job = JobCreate(
+        name="snap-job",
+        task_type=TaskType.ENTITY_SNAPSHOT,
+        cron_expression="0 0 * * *",
+        pipeline_id="pipe-1",
+        entity_ids=["entity-1"],
+        query_read_only=None,
+        enabled=True,
+        is_cron_expression=True,
+    )
+    assert job.query_read_only is True
+
+
+def test_job_create_coerces_null_query_read_only_for_query_studio():
+    """QUERY_STUDIO create with query_read_only=None must coerce to True."""
+    job = _job_create(query_read_only=None)
+    assert job.query_read_only is True
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
