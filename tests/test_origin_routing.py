@@ -30,7 +30,7 @@ from gluesync_scheduler.services.origin_routing import (
 from gluesync_scheduler.services.trigger_flow_service import TriggerFlowService
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def db_session():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)
