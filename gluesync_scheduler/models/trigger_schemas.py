@@ -32,6 +32,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, validator
 from gluesync_scheduler.models.models import TaskType
 from gluesync_scheduler.models.schemas import QueryStudioValidatorMixin
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
+from gluesync_scheduler.services.origin_routing import (
+    ROUTING_BROADCAST,
+    ROUTING_ORIGIN,
+    default_routing_for_platform_event,
+    normalize_routing,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +47,12 @@ from gluesync_scheduler.core.timezone_utils import get_env_timezone
 class TriggerEventMode(str, Enum):
     ASYNC = "async"
     SYNC = "sync"
+
+
+class TriggerRouting(str, Enum):
+    """How a platform-event trigger selects which action to run."""
+    ORIGIN = ROUTING_ORIGIN
+    BROADCAST = ROUTING_BROADCAST
 
 
 class TriggerEventBase(QueryStudioValidatorMixin, BaseModel):
@@ -107,6 +119,10 @@ class TriggerFlowBase(BaseModel):
 
 class TriggerFlowCreate(TriggerFlowBase):
     platform_event: Optional[str] = Field(None, description="Platform event type that triggers this flow (e.g. ENTITY_CDC_STARTED). If set, a webhook is registered in CoreHub to listen for this event.")
+    routing: Optional[TriggerRouting] = Field(
+        None,
+        description="origin: Route to the source. broadcast: Broadcast to every action on this flow. Omitted uses origin for entity-scoped platform events (table reorg, truncate, table DDL) and broadcast otherwise.",
+    )
     events: List[TriggerEventCreate] = Field(
         ...,
         min_length=1,
@@ -143,12 +159,23 @@ class TriggerFlowCreate(TriggerFlowBase):
     )
 
 
+    @validator("routing", always=True)
+    def default_routing(cls, v, values):
+        if v is not None:
+            return TriggerRouting(normalize_routing(v.value if hasattr(v, "value") else v))
+        return TriggerRouting(default_routing_for_platform_event(values.get("platform_event")))
+
+
 class TriggerFlowUpdate(BaseModel):
     """All fields optional — only provided fields are updated."""
     name: Optional[str] = Field(None, description="Updated name")
     description: Optional[str] = Field(None, description="Updated description")
     enabled: Optional[bool] = Field(None, description="Enable or disable the flow")
     platform_event: Optional[str] = Field(None, description="Platform event type that triggers this flow")
+    routing: Optional[TriggerRouting] = Field(
+        None,
+        description="origin: Route to the source. broadcast: Broadcast.",
+    )
     events: Optional[List[TriggerEventCreate]] = Field(
         None,
         description="Replace all events with this list (pass empty list to clear — at least 1 required on create)",
@@ -159,6 +186,10 @@ class TriggerFlowResponse(TriggerFlowBase):
     """Full TriggerFlow returned by the API."""
     id: int
     platform_event: Optional[str] = None
+    routing: Optional[str] = Field(
+        None,
+        description="origin: Route to the source. broadcast: Broadcast. Null/omitted is broadcast.",
+    )
     # secret_token is intentionally omitted here — only returned on create/regenerate
     trigger_url: str = Field(..., description="Stable URL to POST for firing this flow")
     events: List[TriggerEventResponse] = Field(default_factory=list)

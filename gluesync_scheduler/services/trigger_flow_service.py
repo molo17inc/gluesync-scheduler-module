@@ -42,6 +42,12 @@ from gluesync_scheduler.services.chain_execution_service import (
     _get_chronos_callback_base,
     chain_execution_service,
 )
+from gluesync_scheduler.services.origin_routing import (
+    ROUTING_BROADCAST,
+    default_routing_for_platform_event,
+    filter_events_for_routing,
+    normalize_routing,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,11 +145,13 @@ class TriggerFlowService:
         Returns (flow, plaintext_token) — the token is only handed back here.
         """
         token = _generate_token()
+        routing = data.routing.value if getattr(data, "routing", None) is not None else default_routing_for_platform_event(data.platform_event)
         flow = TriggerFlow(
             name=data.name,
             description=data.description,
             enabled=data.enabled,
             platform_event=data.platform_event,
+            routing=routing,
             secret_token=token,
         )
         self.db.add(flow)
@@ -169,13 +177,7 @@ class TriggerFlowService:
 
         return flow, token
 
-    def update_flow(self, flow_id: int, data: TriggerFlowUpdate) -> Optional[TriggerFlow]:
-        flow = self.db.query(TriggerFlow).filter(TriggerFlow.id == flow_id).first()
-        if flow is None:
-            return None
-
-        old_platform_event = flow.platform_event
-
+    def _apply_flow_field_updates(self, flow: TriggerFlow, data: TriggerFlowUpdate) -> None:
         if data.name is not None:
             flow.name = data.name
         if data.description is not None:
@@ -184,32 +186,61 @@ class TriggerFlowService:
             flow.enabled = data.enabled
         if data.platform_event is not None:
             flow.platform_event = data.platform_event
+        if data.routing is not None:
+            flow.routing = (
+                data.routing.value
+                if hasattr(data.routing, "value")
+                else normalize_routing(data.routing)
+            )
 
+    def _replace_flow_events(self, flow_id: int, events: List[TriggerEventCreate]) -> None:
+        self.db.query(TriggerFlowEvent).filter(
+            TriggerFlowEvent.trigger_flow_id == flow_id
+        ).delete()
+        for ev in _events_to_orm(events, flow_id):
+            self.db.add(ev)
+
+    def _maybe_reregister_platform_webhook(
+        self,
+        flow_id: int,
+        requested_event: Optional[str],
+        old_event: Optional[str],
+        new_event: Optional[str],
+    ) -> None:
+        if requested_event is None or new_event == old_event:
+            return
+        if old_event:
+            try:
+                chain_execution_service.sync_delete_platform_event_webhook(flow_id)
+            except Exception:
+                logger.exception(
+                    "Failed to delete old platform event webhook for flow %d",
+                    flow_id,
+                )
+        if new_event:
+            try:
+                chain_execution_service.sync_register_platform_event_webhook(flow_id, new_event)
+            except Exception:
+                logger.exception(
+                    "Failed to register new platform event webhook for flow %d",
+                    flow_id,
+                )
+
+    def update_flow(self, flow_id: int, data: TriggerFlowUpdate) -> Optional[TriggerFlow]:
+        flow = self.db.query(TriggerFlow).filter(TriggerFlow.id == flow_id).first()
+        if flow is None:
+            return None
+
+        old_platform_event = flow.platform_event
+        self._apply_flow_field_updates(flow, data)
         if data.events is not None:
-            # Replace events atomically
-            self.db.query(TriggerFlowEvent).filter(
-                TriggerFlowEvent.trigger_flow_id == flow_id
-            ).delete()
-            for ev in _events_to_orm(data.events, flow_id):
-                self.db.add(ev)
+            self._replace_flow_events(flow_id, data.events)
 
         self.db.commit()
         self.db.refresh(flow)
-
-        # Re-register webhook if platform_event changed
-        new_platform_event = flow.platform_event
-        if data.platform_event is not None and new_platform_event != old_platform_event:
-            if old_platform_event:
-                try:
-                    chain_execution_service.sync_delete_platform_event_webhook(flow_id)
-                except Exception as exc:
-                    logger.error("Failed to delete old platform event webhook for flow %d: %s", flow_id, exc)
-            if new_platform_event:
-                try:
-                    chain_execution_service.sync_register_platform_event_webhook(flow_id, new_platform_event)
-                except Exception as exc:
-                    logger.error("Failed to register new platform event webhook for flow %d: %s", flow_id, exc)
-
+        self._maybe_reregister_platform_webhook(
+            flow_id, data.platform_event, old_platform_event, flow.platform_event
+        )
         return self.get_flow(flow_id)
 
     def toggle_enabled(self, flow_id: int, enabled: bool) -> Optional[TriggerFlow]:
@@ -265,11 +296,19 @@ class TriggerFlowService:
     # Fire
     # ------------------------------------------------------------------
 
-    async def fire(self, flow_id: int, source: str = "manual") -> Tuple[bool, str]:
+    async def fire(
+        self,
+        flow_id: int,
+        source: str = "manual",
+        event_payload: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, str]:
         """Execute the TriggerFlow chain.
 
         Updates last_triggered on the flow record.
         Returns (success, error_message).
+
+        When the flow uses origin routing and ``source`` is a platform event,
+        only actions whose target matches ``event.source`` (kind + id) run.
         """
         flow = self.db.query(TriggerFlow).filter(TriggerFlow.id == flow_id).first()
         if flow is None:
@@ -281,6 +320,18 @@ class TriggerFlowService:
             .order_by(TriggerFlowEvent.position)
             .all()
         )
+
+        routing = flow.routing or ROUTING_BROADCAST
+        if source == "platform_event":
+            events = filter_events_for_routing(
+                events, routing, event_payload, flow_id=flow_id
+            )
+            if routing == "origin" and not events:
+                logger.info(
+                    "TriggerFlow %d origin routing: no matching target — no-op",
+                    flow_id,
+                )
+                return True, ""
 
         now = datetime.now(tz=timezone.utc)
         flow.last_triggered = now

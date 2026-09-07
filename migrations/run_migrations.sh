@@ -40,6 +40,10 @@ python3 "$SCRIPT_DIR/migrate_add_trigger_flows.py" "$@"
 echo "Running migration: migrate_add_platform_event.py"
 python3 "$SCRIPT_DIR/migrate_add_platform_event.py" "$@"
 
+# Add routing column to trigger_flows table
+echo "Running migration: migrate_add_trigger_routing.py"
+python3 "$SCRIPT_DIR/migrate_add_trigger_routing.py" "$@"
+
 # Add trigger_flow_execution_logs table
 echo "Running migration: migrate_add_execution_logs.py"
 python3 "$SCRIPT_DIR/migrate_add_execution_logs.py" "$@"
