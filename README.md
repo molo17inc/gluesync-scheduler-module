@@ -155,8 +155,8 @@ Configure the application using environment variables:
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
 | `CHRONOS_SDK_TOKEN_REFRESH_ON_401` | Whether to automatically refresh the SDK token on 401 Unauthorized and retry outbound CoreHub calls exactly once | `True` |
-| `CHRONOS_REDO_PAUSE_TIMEOUT` | Maximum seconds to wait for entities to leave the Active state (Hold or Error accepted) before issuing a redo command. See [Pause before redo](#pause-before-redo). | `60` |
-| `CHRONOS_REDO_POLL_INTERVAL` | Seconds between CoreHub `entities-status` checks while polling for entities to leave the Active state (Hold or Error accepted) before a redo. See [Pause before redo](#pause-before-redo). | `5` |
+| `CHRONOS_REDO_PAUSE_TIMEOUT` | Maximum seconds to wait for entities to leave the Active state (Hold, Error, or Warning accepted) before issuing a redo command. See [Pause before redo](#pause-before-redo). | `60` |
+| `CHRONOS_REDO_POLL_INTERVAL` | Seconds between CoreHub `entities-status` checks while polling for entities to leave the Active state (Hold, Error, or Warning accepted) before a redo. See [Pause before redo](#pause-before-redo). | `5` |
 | `TZ` | Preferred timezone environment variable for job scheduling. If set, it takes precedence over `TIMEZONE`. | `UTC` |
 | `TIMEZONE` | Deprecated timezone environment variable for job scheduling. Used only as fallback when `TZ` is not set. | `UTC` |
 
@@ -635,15 +635,15 @@ The module automatically retrieves the CoreHub URL from the SDK after discovery,
 
 ### Pause before redo
 
-All redo operations (`entity_redo`, `pipeline_redo`, `group_redo`) now pause their target objects **before** sending the redo command to CoreHub, so the target is fully stopped before the redo is applied. Instead of waiting a fixed number of seconds, Chronos polls CoreHub for the runtime status of the affected entities and only proceeds once every target entity is no longer **Active** — i.e. it reports either **Hold** (paused) or **Error**. Both states are acceptable to move forward with the redo; only an entity that is still syncing or snapshotting (`isSyncActive` or `isMigrationActive` true) keeps the poller waiting.
+All redo operations (`entity_redo`, `pipeline_redo`, `group_redo`) now pause their target objects **before** sending the redo command to CoreHub, so the target is fully stopped before the redo is applied. Instead of waiting a fixed number of seconds, Chronos polls CoreHub for the runtime status of the affected entities and only proceeds once every target entity is no longer **Active** — i.e. it reports either **Hold** (paused), **Error**, or **Warning**. Those states are acceptable to move forward with the redo; only an entity that is still **Active** (syncing or snapshotting, with no error/warning) keeps the poller waiting.
 
-The polling uses CoreHub's `GET /pipelines/{pipeline_id}/entities-status` endpoint, which returns the same runtime status the MPP UI uses to render Active / Hold / Error. An entity is considered settled (ready to proceed) when both `isSyncActive` and `isMigrationActive` are false — regardless of whether `errorState` is set. This mirrors the CoreHub / MPP UI computation, where an entity is `active` only while syncing or snapshotting, and otherwise resolves to `hold` or `error`.
+The polling uses CoreHub's `GET /pipelines/{pipeline_id}/entities-status` endpoint, which returns the same runtime status the MPP UI uses to render Active / Hold / Error / Warning. An entity is considered settled (ready to proceed) when it reports Hold, Error, or Warning. Hub !2219 puts Warning on `errorState.severity` (`WARNING` vs `ERROR`). Warning and Error remain settled even if `isSyncActive` / `isMigrationActive` are still true — an entity can keep running while Warning, same as Error.
 
 | Redo operation | Pause target | What is polled |
 |----------------|--------------|----------------|
-| `entity_redo` | The single entity (`stop` with `entity` param) | That entity leaving Active (Hold or Error) |
-| `pipeline_redo` | The whole pipeline (`stop`) | All entities in the pipeline leaving Active (Hold or Error) |
-| `group_redo` | The group (`stop-group`) | All entities belonging to the group leaving Active (Hold or Error) |
+| `entity_redo` | The single entity (`stop` with `entity` param) | That entity leaving Active (Hold, Error, or Warning) |
+| `pipeline_redo` | The whole pipeline (`stop`) | All entities in the pipeline leaving Active (Hold, Error, or Warning) |
+| `group_redo` | The group (`stop-group`) | All entities belonging to the group leaving Active (Hold, Error, or Warning) |
 
 If the pause call itself fails, the redo is aborted. If polling times out before every target entity leaves the Active state, the redo is also aborted and an error is logged. When the affected entity IDs cannot be resolved (for example the config endpoint returns nothing), Chronos proceeds with the redo and logs a warning rather than blocking indefinitely.
 
