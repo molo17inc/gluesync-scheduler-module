@@ -63,7 +63,7 @@ async def test_health_check_pass_on_200(clean_sdk_and_health_check):
     mock_http_client = MagicMock()
     mock_http_client.get = AsyncMock(return_value=mock_response)
 
-    with patch.object(hc, "_get_http_client", AsyncMock(return_value=mock_http_client)), \
+    with patch.object(hc, "_get_http_client", return_value=mock_http_client), \
          patch.object(GluesyncSDKClient, "initialize", new_callable=AsyncMock) as mock_init:
         await hc._check_once()
 
@@ -83,7 +83,7 @@ async def test_health_check_reconnect_on_401(clean_sdk_and_health_check):
     mock_http_client = MagicMock()
     mock_http_client.get = AsyncMock(return_value=mock_response)
 
-    with patch.object(hc, "_get_http_client", AsyncMock(return_value=mock_http_client)), \
+    with patch.object(hc, "_get_http_client", return_value=mock_http_client), \
          patch.object(GluesyncSDKClient, "initialize", new_callable=AsyncMock) as mock_init:
         await hc._check_once()
 
@@ -102,7 +102,7 @@ async def test_health_check_reconnect_on_network_error(clean_sdk_and_health_chec
     mock_http_client = MagicMock()
     mock_http_client.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
 
-    with patch.object(hc, "_get_http_client", AsyncMock(return_value=mock_http_client)), \
+    with patch.object(hc, "_get_http_client", return_value=mock_http_client), \
          patch.object(GluesyncSDKClient, "initialize", new_callable=AsyncMock) as mock_init:
         await hc._check_once()
 
@@ -122,7 +122,7 @@ async def test_health_check_no_reconnect_on_500(clean_sdk_and_health_check):
     mock_http_client = MagicMock()
     mock_http_client.get = AsyncMock(return_value=mock_response)
 
-    with patch.object(hc, "_get_http_client", AsyncMock(return_value=mock_http_client)), \
+    with patch.object(hc, "_get_http_client", return_value=mock_http_client), \
          patch.object(GluesyncSDKClient, "initialize", new_callable=AsyncMock) as mock_init:
         await hc._check_once()
 
@@ -139,7 +139,7 @@ async def test_health_check_skips_when_sdk_not_initialized(clean_sdk_and_health_
     mock_http_client = MagicMock()
     mock_http_client.get = AsyncMock()
 
-    with patch.object(hc, "_get_http_client", AsyncMock(return_value=mock_http_client)), \
+    with patch.object(hc, "_get_http_client", return_value=mock_http_client), \
          patch.object(GluesyncSDKClient, "initialize", new_callable=AsyncMock) as mock_init:
         await hc._check_once()
 
@@ -154,7 +154,7 @@ async def test_health_check_disabled_by_env(clean_sdk_and_health_check):
         hc = CoreHubHealthCheck()
         assert hc._enabled is False
 
-        await hc.start()
+        hc.start()
 
         # No task should have been created
         assert hc._task is None
@@ -170,7 +170,7 @@ async def test_health_check_stop_cancels_task(clean_sdk_and_health_check):
         await asyncio.sleep(0.01)
 
     with patch.object(hc, "_run", mock_run):
-        await hc.start()
+        hc.start()
         assert hc._task is not None
 
         # Wait for the mock run to complete

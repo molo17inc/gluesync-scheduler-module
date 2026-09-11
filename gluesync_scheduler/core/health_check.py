@@ -96,7 +96,7 @@ class CoreHubHealthCheck:
 
     # --- Public API ---------------------------------------------------
 
-    async def start(self) -> None:
+    def start(self) -> None:
         """Start the background health-check task.
 
         If the health check is disabled via ``CHRONOS_HEALTH_CHECK_ENABLED``
@@ -128,7 +128,8 @@ class CoreHubHealthCheck:
                 await self._task
             except asyncio.CancelledError:
                 pass
-            self._task = None
+            finally:
+                self._task = None
 
         if self._client is not None:
             await self._client.aclose()
@@ -166,7 +167,7 @@ class CoreHubHealthCheck:
             logger.debug("Could not get token from SDK client: %s", exc)
         return None
 
-    async def _get_http_client(self) -> httpx.AsyncClient:
+    def _get_http_client(self) -> httpx.AsyncClient:
         """Return the reusable httpx client, constructing on first use."""
         if self._client is not None:
             return self._client
@@ -198,7 +199,7 @@ class CoreHubHealthCheck:
         url = base_url.rstrip("/") + self.AUTH_ME_PATH
         headers = {"Authorization": f"Bearer {token}"}
 
-        client = await self._get_http_client()
+        client = self._get_http_client()
         try:
             response = await client.get(url, headers=headers)
         except httpx.HTTPError as exc:
@@ -238,8 +239,8 @@ class CoreHubHealthCheck:
             logger.info("CoreHub health check: triggering SDK force-reconnect...")
             await gluesync_sdk_client.initialize(force_reconnect=True)
             logger.info("CoreHub health check: SDK force-reconnect completed")
-        except Exception as exc:
-            logger.error("CoreHub health check: force-reconnect failed: %s", exc)
+        except Exception:
+            logger.exception("CoreHub health check: force-reconnect failed")
 
     async def _run(self) -> None:
         """Main loop — runs until ``stop()`` is called."""
@@ -252,7 +253,9 @@ class CoreHubHealthCheck:
             except asyncio.CancelledError:
                 raise
             except Exception:
+                # Log and continue — the health check must not crash the loop
                 logger.exception("Unexpected error in CoreHub health check loop")
+                continue
 
             try:
                 await asyncio.sleep(self._interval)

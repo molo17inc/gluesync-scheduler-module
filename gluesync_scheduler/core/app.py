@@ -395,7 +395,7 @@ async def startup_event():
     # Start the CoreHub health check background task
     try:
         from gluesync_scheduler.core.health_check import health_check
-        await health_check.start()
+        health_check.start()
         logger.info("CoreHub health check started (interval=%ds)", health_check._interval)
     except Exception as e:
         logger.warning(f"Failed to start CoreHub health check (non-fatal): {e}")
