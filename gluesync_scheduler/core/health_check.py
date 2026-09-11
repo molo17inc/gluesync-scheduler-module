@@ -122,23 +122,23 @@ class CoreHubHealthCheck:
     async def stop(self) -> None:
         """Stop the background health-check task and close the HTTP client."""
         self._stopped = True
-        cancelled = False
         if self._task is not None:
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
-                cancelled = True
-            finally:
                 self._task = None
+                if self._client is not None:
+                    await self._client.aclose()
+                    self._client = None
+                logger.info("CoreHub health check stopped")
+                raise
+            self._task = None
 
         if self._client is not None:
             await self._client.aclose()
             self._client = None
         logger.info("CoreHub health check stopped")
-
-        if cancelled:
-            raise asyncio.CancelledError()
 
     # --- Internal helpers --------------------------------------------
 
