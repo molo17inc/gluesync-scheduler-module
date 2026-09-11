@@ -317,7 +317,7 @@ class GluesyncSDKClient:
                     cycle_count += 1
                     logger.info(f"Completed backoff cycle {cycle_count}, resetting delay to 1 second")
             except (GluesyncLicenseError, GluesyncAuthenticationError) as e:
-                logger.error(f"{type(e).__name__}: {e}")
+                logger.exception(f"{type(e).__name__}: {e}")
                 raise
 
     async def _connect_direct(self, host, port, protocol, retry_count, cycle_count):
