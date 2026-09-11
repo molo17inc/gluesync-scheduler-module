@@ -255,6 +255,10 @@ class CoreHubHealthCheck:
             try:
                 await self._check_once()
             except asyncio.CancelledError:
+                # Clean up the HTTP client before re-raising
+                if self._client is not None:
+                    await self._client.aclose()
+                    self._client = None
                 raise
             except Exception:
                 # Log and continue — the health check must not crash the loop
@@ -264,9 +268,13 @@ class CoreHubHealthCheck:
             try:
                 await asyncio.sleep(self._interval)
             except asyncio.CancelledError:
+                # Clean up the HTTP client before re-raising
+                if self._client is not None:
+                    await self._client.aclose()
+                    self._client = None
                 raise
 
-        # Clean up the HTTP client when the loop exits
+        # Clean up the HTTP client when the loop exits normally
         if self._client is not None:
             await self._client.aclose()
             self._client = None
