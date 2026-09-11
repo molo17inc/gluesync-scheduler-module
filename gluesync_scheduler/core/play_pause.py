@@ -570,13 +570,21 @@ class CoreHubClient:
             "Triggering SDK token refresh and single retry..."
         )
         try:
+            old_token = (ctx["headers"].get('Authorization') or '').replace('Bearer ', '')
             self._reinitialize_sdk_client()
             new_token, _from_sdk = self._get_current_token()
             if not new_token:
                 logger.error("Failed to retrieve a fresh token after SDK client reinitialization")
                 return None
 
-            logger.info("Successfully refreshed SDK token after 401. Retrying request...")
+            if new_token == old_token:
+                logger.warning(
+                    "Token after reinitialization is identical to the rejected token "
+                    "— reinitialization may not have taken effect"
+                )
+            else:
+                logger.info("Successfully refreshed SDK token after 401. Retrying request...")
+
             retry_headers = ctx["headers"].copy()
             retry_headers['Authorization'] = f'Bearer {new_token}'
             retry_response = self._do_request(
@@ -592,22 +600,33 @@ class CoreHubClient:
 
     @staticmethod
     def _reinitialize_sdk_client():
-        """Reset the shared SDK client so the next call performs a fresh login handshake."""
-        gluesync_sdk_client._is_initialized = False
-        gluesync_sdk_client._token = None
-        if gluesync_sdk_client._client:
-            gluesync_sdk_client._client.connected = False
+        """Reset the shared SDK client so the next call performs a fresh login handshake.
 
+        Uses ``force_reconnect=True`` so :meth:`initialize` disconnects and
+        discards the old client instead of reusing a stale token from a
+        still-connected WebSocket.  When called from a thread executor (the
+        normal case for ``fetch_core_hub`` via ``run_in_executor``), the
+        coroutine is scheduled on the running event loop with
+        ``run_coroutine_threadsafe`` to avoid the "event loop is already
+        running" error that ``run_until_complete`` would raise.
+        """
         import asyncio
+
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
             loop = None
 
         if loop and loop.is_running():
-            loop.run_until_complete(gluesync_sdk_client.initialize())
+            # We're in a thread executor — schedule on the main event loop
+            future = asyncio.run_coroutine_threadsafe(
+                gluesync_sdk_client.initialize(force_reconnect=True),
+                loop,
+            )
+            future.result(timeout=30)  # Wait up to 30s for reconnection
         else:
-            asyncio.run(gluesync_sdk_client.initialize())
+            # No running loop — safe to use asyncio.run
+            asyncio.run(gluesync_sdk_client.initialize(force_reconnect=True))
 
     def _process_retry_response(self, retry_response, raw=False):
         """Convert a retry response into the standard result dict."""
