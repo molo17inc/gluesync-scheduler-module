@@ -122,16 +122,34 @@ class GluesyncSDKClient:
         scheme = "https" if os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't') else "http"
         return f"{scheme}://{host}:{port}"
     
-    async def initialize(self):
+    async def initialize(self, force_reconnect: bool = False):
         """Initialize the Gluesync client with indefinite retries and exponential backoff
-        
+
         The method will retry indefinitely with exponential backoff starting at 1 second,
         doubling each time up to 30 seconds, then resetting back to 1 second.
+
+        Args:
+            force_reconnect: When True, disconnect and discard the existing client
+                so a fresh login handshake is performed. This is used by the 401
+                retry path in CoreHubClient to recover from stale/invalidated tokens.
         """
-        if self._initializing:
+        if force_reconnect:
+            # Disconnect and clear the old client to force a fresh login
+            if self._client:
+                try:
+                    if self._client.is_connected:
+                        logger.info("Force-reconnect: disconnecting existing SDK client...")
+                        await self._client.disconnect()
+                except Exception as e:
+                    logger.warning(f"Force-reconnect: error during disconnect: {e}")
+                self._client = None
+            self._token = None
+            self._is_initialized = False
+            self._initializing = False
+        elif self._initializing:
             logger.info("Gluesync SDK client is already initializing, skipping duplicate initialization call")
             return
-            
+
         self._initializing = True
         try:
             if self._is_initialized and self._token:
@@ -140,7 +158,7 @@ class GluesyncSDKClient:
             elif self._is_initialized and not self._token:
                 logger.warning("SDK client marked as initialized but no token available - reinitializing")
                 self._is_initialized = False
-            
+
             # If client already exists and is active (connected or reconnecting), do not re-create it
             if self._client and (self._client.is_connected or getattr(self._client, '_reconnecting', False)):
                 logger.info("SDK client already exists and is connected or reconnecting, skipping recreation")

@@ -391,7 +391,15 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("The application will continue, but some functionality may be limited")
-    
+
+    # Start the CoreHub health check background task
+    try:
+        from gluesync_scheduler.core.health_check import health_check
+        await health_check.start()
+        logger.info("CoreHub health check started (interval=%ds)", health_check._interval)
+    except Exception as e:
+        logger.warning(f"Failed to start CoreHub health check (non-fatal): {e}")
+
     # Load existing jobs into the scheduler
     try:
         logger.info("Loading existing jobs into scheduler...")
@@ -464,7 +472,15 @@ async def startup_event():
 async def shutdown_event():
     """Clean up resources on shutdown"""
     logger.info("Shutting down Gluesync Scheduler Module...")
-    
+
+    # Stop the CoreHub health check
+    try:
+        from gluesync_scheduler.core.health_check import health_check
+        await health_check.stop()
+        logger.info("CoreHub health check stopped")
+    except Exception as e:
+        logger.warning(f"Error stopping CoreHub health check: {e}")
+
     # Shutdown the CoreHub introspector httpx client (if it was ever
     # materialised). Uses lazy import so the security module is not
     # loaded on shutdown paths that never called it.
