@@ -747,6 +747,60 @@ async def resync_pipeline(
             detail=f"Error resyncing pipeline: {str(e)}"
         )
 
+
+@router.post(
+    "/{pipeline_id}/one-time-snapshot-group",
+    response_model=OperationResponse,
+    summary="Create a data snapshot for specific groups",
+)
+async def resync_groups(
+    request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline containing the groups"),
+    group_ids: Optional[List[str]] = Query(None, description="Group IDs to snapshot"),
+    snapshot_write_method: str = Query("UPSERT", description="Snapshot write method"),
+    body: dict = Body(default=None),
+):
+    """Internal endpoint used by scheduled and trigger-flow group snapshot events."""
+    cron_job_identifier = getattr(request.state, 'cron_job_identifier', None)
+    if body and body.get('group_ids'):
+        group_ids = body['group_ids']
+    if body and body.get('snapshot_write_method'):
+        snapshot_write_method = body['snapshot_write_method']
+    if not group_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="group_ids must be provided for group snapshot operations",
+        )
+
+    try:
+        result = await PipelineManager().resync_groups(
+            pipeline_id,
+            group_ids,
+            snapshot_write_method,
+        )
+        if not result:
+            _handle_operation_failure(
+                f"Failed to snapshot groups in pipeline {pipeline_id}",
+                cron_job_identifier,
+            )
+        _mark_job_succeeded(cron_job_identifier)
+        return {
+            "success": True,
+            "message": f"Snapshot triggered successfully for groups in pipeline {pipeline_id}",
+            "data": {
+                "pipeline_id": pipeline_id,
+                "groups": group_ids,
+                "snapshot_write_method": snapshot_write_method,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        message = f"Error snapshotting groups in pipeline {pipeline_id}: {exc}"
+        logger.exception(message)
+        _handle_operation_failure(message, cron_job_identifier)
+
+
 @router.post("/{pipeline_id}/enter-maintenance", response_model=OperationResponse, summary="Enter maintenance mode for a pipeline")
 async def enter_maintenance_mode(
     request: Request,

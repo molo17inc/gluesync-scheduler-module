@@ -128,6 +128,22 @@ def _build_settings_app():
     return app
 
 
+def _build_triggers_app():
+    from fastapi import FastAPI
+
+    from gluesync_scheduler.api.trigger_router import router as triggers_router
+    from gluesync_scheduler.db.database import get_db
+
+    app = FastAPI()
+    app.include_router(triggers_router, prefix="/api")
+
+    def _fake_db():
+        yield MagicMock()
+
+    app.dependency_overrides[get_db] = _fake_db
+    return app
+
+
 @pytest.fixture
 def jobs_app():
     return _build_jobs_app()
@@ -136,6 +152,11 @@ def jobs_app():
 @pytest.fixture
 def settings_app():
     return _build_settings_app()
+
+
+@pytest.fixture
+def triggers_app():
+    return _build_triggers_app()
 
 
 def _client(app):
@@ -158,6 +179,7 @@ JOBS_ROUTES = [
     ("POST",   "/api/jobs/",           {"stub": True}, "require_manage"),
     ("PUT",    "/api/jobs/42",         {"stub": True}, "require_manage"),
     ("POST",   "/api/jobs/42/run",     None, "require_control"),
+    ("GET",    "/api/jobs/42/chain-status", None, "current_user"),
     ("PATCH",  "/api/jobs/42/status",  {"enabled": True}, "require_control"),
     ("DELETE", "/api/jobs/42",         None, "require_manage"),
 ]
@@ -167,6 +189,21 @@ SETTINGS_ROUTES = [
     ("GET",  "/api/settings/timezone", None, "current_user"),
     ("PUT",  "/api/settings/timezone", {"value": "UTC"}, "require_config"),
     ("POST", "/api/settings/",         {"key": "k", "value": "v"}, "require_config"),
+]
+
+TRIGGER_ROUTES = [
+    ("GET",    "/api/triggers/",                    None, "current_user"),
+    ("GET",    "/api/triggers/42",                  None, "current_user"),
+    ("POST",   "/api/triggers/",                    {
+        "name": "deploy-hook",
+        "events": [{"task_type": "pipeline_start", "pipeline_id": "pipeline-1"}],
+    }, "require_manage"),
+    ("PUT",    "/api/triggers/42",                  {"name": "updated"}, "require_manage"),
+    ("PATCH",  "/api/triggers/42/status",           {"enabled": True}, "require_control"),
+    ("DELETE", "/api/triggers/42",                  None, "require_manage"),
+    ("POST",   "/api/triggers/42/regenerate-token", None, "require_manage"),
+    ("POST",   "/api/triggers/42/fire-internal",    None, "require_manage"),
+    ("GET",    "/api/triggers/42/logs",             None, "current_user"),
 ]
 
 
@@ -238,6 +275,13 @@ class TestUnauthenticated:
             r = _do_request(client, method, path, body)
         assert r.status_code == 401
 
+    @pytest.mark.parametrize("method,path,body,_guard", TRIGGER_ROUTES)
+    def test_triggers_401(self, triggers_app, method, path, body, _guard):
+        _install_user(None)
+        with _client(triggers_app) as client:
+            r = _do_request(client, method, path, body)
+        assert r.status_code == 401
+
 
 # --- Forbidden ---------------------------------------------------------
 
@@ -279,6 +323,22 @@ class TestRoleMatrix:
         allowed = role in GUARD_ALLOWS[guard]
 
         with _client(settings_app) as client:
+            r = _do_request(client, method, path, body)
+
+        if allowed:
+            assert r.status_code not in (401, 403), (
+                f"{role} {method} {path} \u2192 {r.status_code}, expected pass through guard"
+            )
+        else:
+            assert r.status_code == 403
+
+    @pytest.mark.parametrize("role", ALL_ROLES)
+    @pytest.mark.parametrize("method,path,body,guard", TRIGGER_ROUTES)
+    def test_triggers(self, triggers_app, role, method, path, body, guard):
+        _install_user(role)
+        allowed = role in GUARD_ALLOWS[guard]
+
+        with _client(triggers_app) as client:
             r = _do_request(client, method, path, body)
 
         if allowed:

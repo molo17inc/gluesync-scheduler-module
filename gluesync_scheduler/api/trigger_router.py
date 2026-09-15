@@ -41,7 +41,12 @@ from gluesync_scheduler.models.trigger_schemas import (
     TriggerFlowResponse,
     TriggerFlowUpdate,
 )
-from gluesync_scheduler.security import require_manage, CurrentUser
+from gluesync_scheduler.security import (
+    CurrentUser,
+    current_user,
+    require_control,
+    require_manage,
+)
 from gluesync_scheduler.services.trigger_flow_service import TriggerFlowService
 
 logger = logging.getLogger(__name__)
@@ -70,6 +75,7 @@ def list_trigger_flows(
     skip: int = Query(0, ge=0, description="Pagination offset"),
     limit: int = Query(100, ge=1, le=1000, description="Page size"),
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(current_user),
 ):
     """Return a paginated list of all TriggerFlows (secret tokens excluded)."""
     svc = TriggerFlowService(db)
@@ -85,6 +91,7 @@ def list_trigger_flows(
 def get_trigger_flow(
     flow_id: int = Path(..., description="TriggerFlow ID"),
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(current_user),
 ):
     """Retrieve a TriggerFlow by ID (secret token excluded)."""
     svc = TriggerFlowService(db)
@@ -103,6 +110,7 @@ def get_trigger_flow(
 def create_trigger_flow(
     data: TriggerFlowCreate = Body(...),
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_manage),
 ):
     """Create a new TriggerFlow.
 
@@ -135,6 +143,7 @@ def update_trigger_flow(
     flow_id: int = Path(..., description="TriggerFlow ID"),
     data: TriggerFlowUpdate = Body(...),
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_manage),
 ):
     """Update name, description, enabled flag, and/or events.
 
@@ -158,6 +167,7 @@ def toggle_trigger_flow_status(
     flow_id: int = Path(..., description="TriggerFlow ID"),
     enabled: bool = Body(..., embed=True, description="true to enable, false to disable"),
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_control),
 ):
     svc = TriggerFlowService(db)
     flow = svc.toggle_enabled(flow_id, enabled)
@@ -174,6 +184,7 @@ def toggle_trigger_flow_status(
 def delete_trigger_flow(
     flow_id: int = Path(..., description="TriggerFlow ID"),
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_manage),
 ):
     svc = TriggerFlowService(db)
     deleted = svc.delete_flow(flow_id)
@@ -190,6 +201,7 @@ def delete_trigger_flow(
 def regenerate_token(
     flow_id: int = Path(..., description="TriggerFlow ID"),
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_manage),
 ):
     """Generate a new secret token, invalidating the previous one immediately.
 
@@ -476,6 +488,7 @@ async def get_trigger_flow_logs(
     flow_id: int = Path(..., description="TriggerFlow ID"),
     limit: int = Query(20, ge=1, le=100, description="Max logs to return"),
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(current_user),
 ) -> list[ExecutionLogResponse]:
     """Return the most recent execution logs for a trigger flow."""
     svc = TriggerFlowService(db)

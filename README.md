@@ -181,7 +181,8 @@ Additional environment variables for the Gluesync SDK integration:
 
 ### Authorization / user role enforcement
 
-Chronos protects its `/api/jobs/*` and `/api/settings/*` endpoints by
+Chronos protects its `/api/jobs/*`, `/api/triggers/*` management routes and
+`/api/settings/*` endpoints by
 resolving the caller's identity via CoreHub's `GET /auth/me` on each
 request (with a short-lived cache) and rejecting requests that do not
 carry a valid `gs-auth` session cookie or `Authorization: Bearer` JWT.
@@ -673,6 +674,11 @@ This module now integrates directly with the Gluesync CoreHub using the official
 The integration uses only the SDK-provided authentication token for all CoreHub API calls. Manual authentication with username/password is completely removed, making the module more secure and streamlined.
 
 The module automatically retrieves the CoreHub URL from the SDK after discovery, ensuring that the correct URL is used even when the CoreHub is discovered dynamically through UDP broadcast.
+
+During the `/ext-module` handshake Chronos also advertises its REST API
+`Module-Port` (from `PORT`) and `Module-Scheme` (from `SSL_ENABLED`). CoreHub
+uses these values for direct module calls and `{{chronos_address}}` webhook
+resolution.
 
 **Connection Behavior**: Whether using `GLUESYNC_HOST` for direct connection or UDP discovery, the scheduler will retry connecting to CoreHub indefinitely with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s max) until successful. This ensures reliable operation in containerized environments where services may start in different orders.
 

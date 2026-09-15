@@ -393,14 +393,21 @@ regardless of role.
 | `PUT`    | `/jobs/{id}`               | `require_manage`| edit |
 | `DELETE` | `/jobs/{id}`               | `require_manage`| delete |
 | `POST`   | `/jobs/{id}/run`           | `require_control`| run-now |
+| `GET`    | `/jobs/{id}/chain-status`  | `current_user`  | chained-event result |
 | `PATCH`  | `/jobs/{id}/status`        | `require_control`| enable/disable |
 | `GET`    | `/settings/timezone`       | `current_user`  | read |
 | `PUT`    | `/settings/timezone`       | `require_config`| |
 | `GET`    | `/settings/*` (other)      | `current_user`  | read |
 | `PUT/POST/DELETE` `/settings/*` | `require_config` | writes |
+| `GET`    | `/triggers`, `/triggers/{id}`, `/triggers/{id}/logs` | `current_user` | read trigger flows and execution logs |
+| `POST`   | `/triggers` | `require_manage` | create a webhook/platform-event trigger flow |
+| `PUT/DELETE` | `/triggers/{id}` | `require_manage` | edit/delete |
+| `PATCH`  | `/triggers/{id}/status` | `require_control` | enable/disable |
+| `POST`   | `/triggers/{id}/regenerate-token` | `require_manage` | rotate the webhook secret |
+| `POST`   | `/triggers/{id}/fire-internal` | `require_manage` | authenticated UI/MCP fire-now |
+| `POST`   | `/triggers/{id}/fire` | `X-Trigger-Token` | public webhook entrypoint; no user session required |
 | `*`      | `/pipelines/*`             | **`verify_localhost` only** (chronos-internal, cron-triggered; see below) |
-| `*`      | `/webhooks/*`              | Not present on `main`; ships with `feature/chained-events`. Auth model deferred to that MR. |
-| `POST`   | `/jobs/chained/*`          | Deferred with `feature/chained-events`. |
+| `POST`   | `/webhooks/*`              | `EXT_MODULE` plus event identifier headers | CoreHub callback receivers, not user management routes |
 
 Exact per-route wiring implemented in iteration 2 (this MR).
 

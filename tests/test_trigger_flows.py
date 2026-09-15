@@ -90,6 +90,9 @@ def api_client(db_engine):
     """
     import gluesync_scheduler.db.database as db_module
     from gluesync_scheduler.core.app import app
+    from gluesync_scheduler.security import current_user, require_control, require_manage
+    from gluesync_scheduler.security.corehub_introspect import CurrentUser
+    from gluesync_scheduler.security.user_role import UserRole
 
     TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
 
@@ -105,6 +108,10 @@ def api_client(db_engine):
             db.close()
 
     app.dependency_overrides[get_db] = _override_get_db
+    admin = CurrentUser(username="test-admin", role=UserRole.SUPER_ADMIN)
+    app.dependency_overrides[current_user] = lambda: admin
+    app.dependency_overrides[require_control] = lambda: admin
+    app.dependency_overrides[require_manage] = lambda: admin
 
     client = TestClient(app, raise_server_exceptions=False)
     yield client
@@ -269,6 +276,13 @@ class TestTriggerFlowServiceCRUD:
 # ---------------------------------------------------------------------------
 
 class TestTriggerFlowAPI:
+    def test_group_snapshot_chain_target_route_exists(self):
+        from gluesync_scheduler.core.app import app
+
+        assert "/api/pipelines/{pipeline_id}/one-time-snapshot-group" in {
+            route.path for route in app.routes
+        }
+
     def test_create_and_get(self, api_client):
         payload = {
             "name": "api-flow",
