@@ -59,18 +59,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ChronosGluesyncClient(GluesyncClient):
-    """Gluesync SDK client that advertises Chronos's own REST endpoint."""
-
-    def get_connection_headers(self):
-        headers = super().get_connection_headers()
-        headers["Module-Port"] = os.getenv("PORT", "1717")
-        headers["Module-Scheme"] = (
+def _module_endpoint_headers():
+    return {
+        "Module-Port": os.getenv("PORT", "1717"),
+        "Module-Scheme": (
             "https"
             if os.getenv("SSL_ENABLED", "False").lower() in ("true", "1", "t")
             else "http"
-        )
+        ),
+    }
+
+
+def _with_module_endpoint_headers(client):
+    """Advertise Chronos's REST address on the SDK handshake."""
+    original = client.get_connection_headers
+
+    def get_connection_headers():
+        headers = dict(original() or {})
+        headers.update(_module_endpoint_headers())
         return headers
+
+    client.get_connection_headers = get_connection_headers
+    return client
 
 
 class GluesyncSDKClient:
@@ -185,7 +195,7 @@ class GluesyncSDKClient:
                 license_file_path, security_config,
             )
 
-            self._client = ChronosGluesyncClient(**client_args)
+            self._client = _with_module_endpoint_headers(GluesyncClient(**client_args))
             self._setup_event_handlers()
 
             protocol = 'https' if ssl_enabled else 'http'
