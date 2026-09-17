@@ -33,6 +33,7 @@ import pytz
 from sqlalchemy.orm import Session
 
 from gluesync_scheduler.models.models import ExecutionMode, TaskType, TriggerFlow, TriggerFlowEvent, TriggerFlowExecutionLog, require_query_studio_fields, query_read_only_of
+from gluesync_scheduler.models.ai_agent_run import ai_agent_run_orm_kwargs, require_ai_agent_run_fields
 from gluesync_scheduler.models.trigger_schemas import (
     TriggerEventCreate,
     TriggerFlowCreate,
@@ -79,11 +80,19 @@ def _events_to_orm(
     result = []
     for pos, ev in enumerate(events):
         require_query_studio_fields(ev.task_type, ev.agent_id, ev.query_sql, ev.saved_query_id)
+        require_ai_agent_run_fields(
+            ev.task_type,
+            getattr(ev, "agent_alias", None),
+            getattr(ev, "prompt_template", None),
+            getattr(ev, "payload_allow_list", None),
+            getattr(ev, "agent_input", None),
+            getattr(ev, "idempotency_key", None),
+        )
         orm = TriggerFlowEvent(
             trigger_flow_id=flow_id,
             position=pos,
             task_type=ev.task_type,
-            pipeline_id=ev.pipeline_id,
+            pipeline_id=ev.pipeline_id or "",
             entity_ids=json.dumps(ev.entity_ids) if ev.entity_ids is not None else None,
             group_ids=json.dumps(ev.group_ids) if ev.group_ids is not None else None,
             with_snapshot=ev.with_snapshot,
@@ -93,6 +102,7 @@ def _events_to_orm(
             saved_query_id=ev.saved_query_id,
             query_read_only=query_read_only_of(ev),
             execution_mode=ExecutionMode(ev.execution_mode.value),
+            **ai_agent_run_orm_kwargs(ev),
         )
         result.append(orm)
     return result
@@ -339,7 +349,12 @@ class TriggerFlowService:
 
         start_time = now.timestamp()
         try:
-            success = await chain_execution_service.execute_trigger_flow(flow_id, events)
+            success = await chain_execution_service.execute_trigger_flow(
+                flow_id,
+                events,
+                source=source,
+                event_payload=event_payload,
+            )
         except Exception as exc:
             logger.error("TriggerFlow %d raised an unhandled exception: %s", flow_id, exc)
             success = False

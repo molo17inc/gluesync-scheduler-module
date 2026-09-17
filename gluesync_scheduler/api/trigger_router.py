@@ -26,7 +26,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Path, Query, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -48,8 +48,25 @@ from gluesync_scheduler.security import (
     require_manage,
 )
 from gluesync_scheduler.services.trigger_flow_service import TriggerFlowService
+from gluesync_scheduler.models.ai_agent_run import MAX_FIRE_BODY_BYTES, parse_capped_json_body
 
 logger = logging.getLogger(__name__)
+
+
+async def _event_payload_from_request(request: Request) -> dict:
+    raw = await request.body()
+    if len(raw) > MAX_FIRE_BODY_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="request body exceeds the trigger payload size limit",
+        )
+    try:
+        return parse_capped_json_body(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 router = APIRouter(
     prefix="/triggers",
@@ -251,6 +268,7 @@ async def fire_trigger_flow(
         description="Secret token returned when the flow was created",
     ),
     background_tasks: BackgroundTasks = None,
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     """Fire a TriggerFlow by ID.
@@ -289,6 +307,7 @@ async def fire_trigger_flow(
         )
 
     triggered_at = datetime.now(tz=timezone.utc).isoformat()
+    event_payload = await _event_payload_from_request(request)
     events_count = (
         db.query(__import__("gluesync_scheduler.models.models", fromlist=["TriggerFlowEvent"]).TriggerFlowEvent)
         .filter_by(trigger_flow_id=flow_id)
@@ -299,7 +318,7 @@ async def fire_trigger_flow(
         # Synchronous path: run the chain inline and wait up to wait_timeout_seconds
         try:
             success, err = await asyncio.wait_for(
-                svc.fire(flow_id, source="webhook"),
+                svc.fire(flow_id, source="webhook", event_payload=event_payload),
                 timeout=float(wait_timeout_seconds),
             )
         except asyncio.TimeoutError:
@@ -337,7 +356,7 @@ async def fire_trigger_flow(
             bg_db = SessionLocal()
             try:
                 bg_svc = TriggerFlowService(bg_db)
-                await bg_svc.fire(fid, source="webhook")
+                await bg_svc.fire(fid, source="webhook", event_payload=event_payload)
             except Exception as exc:
                 logger.error("Background fire of TriggerFlow %d failed: %s", fid, exc)
             finally:
@@ -386,6 +405,7 @@ async def fire_trigger_flow_internal(
         description="Max seconds to wait when wait=true (default 120)",
     ),
     background_tasks: BackgroundTasks = None,
+    request: Request = None,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_manage),
 ):
@@ -410,6 +430,7 @@ async def fire_trigger_flow_internal(
         )
 
     triggered_at = datetime.now(tz=timezone.utc).isoformat()
+    event_payload = await _event_payload_from_request(request)
     events_count = (
         db.query(__import__("gluesync_scheduler.models.models", fromlist=["TriggerFlowEvent"]).TriggerFlowEvent)
         .filter_by(trigger_flow_id=flow_id)
@@ -419,7 +440,7 @@ async def fire_trigger_flow_internal(
     if wait:
         try:
             success, err = await asyncio.wait_for(
-                svc.fire(flow_id, source="manual"),
+                svc.fire(flow_id, source="manual", event_payload=event_payload),
                 timeout=float(wait_timeout_seconds),
             )
         except asyncio.TimeoutError:
@@ -455,7 +476,7 @@ async def fire_trigger_flow_internal(
             bg_db = SessionLocal()
             try:
                 bg_svc = TriggerFlowService(bg_db)
-                await bg_svc.fire(fid, source="manual")
+                await bg_svc.fire(fid, source="manual", event_payload=event_payload)
             except Exception as exc:
                 logger.error("Background fire of TriggerFlow %d failed: %s", fid, exc)
             finally:

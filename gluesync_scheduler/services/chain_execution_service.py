@@ -40,6 +40,16 @@ import requests
 from sqlalchemy.orm import Session
 
 from gluesync_scheduler.models.models import ChainedJobEvent, ExecutionMode, ScheduledJob, TaskType, query_read_only_of, query_studio_http_payload
+from gluesync_scheduler.models.ai_agent_run import (
+    ai_agent_run_http_payload,
+    build_run_input,
+    chronos_correlation_id,
+    interpolate_idempotency_key,
+    loop_guard_error,
+    parse_json_object,
+    pipeline_path_id,
+    source_run_or_fire_id,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +73,17 @@ class ExecutableEvent:
     query_sql: Optional[str] = None
     saved_query_id: Optional[str] = None
     query_read_only: bool = True
+    agent_alias: Optional[str] = None
+    agent_version: Optional[int] = None
+    agent_input: Optional[Any] = None
+    prompt_template: Optional[str] = None
+    payload_allow_list: Optional[Any] = None
+    idempotency_key: Optional[str] = None
+    allow_ai_run_loop: bool = False
+    resolved_input: Optional[dict] = None
+    resolved_idempotency_key: Optional[str] = None
+    correlation_id: Optional[str] = None
+    event_payload: Optional[dict] = None
 
     @staticmethod
     def from_chained(event: "ChainedJobEvent") -> "ExecutableEvent":
@@ -81,6 +102,13 @@ class ExecutableEvent:
             query_sql=getattr(event, "query_sql", None),
             saved_query_id=getattr(event, "saved_query_id", None),
             query_read_only=query_read_only_of(event),
+            agent_alias=getattr(event, "agent_alias", None),
+            agent_version=getattr(event, "agent_version", None),
+            agent_input=getattr(event, "agent_input", None),
+            prompt_template=getattr(event, "prompt_template", None),
+            payload_allow_list=getattr(event, "payload_allow_list", None),
+            idempotency_key=getattr(event, "idempotency_key", None),
+            allow_ai_run_loop=bool(getattr(event, "allow_ai_run_loop", False)),
         )
 
     @staticmethod
@@ -180,6 +208,7 @@ def _task_type_to_webhook_events(task_type: TaskType) -> list:
         TaskType.PIPELINE_ENTER_MAINTENANCE: ["PIPELINE_ENTER_MAINTENANCE"],
         TaskType.PIPELINE_EXIT_MAINTENANCE: ["PIPELINE_EXIT_MAINTENANCE"],
         TaskType.QUERY_STUDIO: [],
+        TaskType.AI_AGENT_RUN: [],
     }
     return mapping.get(task_type, ["ENTITY_SNAPSHOT_COMPLETED", "ENTITY_CDC_STARTED", "ENTITY_CDC_STOPPED"])
 
@@ -346,7 +375,13 @@ class ChainExecutionService:
         self._persist_chain_errors(job, db, errors)
         return {"started": True, "success": chain_success, "errors": errors}
 
-    async def execute_trigger_flow(self, flow_id: int, events: list) -> bool:
+    async def execute_trigger_flow(
+        self,
+        flow_id: int,
+        events: list,
+        source: str = "manual",
+        event_payload: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Execute a list of TriggerFlowEvent ORM objects as an ExecutableEvent chain.
 
         Returns True when the chain completed without stopping early, False otherwise.
@@ -358,7 +393,37 @@ class ChainExecutionService:
 
         logger.info("Executing TriggerFlow %d: %d event(s)", flow_id, len(events))
 
-        executables = [ExecutableEvent.from_trigger(e) for e in events]
+        executables = []
+        for event in events:
+            executable = ExecutableEvent.from_trigger(event)
+            if executable.task_type == TaskType.AI_AGENT_RUN:
+                guard = loop_guard_error(
+                    executable.task_type,
+                    source,
+                    event_payload,
+                    executable.allow_ai_run_loop,
+                )
+                if guard:
+                    logger.error("TriggerFlow %d event %d: %s", flow_id, event.id, guard)
+                    return False
+                executable.event_payload = event_payload
+                executable.resolved_input = build_run_input(
+                    executable.prompt_template,
+                    executable.payload_allow_list,
+                    parse_json_object(executable.agent_input),
+                    event_payload,
+                )
+                executable.resolved_idempotency_key = interpolate_idempotency_key(
+                    executable.idempotency_key,
+                    executable.payload_allow_list,
+                    event_payload,
+                )
+                executable.correlation_id = chronos_correlation_id(
+                    flow_id,
+                    event.id,
+                    source_run_or_fire_id(event_payload, f"fire-{flow_id}"),
+                )
+            executables.append(executable)
         return await self._run_executable_list(executables)
 
     async def _run_executable_list(self, events: List[ExecutableEvent]) -> bool:
@@ -754,7 +819,7 @@ class ChainExecutionService:
                 logger.error("Unknown task_type %s for event id=%d", event.task_type, event.id)
                 return False
 
-            endpoint = f"{base_url}/pipelines/{event.pipeline_id}/{action}"
+            endpoint = f"{base_url}/pipelines/{pipeline_path_id(event.pipeline_id)}/{action}"
             payload = _event_payload(event)
 
             timeout = int(os.getenv("SCHEDULER_INTERNAL_HTTP_TIMEOUT", "120"))
@@ -1182,6 +1247,7 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
         TaskType.PIPELINE_ENTER_MAINTENANCE: "enter-maintenance",
         TaskType.PIPELINE_EXIT_MAINTENANCE: "exit-maintenance",
         TaskType.QUERY_STUDIO: "query-studio",
+        TaskType.AI_AGENT_RUN: "ai-agent-run",
     }
     return mapping.get(task_type)
 
@@ -1190,6 +1256,9 @@ def _event_payload(event: ExecutableEvent) -> dict:
     """Build the Chronos internal pipeline-API payload for an executable event."""
     if event.task_type == TaskType.QUERY_STUDIO:
         return query_studio_http_payload(event)
+    if event.task_type == TaskType.AI_AGENT_RUN:
+        wait = event.execution_mode == ExecutionMode.SYNC
+        return ai_agent_run_http_payload(event, wait=wait)
     payload: dict = {}
     entity_ids = _parse_json_list(event.entity_ids)
     group_ids = _parse_json_list(event.group_ids)

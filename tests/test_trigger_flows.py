@@ -472,6 +472,40 @@ class TestTriggerFlowAPI:
         assert resp.status_code == 200
         assert resp.json()["status"] == "completed"
 
+    def test_fire_wait_forwards_json_body(self, api_client):
+        create_resp = api_client.post(
+            "/api/triggers/",
+            json={"name": "wait-fire-body", "events": [
+                {
+                    "task_type": "ai_agent_run",
+                    "agent_alias": "agent/daily-report",
+                    "prompt_template": "Ticket {{data.ticketId}}",
+                    "payload_allow_list": ["data.ticketId"],
+                    "execution_mode": "async",
+                }
+            ]},
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        fid = create_resp.json()["id"]
+        token = create_resp.json()["secret_token"]
+        fire_mock = AsyncMock(return_value=(True, ""))
+
+        with patch(
+            "gluesync_scheduler.api.trigger_router.TriggerFlowService.fire",
+            new=fire_mock,
+        ):
+            resp = api_client.post(
+                f"/api/triggers/{fid}/fire?wait=true",
+                headers={"X-Trigger-Token": token, "Content-Type": "application/json"},
+                json={"data": {"ticketId": "123"}},
+            )
+
+        assert resp.status_code == 200
+        fire_mock.assert_awaited()
+        kwargs = fire_mock.await_args.kwargs
+        assert kwargs["source"] == "webhook"
+        assert kwargs["event_payload"]["data"]["ticketId"] == "123"
+
     def test_fire_wait_true_failure(self, api_client):
         create_resp = api_client.post(
             "/api/triggers/",

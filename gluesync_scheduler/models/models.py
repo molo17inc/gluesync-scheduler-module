@@ -47,6 +47,7 @@ class TaskType(enum.Enum):
     PIPELINE_ENTER_MAINTENANCE = "pipeline_enter_maintenance"
     PIPELINE_EXIT_MAINTENANCE = "pipeline_exit_maintenance"
     QUERY_STUDIO = "query_studio"
+    AI_AGENT_RUN = "ai_agent_run"
 
 
 QUERY_STUDIO_SQL_PREVIEW_LEN = 200
@@ -141,6 +142,13 @@ class ScheduledJob(Base):
     query_sql = Column(Text, nullable=True)
     saved_query_id = Column(String, nullable=True)
     query_read_only = Column(Boolean, default=True, nullable=False)
+    agent_alias = Column(String, nullable=True)
+    agent_version = Column(Integer, nullable=True)
+    agent_input = Column(Text, nullable=True)
+    prompt_template = Column(Text, nullable=True)
+    payload_allow_list = Column(Text, nullable=True)
+    idempotency_key = Column(String, nullable=True)
+    allow_ai_run_loop = Column(Boolean, default=False, nullable=False)
     enabled = Column(Boolean, default=True)
     command = Column(Text, nullable=False)
     cron_job_identifier = Column(String, nullable=False, unique=True)
@@ -177,6 +185,13 @@ class ChainedJobEvent(Base):
     query_sql = Column(Text, nullable=True)
     saved_query_id = Column(String, nullable=True)
     query_read_only = Column(Boolean, default=True, nullable=False)
+    agent_alias = Column(String, nullable=True)
+    agent_version = Column(Integer, nullable=True)
+    agent_input = Column(Text, nullable=True)
+    prompt_template = Column(Text, nullable=True)
+    payload_allow_list = Column(Text, nullable=True)
+    idempotency_key = Column(String, nullable=True)
+    allow_ai_run_loop = Column(Boolean, default=False, nullable=False)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     webhook_timeout_seconds = Column(Integer, nullable=False, default=3600)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
@@ -217,6 +232,13 @@ class TriggerFlowEvent(Base):
     query_sql = Column(Text, nullable=True)
     saved_query_id = Column(String, nullable=True)
     query_read_only = Column(Boolean, default=True, nullable=False)
+    agent_alias = Column(String, nullable=True)
+    agent_version = Column(Integer, nullable=True)
+    agent_input = Column(Text, nullable=True)
+    prompt_template = Column(Text, nullable=True)
+    payload_allow_list = Column(Text, nullable=True)
+    idempotency_key = Column(String, nullable=True)
+    allow_ai_run_loop = Column(Boolean, default=False, nullable=False)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))

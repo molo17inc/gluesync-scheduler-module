@@ -36,6 +36,12 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from gluesync_scheduler.models.models import ScheduledJob, TaskType, Setting, ChainedJobEvent, ExecutionMode, require_query_studio_fields, query_read_only_of, query_studio_http_payload, QUERY_STUDIO_AGENT_ID, QUERY_STUDIO_SQL, QUERY_STUDIO_SAVED_ID
+from gluesync_scheduler.models.ai_agent_run import (
+    ai_agent_run_http_payload,
+    ai_agent_run_orm_kwargs,
+    pipeline_path_id,
+    require_ai_agent_run_fields,
+)
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
@@ -117,6 +123,7 @@ def _chained_event_orm(parent_job_id: int, pos: int, ce) -> ChainedJobEvent:
         query_read_only=query_read_only_of(ce),
         execution_mode=ExecutionMode(ce.execution_mode.value),
         webhook_timeout_seconds=ce.webhook_timeout_seconds,
+        **ai_agent_run_orm_kwargs(ce),
     )
 
 
@@ -125,6 +132,27 @@ def _validate_query_studio_chain(task_type, agent_id, query_sql, saved_query_id,
     if chained_events:
         for ce in chained_events:
             require_query_studio_fields(ce.task_type, ce.agent_id, ce.query_sql, ce.saved_query_id)
+
+
+def _validate_ai_agent_run_chain(job_data) -> None:
+    require_ai_agent_run_fields(
+        job_data.task_type,
+        getattr(job_data, "agent_alias", None),
+        getattr(job_data, "prompt_template", None),
+        getattr(job_data, "payload_allow_list", None),
+        getattr(job_data, "agent_input", None),
+        getattr(job_data, "idempotency_key", None),
+    )
+    if job_data.chained_events:
+        for ce in job_data.chained_events:
+            require_ai_agent_run_fields(
+                ce.task_type,
+                getattr(ce, "agent_alias", None),
+                getattr(ce, "prompt_template", None),
+                getattr(ce, "payload_allow_list", None),
+                getattr(ce, "agent_input", None),
+                getattr(ce, "idempotency_key", None),
+            )
 
 
 def _task_type_to_action(task_type) -> Optional[str]:
@@ -146,6 +174,8 @@ def _task_type_to_action(task_type) -> Optional[str]:
         return "exit-maintenance"
     if task_type == TaskType.QUERY_STUDIO:
         return "query-studio"
+    if task_type == TaskType.AI_AGENT_RUN:
+        return "ai-agent-run"
     return None
 
 
@@ -527,6 +557,7 @@ class JobService:
                 job_data.task_type, job_data.agent_id, job_data.query_sql,
                 job_data.saved_query_id, job_data.chained_events,
             )
+            _validate_ai_agent_run_chain(job_data)
 
             db_job = ScheduledJob(
                 name=job_data.name,
@@ -549,7 +580,8 @@ class JobService:
                 start_time=next_run_time,
                 next_run=next_run_dt,
                 timezone_name=self._get_configured_timezone(),
-                is_cron_expression=is_cron_expression
+                is_cron_expression=is_cron_expression,
+                **ai_agent_run_orm_kwargs(job_data),
             )
 
             db_job.cron_job_identifier = f"gluesync_job_{uuid.uuid4().hex[:8]}"
@@ -591,6 +623,10 @@ class JobService:
             update_data["entity_ids"] = json.dumps(update_data["entity_ids"]) if update_data["entity_ids"] else None
         if "group_ids" in update_data:
             update_data["group_ids"] = json.dumps(update_data["group_ids"]) if update_data["group_ids"] else None
+        if "agent_input" in update_data:
+            update_data["agent_input"] = json.dumps(update_data["agent_input"]) if update_data["agent_input"] else None
+        if "payload_allow_list" in update_data:
+            update_data["payload_allow_list"] = json.dumps(update_data["payload_allow_list"]) if update_data["payload_allow_list"] else None
         if "snapshot_write_method" in update_data and update_data["snapshot_write_method"] is None:
             update_data["snapshot_write_method"] = 'UPSERT'
 
@@ -849,6 +885,24 @@ class JobService:
                 final_task_type, final_agent_id, final_query_sql,
                 final_saved_query_id, job_data.chained_events,
             )
+            require_ai_agent_run_fields(
+                final_task_type,
+                update_data.get("agent_alias", db_job.agent_alias),
+                update_data.get("prompt_template", db_job.prompt_template),
+                update_data.get("payload_allow_list", db_job.payload_allow_list),
+                update_data.get("agent_input", db_job.agent_input),
+                update_data.get("idempotency_key", db_job.idempotency_key),
+            )
+            if job_data.chained_events:
+                for ce in job_data.chained_events:
+                    require_ai_agent_run_fields(
+                        ce.task_type,
+                        getattr(ce, "agent_alias", None),
+                        getattr(ce, "prompt_template", None),
+                        getattr(ce, "payload_allow_list", None),
+                        getattr(ce, "agent_input", None),
+                        getattr(ce, "idempotency_key", None),
+                    )
 
             cron_updated = self._apply_schedule_to_update_data(update_data)
             self._apply_update_fields_to_job(db_job, update_data)
@@ -1098,8 +1152,10 @@ class JobService:
         json_data = {}
         if job.task_type == TaskType.QUERY_STUDIO:
             json_data = query_studio_http_payload(job)
+        if job.task_type == TaskType.AI_AGENT_RUN:
+            json_data = ai_agent_run_http_payload(job, wait=True)
 
-        if job.task_type != TaskType.QUERY_STUDIO and entity_ids:
+        if job.task_type not in (TaskType.QUERY_STUDIO, TaskType.AI_AGENT_RUN) and entity_ids:
             json_data["entity_ids"] = entity_ids
 
         if group_ids and job.task_type == TaskType.GROUP_REDO:
@@ -1193,7 +1249,7 @@ class JobService:
             if job.task_type in _GROUP_TASK_TYPES:
                 return self._execute_group_operation(job, group_ids, action)
 
-            endpoint = f"{base_url}/pipelines/{job.pipeline_id}/{action}"
+            endpoint = f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/{action}"
             json_data = self._build_execute_payload(job, entity_ids, group_ids)
 
             logger.info(f"Endpoint: {method} {endpoint}")
@@ -1393,6 +1449,13 @@ def _rows_to_chained_responses(rows: list) -> list:
             saved_query_id=row.saved_query_id,
             query_read_only=query_read_only_of(row),
             execution_mode=row.execution_mode.value,
+            agent_alias=row.agent_alias,
+            agent_version=row.agent_version,
+            agent_input=row.agent_input,
+            prompt_template=row.prompt_template,
+            payload_allow_list=row.payload_allow_list,
+            idempotency_key=row.idempotency_key,
+            allow_ai_run_loop=bool(getattr(row, "allow_ai_run_loop", False)),
         )
         result.append(resp)
     return result

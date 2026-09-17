@@ -204,6 +204,9 @@ def _endpoint_for_job(base_url: str, job: ScheduledJob) -> Optional[str]:
         return f"{base_url}/pipelines/{job.pipeline_id}/redo-group"
     if job.task_type == TaskType.QUERY_STUDIO:
         return f"{base_url}/pipelines/{job.pipeline_id}/query-studio"
+    if job.task_type == TaskType.AI_AGENT_RUN:
+        from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
+        return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/ai-agent-run"
     logger.error(f"Unknown task type: {job.task_type}")
     return None
 
@@ -232,8 +235,12 @@ def _payload_for_job(job: ScheduledJob, entity_ids: list, group_ids: list) -> tu
         from gluesync_scheduler.models.models import query_studio_http_payload
         json_data = query_studio_http_payload(job)
         request_timeout = 120
+    if job.task_type == TaskType.AI_AGENT_RUN:
+        from gluesync_scheduler.models.ai_agent_run import ai_agent_run_http_payload
+        json_data = ai_agent_run_http_payload(job, wait=True)
+        request_timeout = 120
 
-    if job.task_type != TaskType.QUERY_STUDIO and entity_ids:
+    if job.task_type not in (TaskType.QUERY_STUDIO, TaskType.AI_AGENT_RUN) and entity_ids:
         json_data["entity_ids"] = entity_ids
 
     if group_ids and job.task_type == TaskType.GROUP_REDO:

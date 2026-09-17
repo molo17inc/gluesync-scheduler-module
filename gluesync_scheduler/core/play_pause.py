@@ -1389,6 +1389,73 @@ class CoreHubClient:
         )
         return _query_studio_execute_succeeded(response, pipeline_id, agent_id)
 
+    AI_AGENT_RUN_TIMEOUT_SECONDS = 120
+    AI_AGENT_RUN_POLL_SECONDS = 1
+    AI_AGENT_SUCCESS_STATUSES = {"SUCCEEDED"}
+    AI_AGENT_FAILURE_STATUSES = {"FAILED", "CANCELLED", "AMBIGUOUS"}
+
+    def execute_ai_agent_run(
+        self,
+        agent_alias: str,
+        run_input: dict,
+        agent_version: int = None,
+        idempotency_key: str = None,
+        correlation_id: str = None,
+        wait: bool = True,
+    ) -> bool:
+        """POST a published agent run to CoreHub and optionally poll until terminal."""
+        from urllib.parse import quote
+
+        slug = (agent_alias or "").strip()
+        if not slug:
+            logger.error("ai_agent_run missing agent_alias")
+            return False
+
+        body = {"input": run_input or {}}
+        if agent_version is not None:
+            body["agentVersion"] = agent_version
+        if idempotency_key:
+            body["idempotencyKey"] = idempotency_key
+        if correlation_id:
+            body["correlationId"] = correlation_id
+
+        path = f"/api/ai/v1/agents/{quote(slug, safe='')}/runs"
+        response = self.fetch_core_hub(
+            path,
+            method="POST",
+            body=body,
+            timeout=self.AI_AGENT_RUN_TIMEOUT_SECONDS,
+            raw=True,
+        )
+        if not response or response.get("status") == "error":
+            logger.error("ai_agent_run POST failed for %s: %s", slug, response)
+            return False
+        run_id = response.get("id")
+        if not run_id:
+            logger.error("ai_agent_run POST succeeded without run id: %s", response)
+            return False
+        if not wait:
+            return True
+        return self._poll_ai_agent_run(run_id)
+
+    def _poll_ai_agent_run(self, run_id: str) -> bool:
+        deadline = time.time() + self.AI_AGENT_RUN_TIMEOUT_SECONDS
+        path = f"/api/ai/v1/runs/{run_id}"
+        while time.time() < deadline:
+            response = self.fetch_core_hub(path, method="GET", raw=True, timeout=15)
+            if not response or response.get("status") == "error":
+                time.sleep(self.AI_AGENT_RUN_POLL_SECONDS)
+                continue
+            status_name = str(response.get("status") or "").upper()
+            if status_name in self.AI_AGENT_SUCCESS_STATUSES:
+                return True
+            if status_name in self.AI_AGENT_FAILURE_STATUSES:
+                logger.error("ai_agent_run %s ended with status %s", run_id, status_name)
+                return False
+            time.sleep(self.AI_AGENT_RUN_POLL_SECONDS)
+        logger.error("ai_agent_run %s timed out waiting for a terminal status", run_id)
+        return False
+
 
 class PipelineManager:
     """Manager for pipeline operations"""
@@ -1844,6 +1911,27 @@ class PipelineManager:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, self.client.execute_query_studio, pipeline_id, agent_id, query_sql, saved_query_id, query_read_only
+        )
+
+    async def execute_ai_agent_run(
+        self,
+        agent_alias: str,
+        run_input: dict,
+        agent_version: int = None,
+        idempotency_key: str = None,
+        correlation_id: str = None,
+        wait: bool = True,
+    ) -> bool:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            self.client.execute_ai_agent_run,
+            agent_alias,
+            run_input,
+            agent_version,
+            idempotency_key,
+            correlation_id,
+            wait,
         )
 
 

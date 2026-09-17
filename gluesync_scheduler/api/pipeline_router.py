@@ -1053,3 +1053,84 @@ async def execute_query_studio(
             detail=f"Error executing Query Studio query: {str(e)}",
         )
 
+
+def _parse_ai_agent_run_body(body: Optional[dict]):
+    from gluesync_scheduler.models.ai_agent_run import build_run_input, parse_json_list, parse_json_object
+    from gluesync_scheduler.models.models import stripped_or_none
+
+    body = body or {}
+    agent_alias = stripped_or_none(body.get("agent_alias"))
+    if not agent_alias:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ai_agent_run requires a non-empty agent_alias",
+        )
+    run_input = body.get("input")
+    if not isinstance(run_input, dict):
+        run_input = build_run_input(
+            body.get("prompt_template"),
+            parse_json_list(body.get("payload_allow_list")),
+            parse_json_object(body.get("agent_input")),
+            body.get("event_payload") if isinstance(body.get("event_payload"), dict) else None,
+        )
+    wait = body.get("wait")
+    if wait is None:
+        wait = True
+    return {
+        "agent_alias": agent_alias,
+        "run_input": run_input,
+        "agent_version": body.get("agent_version"),
+        "idempotency_key": stripped_or_none(body.get("idempotency_key")),
+        "correlation_id": stripped_or_none(body.get("correlation_id")),
+        "wait": bool(wait),
+    }
+
+
+@router.post("/{pipeline_id}/ai-agent-run", response_model=OperationResponse, summary="Execute a published AI agent run")
+async def execute_ai_agent_run(
+    request: Request,
+    pipeline_id: str = Path(..., description="Optional pipeline placeholder; unused by CoreHub"),
+    body: dict = Body(default=None),
+):
+    """Execute a published AI agent via CoreHub.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers (cron, chains, trigger flows).
+    """
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    parsed = _parse_ai_agent_run_body(body)
+    logger.info(
+        "Received AI agent run request pipeline=%s agent=%s wait=%s",
+        pipeline_id, parsed["agent_alias"], parsed["wait"],
+    )
+    try:
+        pipeline_manager = PipelineManager()
+        result = await pipeline_manager.execute_ai_agent_run(
+            parsed["agent_alias"],
+            parsed["run_input"],
+            parsed["agent_version"],
+            parsed["idempotency_key"],
+            parsed["correlation_id"],
+            parsed["wait"],
+        )
+        message = (
+            f"AI agent run executed successfully for {parsed['agent_alias']}"
+            if result else f"AI agent run failed for {parsed['agent_alias']}"
+        )
+        if not result:
+            _handle_operation_failure(message, cron_job_identifier)
+        _mark_job_succeeded(cron_job_identifier)
+        return {
+            "success": True,
+            "message": message,
+            "data": {"agent_alias": parsed["agent_alias"], "pipeline_id": pipeline_id},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error executing AI agent run")
+        _mark_job_failed(cron_job_identifier, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error executing AI agent run: {str(e)}",
+        )
+

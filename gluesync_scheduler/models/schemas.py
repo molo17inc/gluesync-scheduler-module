@@ -31,6 +31,7 @@ from croniter import croniter
 from pydantic import BaseModel, Field, validator, field_validator, field_serializer, model_validator, ConfigDict
 
 from gluesync_scheduler.models.models import TaskType, ExecutionMode, require_query_studio_fields, coerce_query_read_only
+from gluesync_scheduler.models.ai_agent_run import parse_json_list, parse_json_object, require_ai_agent_run_fields
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 
@@ -50,16 +51,60 @@ class QueryStudioValidatorMixin:
         return self
 
 
+class AiAgentRunValidatorMixin:
+    """Shared validation for published AI agent run tasks."""
+
+    @field_validator("payload_allow_list", mode="before")
+    @classmethod
+    def _parse_payload_allow_list(cls, v):
+        if v is None:
+            return None
+        return parse_json_list(v)
+
+    @field_validator("agent_input", mode="before")
+    @classmethod
+    def _parse_agent_input(cls, v):
+        if v is None:
+            return None
+        return parse_json_object(v)
+
+    @field_validator("allow_ai_run_loop", mode="before")
+    @classmethod
+    def _coerce_allow_ai_run_loop(cls, v):
+        if v is None:
+            return None
+        return bool(v)
+
+    @model_validator(mode="after")
+    def _validate_ai_agent_run(self):
+        require_ai_agent_run_fields(
+            self.task_type,
+            getattr(self, "agent_alias", None),
+            getattr(self, "prompt_template", None),
+            getattr(self, "payload_allow_list", None),
+            getattr(self, "agent_input", None),
+            getattr(self, "idempotency_key", None),
+        )
+        if self.task_type == TaskType.AI_AGENT_RUN:
+            object.__setattr__(self, "pipeline_id", getattr(self, "pipeline_id", None) or "")
+            object.__setattr__(self, "allow_ai_run_loop", bool(getattr(self, "allow_ai_run_loop", False)))
+            object.__setattr__(self, "payload_allow_list", getattr(self, "payload_allow_list", None) or [])
+        elif not (getattr(self, "pipeline_id", None) or "").strip():
+            if getattr(self, "pipeline_id", None) is not None:
+                raise ValueError("pipeline_id is required")
+        return self
+
+
 class ChainedEventMode(str, Enum):
     """Execution mode for a chained event"""
     ASYNC = "async"   # fire-and-forget; don't wait for completion
     SYNC = "sync"     # register a corehub webhook and wait for callback before proceeding
 
 
-class ChainedEventBase(QueryStudioValidatorMixin, BaseModel):
+class ChainedEventBase(QueryStudioValidatorMixin, AiAgentRunValidatorMixin, BaseModel):
     """Fields shared by create and response schemas for chained events"""
     task_type: TaskType = Field(..., description="Type of task to perform")
-    pipeline_id: str = Field(..., description="Pipeline ID to operate on")
+    pipeline_id: str = Field("", description="Pipeline ID to operate on. Optional for ai_agent_run.")
     entity_ids: Optional[List[str]] = Field(None, description="Entity IDs (required for entity operations)")
     group_ids: Optional[List[str]] = Field(None, description="Group IDs (required for group operations)")
     with_snapshot: bool = Field(False, description="Whether to include a snapshot")
@@ -68,6 +113,13 @@ class ChainedEventBase(QueryStudioValidatorMixin, BaseModel):
     query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
     saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
     query_read_only: bool = Field(True, description="Query Studio read-only mode. True (default) runs SELECT-only. False allows UPDATE/INSERT/DELETE; the UI must acknowledge harm before sending false.")
+    agent_alias: Optional[str] = Field(None, description="Published AI agent alias (required when task_type is ai_agent_run)")
+    agent_version: Optional[int] = Field(None, description="Optional published AI agent version")
+    agent_input: Optional[Dict[str, Any]] = Field(None, description="Optional JSON object template interpolated into the AI run input")
+    prompt_template: Optional[str] = Field(None, description="Prompt template with {{dotted.path}} tokens filled from the allow-listed payload")
+    payload_allow_list: Optional[List[str]] = Field(None, description="Dotted payload paths that may be copied into the prompt")
+    idempotency_key: Optional[str] = Field(None, description="Optional idempotency key template for AI run creation")
+    allow_ai_run_loop: bool = Field(False, description="Allow this ai_agent_run action to fire from an AI_RUN_* platform event (one hop)")
     execution_mode: ChainedEventMode = Field(ChainedEventMode.ASYNC, description="async: fire-and-forget; sync: wait for corehub webhook callback before next event")
     webhook_timeout_seconds: int = Field(3600, description="Timeout in seconds for waiting on webhook callback in sync mode (default: 3600 = 1 hour)", ge=1)
 
@@ -130,14 +182,14 @@ class ScheduleConfig(BaseModel):
         return v
 
 
-class JobBase(QueryStudioValidatorMixin, BaseModel):
+class JobBase(QueryStudioValidatorMixin, AiAgentRunValidatorMixin, BaseModel):
     """Base model for job data with common fields"""
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
-    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent")
+    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent\n- ai_agent_run: Execute a published AI agent with a templated prompt")
     schedule: Optional[ScheduleConfig] = Field(None, description="User-friendly schedule configuration")
     cron_expression: Optional[str] = Field(None, description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight). Not required if schedule is provided.", example="0 0 * * *")
-    pipeline_id: str = Field(..., description="ID of the pipeline to operate on", example="pipeline-123")
+    pipeline_id: str = Field("", description="ID of the pipeline to operate on. Optional for ai_agent_run.", example="pipeline-123")
     entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on (required for entity operations)", example=["entity-456", "entity-789"])
     group_ids: Optional[List[str]] = Field(None, description="List of group IDs to operate on (required for group operations)", example=["group-123", "group-456"])
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
@@ -146,6 +198,13 @@ class JobBase(QueryStudioValidatorMixin, BaseModel):
     query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
     saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
     query_read_only: bool = Field(True, description="Query Studio read-only mode. True (default) runs SELECT-only. False allows UPDATE/INSERT/DELETE; the UI must acknowledge harm before sending false.")
+    agent_alias: Optional[str] = Field(None, description="Published AI agent alias (required when task_type is ai_agent_run)")
+    agent_version: Optional[int] = Field(None, description="Optional published AI agent version")
+    agent_input: Optional[Dict[str, Any]] = Field(None, description="Optional JSON object template interpolated into the AI run input")
+    prompt_template: Optional[str] = Field(None, description="Prompt template with {{dotted.path}} tokens filled from the allow-listed payload")
+    payload_allow_list: Optional[List[str]] = Field(None, description="Dotted payload paths that may be copied into the prompt")
+    idempotency_key: Optional[str] = Field(None, description="Optional idempotency key template for AI run creation")
+    allow_ai_run_loop: bool = Field(False, description="Allow this ai_agent_run job to fire from an AI_RUN_* platform event (one hop)")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(
@@ -179,7 +238,7 @@ class JobCreate(JobBase):
     )
 
 
-class JobUpdate(BaseModel):
+class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
     """Model for updating an existing job (all fields are optional)"""
     name: Optional[str] = Field(None, description="Updated name of the job", example="Updated daily entity backup")
     description: Optional[str] = Field(None, description="Updated description of the job", example="Updated description for the daily backup")
@@ -195,6 +254,13 @@ class JobUpdate(BaseModel):
     query_sql: Optional[str] = Field(None, description="Updated Query Studio SQL snapshot")
     saved_query_id: Optional[str] = Field(None, description="Updated Query Studio saved-query ID")
     query_read_only: Optional[bool] = Field(None, description="Updated Query Studio read-only flag (false requires harm acknowledgment in the UI)")
+    agent_alias: Optional[str] = Field(None, description="Updated published AI agent alias")
+    agent_version: Optional[int] = Field(None, description="Updated published AI agent version")
+    agent_input: Optional[Dict[str, Any]] = Field(None, description="Updated AI run input template")
+    prompt_template: Optional[str] = Field(None, description="Updated prompt template")
+    payload_allow_list: Optional[List[str]] = Field(None, description="Updated payload allow-list")
+    idempotency_key: Optional[str] = Field(None, description="Updated AI run idempotency key template")
+    allow_ai_run_loop: Optional[bool] = Field(None, description="Updated AI_RUN_* loop toggle")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(None, description="Replace all chained events with this list (pass empty list to clear)")
@@ -204,6 +270,15 @@ class JobUpdate(BaseModel):
         """Validate Query Studio fields only when the update sets task_type to query_studio."""
         if self.task_type == TaskType.QUERY_STUDIO:
             require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
+        if self.task_type == TaskType.AI_AGENT_RUN:
+            require_ai_agent_run_fields(
+                self.task_type,
+                self.agent_alias,
+                self.prompt_template,
+                self.payload_allow_list,
+                self.agent_input,
+                self.idempotency_key,
+            )
         return self
 
     model_config = ConfigDict(
