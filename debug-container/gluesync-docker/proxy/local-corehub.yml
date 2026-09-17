@@ -1,0 +1,39 @@
+# Routes everything Traefik does not match to a more specific rule (the whole
+# CoreHub REST API, the /ui WebSocket and the Control Plane itself) to a CoreHub
+# running on the host, outside this compose project — typically started from the
+# IDE. Serving the UI and Chronos from the same origin is what makes the
+# /chronos/api/* calls work: the SPA builds them from window.location.origin.
+#
+# The docker provider can only point a service at a container, hence this file.
+# Delete it (or stop mounting it) when you uncomment the gluesync-core-hub
+# service, otherwise two routers claim PathPrefix(`/`).
+#
+# `--ssl-enabled false` is what the IDE run configurations and the Gradle
+# startRagnarok task pass, so the server URL below is http. Switch it to https
+# when CoreHub is started with `--ssl-enabled true`; the self-signed cert is
+# already tolerated via serversTransport.insecureSkipVerify in traefik.yml.
+http:
+  routers:
+    corehub-local:
+      rule: PathPrefix(`/`)
+      entryPoints:
+        - websecure
+      tls: {}
+      service: corehub-local
+    # The chronos router claims PathPrefix(`/api/`) (see the comment on its
+    # labels), which would otherwise swallow AI Studio. Traefik orders routers
+    # by rule length unless an explicit priority is set, and the chronos rule is
+    # far longer than this one, so pin a value above any rule length in play.
+    corehub-local-api:
+      rule: PathPrefix(`/api/ai/`)
+      priority: 1000
+      entryPoints:
+        - websecure
+      tls: {}
+      service: corehub-local
+  services:
+    corehub-local:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://host.docker.internal:1717

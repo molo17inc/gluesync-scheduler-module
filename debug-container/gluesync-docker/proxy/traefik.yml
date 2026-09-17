@@ -12,7 +12,9 @@ providers:
     exposedByDefault: false
     endpoint: "unix:///var/run/docker.sock"
   file:
-    filename: "/etc/traefik/certs.yml"
+    # A directory rather than a single filename so the TLS store and the
+    # router pointing at a host-side CoreHub can live in separate files.
+    directory: "/etc/traefik/dynamic"
     watch: true
 serversTransport:
   insecureSkipVerify: true
