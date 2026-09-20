@@ -68,6 +68,85 @@ async def _event_payload_from_request(request: Request) -> dict:
             detail=str(exc),
         ) from exc
 
+
+async def _execute_trigger_flow(
+    *,
+    svc: TriggerFlowService,
+    flow,
+    flow_id: int,
+    source: str,
+    event_payload: dict,
+    events_count: int,
+    wait: bool,
+    wait_timeout_seconds: int,
+) -> JSONResponse:
+    triggered_at = datetime.now(tz=timezone.utc).isoformat()
+    if wait:
+        try:
+            success, error = await asyncio.wait_for(
+                svc.fire(flow_id, source=source, event_payload=event_payload),
+                timeout=float(wait_timeout_seconds),
+            )
+        except asyncio.TimeoutError:
+            response = FireResponse(
+                trigger_flow_id=flow_id,
+                triggered_at=triggered_at,
+                status=FireStatus.FAILED,
+                events_count=events_count,
+                message=f"Timed out after {wait_timeout_seconds}s waiting for chain to finish",
+            )
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=response.model_dump(),
+            )
+
+        fire_status = FireStatus.COMPLETED if success else FireStatus.FAILED
+        message = (
+            f"TriggerFlow '{flow.name}' completed"
+            if success
+            else f"TriggerFlow '{flow.name}' failed: {error}"
+        )
+        response = FireResponse(
+            trigger_flow_id=flow_id,
+            triggered_at=triggered_at,
+            status=fire_status,
+            events_count=events_count,
+            message=message,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=response.model_dump(),
+        )
+
+    from gluesync_scheduler.db.database import SessionLocal
+
+    async def _fire_in_background() -> None:
+        bg_db = SessionLocal()
+        try:
+            await TriggerFlowService(bg_db).fire(
+                flow_id,
+                source=source,
+                event_payload=event_payload,
+            )
+        except Exception as exc:
+            logger.error("Background fire of TriggerFlow %d failed: %s", flow_id, exc)
+        finally:
+            bg_db.close()
+
+    asyncio.ensure_future(_fire_in_background())
+    response = FireResponse(
+        trigger_flow_id=flow_id,
+        triggered_at=triggered_at,
+        status=FireStatus.QUEUED,
+        events_count=events_count,
+        message=f"TriggerFlow '{flow.name}' queued for execution",
+    )
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content=response.model_dump(),
+    )
+
+
 router = APIRouter(
     prefix="/triggers",
     tags=["triggers"],
@@ -306,74 +385,22 @@ async def fire_trigger_flow(
             detail=f"TriggerFlow {flow_id} is disabled",
         )
 
-    triggered_at = datetime.now(tz=timezone.utc).isoformat()
     event_payload = await _event_payload_from_request(request)
     events_count = (
         db.query(__import__("gluesync_scheduler.models.models", fromlist=["TriggerFlowEvent"]).TriggerFlowEvent)
         .filter_by(trigger_flow_id=flow_id)
         .count()
     )
-
-    if wait:
-        # Synchronous path: run the chain inline and wait up to wait_timeout_seconds
-        try:
-            success, err = await asyncio.wait_for(
-                svc.fire(flow_id, source="webhook", event_payload=event_payload),
-                timeout=float(wait_timeout_seconds),
-            )
-        except asyncio.TimeoutError:
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content=FireResponse(
-                    trigger_flow_id=flow_id,
-                    triggered_at=triggered_at,
-                    status=FireStatus.FAILED,
-                    events_count=events_count,
-                    message=f"Timed out after {wait_timeout_seconds}s waiting for chain to finish",
-                ).model_dump(),
-            )
-
-        http_status = status.HTTP_200_OK
-        fire_status = FireStatus.COMPLETED if success else FireStatus.FAILED
-        msg = f"TriggerFlow '{flow.name}' completed" if success else f"TriggerFlow '{flow.name}' failed: {err}"
-        return JSONResponse(
-            status_code=http_status,
-            content=FireResponse(
-                trigger_flow_id=flow_id,
-                triggered_at=triggered_at,
-                status=fire_status,
-                events_count=events_count,
-                message=msg,
-            ).model_dump(),
-        )
-
-    else:
-        # Async path: queue the chain and return 202 immediately
-        # We need a fresh DB session for the background task since the request session may close
-        from gluesync_scheduler.db.database import SessionLocal
-
-        async def _bg_fire(fid: int) -> None:
-            bg_db = SessionLocal()
-            try:
-                bg_svc = TriggerFlowService(bg_db)
-                await bg_svc.fire(fid, source="webhook", event_payload=event_payload)
-            except Exception as exc:
-                logger.error("Background fire of TriggerFlow %d failed: %s", fid, exc)
-            finally:
-                bg_db.close()
-
-        asyncio.ensure_future(_bg_fire(flow_id))
-
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content=FireResponse(
-                trigger_flow_id=flow_id,
-                triggered_at=triggered_at,
-                status=FireStatus.QUEUED,
-                events_count=events_count,
-                message=f"TriggerFlow '{flow.name}' queued for execution",
-            ).model_dump(),
-        )
+    return await _execute_trigger_flow(
+        svc=svc,
+        flow=flow,
+        flow_id=flow_id,
+        source="webhook",
+        event_payload=event_payload,
+        events_count=events_count,
+        wait=wait,
+        wait_timeout_seconds=wait_timeout_seconds,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -429,71 +456,22 @@ async def fire_trigger_flow_internal(
             detail=f"TriggerFlow {flow_id} is disabled",
         )
 
-    triggered_at = datetime.now(tz=timezone.utc).isoformat()
     event_payload = await _event_payload_from_request(request)
     events_count = (
         db.query(__import__("gluesync_scheduler.models.models", fromlist=["TriggerFlowEvent"]).TriggerFlowEvent)
         .filter_by(trigger_flow_id=flow_id)
         .count()
     )
-
-    if wait:
-        try:
-            success, err = await asyncio.wait_for(
-                svc.fire(flow_id, source="manual", event_payload=event_payload),
-                timeout=float(wait_timeout_seconds),
-            )
-        except asyncio.TimeoutError:
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content=FireResponse(
-                    trigger_flow_id=flow_id,
-                    triggered_at=triggered_at,
-                    status=FireStatus.FAILED,
-                    events_count=events_count,
-                    message=f"Timed out after {wait_timeout_seconds}s waiting for chain to finish",
-                ).model_dump(),
-            )
-
-        http_status = status.HTTP_200_OK
-        fire_status = FireStatus.COMPLETED if success else FireStatus.FAILED
-        msg = f"TriggerFlow '{flow.name}' completed" if success else f"TriggerFlow '{flow.name}' failed: {err}"
-        return JSONResponse(
-            status_code=http_status,
-            content=FireResponse(
-                trigger_flow_id=flow_id,
-                triggered_at=triggered_at,
-                status=fire_status,
-                events_count=events_count,
-                message=msg,
-            ).model_dump(),
-        )
-
-    else:
-        from gluesync_scheduler.db.database import SessionLocal
-
-        async def _bg_fire(fid: int) -> None:
-            bg_db = SessionLocal()
-            try:
-                bg_svc = TriggerFlowService(bg_db)
-                await bg_svc.fire(fid, source="manual", event_payload=event_payload)
-            except Exception as exc:
-                logger.error("Background fire of TriggerFlow %d failed: %s", fid, exc)
-            finally:
-                bg_db.close()
-
-        asyncio.ensure_future(_bg_fire(flow_id))
-
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content=FireResponse(
-                trigger_flow_id=flow_id,
-                triggered_at=triggered_at,
-                status=FireStatus.QUEUED,
-                events_count=events_count,
-                message=f"TriggerFlow '{flow.name}' queued for execution",
-            ).model_dump(),
-        )
+    return await _execute_trigger_flow(
+        svc=svc,
+        flow=flow,
+        flow_id=flow_id,
+        source="manual",
+        event_payload=event_payload,
+        events_count=events_count,
+        wait=wait,
+        wait_timeout_seconds=wait_timeout_seconds,
+    )
 
 
 @router.get(

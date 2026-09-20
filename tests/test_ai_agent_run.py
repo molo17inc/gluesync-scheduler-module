@@ -16,6 +16,7 @@ from gluesync_scheduler.models.ai_agent_run import (
     loop_guard_error,
     parse_capped_json_body,
     require_ai_agent_run_fields,
+    template_tokens,
 )
 from gluesync_scheduler.models.models import ScheduledJob, TaskType
 from gluesync_scheduler.models.schemas import JobCreate
@@ -96,6 +97,12 @@ def test_ai_agent_run_rejects_nested_unsafe_path():
             "Hi {{data.__proto__}}",
             ["data.__proto__"],
         )
+
+
+def test_template_tokens_remain_ascii_identifiers():
+    assert template_tokens("{{data.ticket_123}} {{data.tïcket}}") == [
+        "data.ticket_123"
+    ]
 
 
 def test_interpolation_copies_allow_listed_scalars_only():

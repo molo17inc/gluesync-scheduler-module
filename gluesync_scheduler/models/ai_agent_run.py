@@ -9,7 +9,10 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
-TOKEN_RE = re.compile(r"\{\{\s*([a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*)\s*\}\}")
+TOKEN_RE = re.compile(
+    r"\{\{\s*([a-zA-Z]\w*(?:\.[a-zA-Z]\w*)*)\s*\}\}",
+    re.ASCII,
+)
 MAX_FIRE_BODY_BYTES = 64 * 1024
 AI_RUN_EVENT_PREFIX = "AI_RUN_"
 AI_RUN_CLOUD_PREFIX = "gluesync.ai.run."
