@@ -17,12 +17,16 @@
       if ([string]::IsNullOrWhiteSpace($trivyVersion)) {
         throw "❌ Unable to resolve latest Trivy version"
       }
-      $trivyZip = "$env:TEMP\trivy.zip"
-      $trivyExtractPath = "$env:TEMP\trivy"
-      Invoke-WebRequest -Uri "https://github.com/aquasecurity/trivy/releases/download/v$trivyVersion/trivy_${trivyVersion}_Windows-64bit.zip" -OutFile $trivyZip
-      if (Test-Path $trivyExtractPath) {
-        Remove-Item -Path $trivyExtractPath -Recurse -Force
+      # $env:TEMP is C:\Windows\TEMP and is shared by every job on the runner host,
+      # so concurrent jobs must not reuse the same download/extract paths.
+      $script:TrivyRoot = Join-Path $env:TEMP "trivy-$env:CI_JOB_ID"
+      $trivyZip = Join-Path $script:TrivyRoot "trivy.zip"
+      $trivyExtractPath = Join-Path $script:TrivyRoot "bin"
+      if (Test-Path $script:TrivyRoot) {
+        Remove-Item -Path $script:TrivyRoot -Recurse -Force
       }
+      $null = New-Item -ItemType Directory -Path $script:TrivyRoot -Force
+      Invoke-WebRequest -Uri "https://github.com/aquasecurity/trivy/releases/download/v$trivyVersion/trivy_${trivyVersion}_Windows-64bit.zip" -OutFile $trivyZip
       Expand-Archive -Path $trivyZip -DestinationPath $trivyExtractPath -Force
       $env:PATH = "$trivyExtractPath;$env:PATH"
       trivy --version
@@ -222,6 +226,13 @@
 
           Write-Host "✅ Pushed legacy tag $LEGACY_TAG (for ltsc2022)"
         }
+      }
+
+  after_script:
+    - |
+      $trivyRoot = Join-Path $env:TEMP "trivy-$env:CI_JOB_ID"
+      if (Test-Path $trivyRoot) {
+        Remove-Item -Path $trivyRoot -Recurse -Force -ErrorAction SilentlyContinue
       }
 
   rules:
