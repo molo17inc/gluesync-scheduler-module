@@ -283,6 +283,13 @@ class TestTriggerFlowAPI:
             route.path for route in app.routes
         }
 
+    def test_collection_routes_serve_slashless_requests(self, api_client):
+        # A redirect to the canonical path would cross the reverse-proxy mount
+        # prefix and lose the session cookie, so the retry lands unauthenticated.
+        for path in ("/api/triggers", "/api/jobs"):
+            resp = api_client.get(path, follow_redirects=False)
+            assert resp.status_code == 200, path
+
     def test_create_and_get(self, api_client):
         payload = {
             "name": "api-flow",

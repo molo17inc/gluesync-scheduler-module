@@ -28,6 +28,7 @@ import ssl
 import json
 import uvicorn
 from datetime import datetime
+from functools import lru_cache
 from gluesync_scheduler.version import __version__
 import pytz
 from fastapi import FastAPI, Request
@@ -517,6 +518,37 @@ app.include_router(pipeline_router, prefix="/api")
 app.include_router(webhook_router, prefix="/api")
 app.include_router(trigger_router, prefix="/api")
 app.include_router(query_studio_router, prefix="/api")
+
+
+# Collection routes are declared with a trailing slash, and FastAPI answers the
+# slashless form with a 307 to the canonical path. Behind the reverse proxy that
+# redirect target loses the `/chronos` mount prefix, so the client retries
+# against a different origin and drops the session cookie, ending up with a 401.
+# Rewrite the path in-process instead: the original request, and its
+# credentials, reach the route untouched.
+@lru_cache(maxsize=1)
+def _canonical_collection_paths() -> Set[str]:
+    # Resolved on the first request, so routes registered after this point are
+    # covered as well.
+    return {
+        route.path
+        for route in app.router.routes
+        if getattr(route, "path", "").endswith("/")
+    }
+
+
+class CollectionPathMiddleware(BaseHTTPMiddleware):
+    """Match collection routes whether or not the caller sent a trailing slash."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.scope.get("path", "")
+        if not path.endswith("/") and f"{path}/" in _canonical_collection_paths():
+            request.scope["path"] = f"{path}/"
+
+        return await call_next(request)
+
+
+app.add_middleware(CollectionPathMiddleware)
 
 # Custom JSON encoder to handle datetime objects
 class JSONEncoder(json.JSONEncoder):
