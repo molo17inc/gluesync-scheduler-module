@@ -24,7 +24,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Set
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse
@@ -51,6 +51,7 @@ from gluesync_scheduler.services.trigger_flow_service import TriggerFlowService
 from gluesync_scheduler.models.ai_agent_run import MAX_FIRE_BODY_BYTES, parse_capped_json_body
 
 logger = logging.getLogger(__name__)
+_background_fire_tasks: Set[asyncio.Future] = set()
 
 
 async def _event_payload_from_request(request: Request) -> dict:
@@ -128,12 +129,14 @@ async def _execute_trigger_flow(
                 source=source,
                 event_payload=event_payload,
             )
-        except Exception as exc:
-            logger.error("Background fire of TriggerFlow %d failed: %s", flow_id, exc)
+        except Exception:
+            logger.exception("Background fire of TriggerFlow %d failed", flow_id)
         finally:
             bg_db.close()
 
-    asyncio.ensure_future(_fire_in_background())
+    task = asyncio.ensure_future(_fire_in_background())
+    _background_fire_tasks.add(task)
+    task.add_done_callback(_background_fire_tasks.discard)
     response = FireResponse(
         trigger_flow_id=flow_id,
         triggered_at=triggered_at,

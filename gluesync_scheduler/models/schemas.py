@@ -35,6 +35,27 @@ from gluesync_scheduler.models.ai_agent_run import parse_json_list, parse_json_o
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 
+class QueryStudioFieldsMixin:
+    """Fields shared by schedulable Query Studio actions."""
+
+    agent_id: Optional[str] = Field(
+        None,
+        description="Query Studio agent ID (required when task_type is query_studio)",
+    )
+    query_sql: Optional[str] = Field(
+        None,
+        description="SQL to execute via Query Studio",
+    )
+    saved_query_id: Optional[str] = Field(
+        None,
+        description="Query Studio saved-query ID",
+    )
+    query_read_only: bool = Field(
+        True,
+        description="Whether Query Studio execution is restricted to read-only SQL",
+    )
+
+
 class QueryStudioValidatorMixin:
     """Shared post-init validation for Query Studio identifiers."""
 
@@ -49,6 +70,39 @@ class QueryStudioValidatorMixin:
         """Reject QUERY_STUDIO tasks that are missing agent/SQL identifiers."""
         require_query_studio_fields(self.task_type, self.agent_id, self.query_sql, self.saved_query_id)
         return self
+
+
+class AiAgentRunFieldsMixin:
+    """Fields shared by schedulable AI agent run actions."""
+
+    agent_alias: Optional[str] = Field(
+        None,
+        description="Published AI agent alias (required when task_type is ai_agent_run)",
+    )
+    agent_version: Optional[int] = Field(
+        None,
+        description="Optional published AI agent version",
+    )
+    agent_input: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional JSON object template interpolated into the AI run input",
+    )
+    prompt_template: Optional[str] = Field(
+        None,
+        description="Prompt template with allow-listed dotted-path tokens",
+    )
+    payload_allow_list: Optional[List[str]] = Field(
+        None,
+        description="Dotted payload paths that may be copied into the prompt",
+    )
+    idempotency_key: Optional[str] = Field(
+        None,
+        description="Optional idempotency key template for AI run creation",
+    )
+    allow_ai_run_loop: bool = Field(
+        False,
+        description="Allow an AI run action to consume an AI_RUN_* event for one hop",
+    )
 
 
 class AiAgentRunValidatorMixin:
@@ -101,7 +155,13 @@ class ChainedEventMode(str, Enum):
     SYNC = "sync"     # register a corehub webhook and wait for callback before proceeding
 
 
-class ChainedEventBase(QueryStudioValidatorMixin, AiAgentRunValidatorMixin, BaseModel):
+class ChainedEventBase(
+    QueryStudioFieldsMixin,
+    QueryStudioValidatorMixin,
+    AiAgentRunFieldsMixin,
+    AiAgentRunValidatorMixin,
+    BaseModel,
+):
     """Fields shared by create and response schemas for chained events"""
     task_type: TaskType = Field(..., description="Type of task to perform")
     pipeline_id: str = Field("", description="Pipeline ID to operate on. Optional for ai_agent_run.")
@@ -109,17 +169,6 @@ class ChainedEventBase(QueryStudioValidatorMixin, AiAgentRunValidatorMixin, Base
     group_ids: Optional[List[str]] = Field(None, description="Group IDs (required for group operations)")
     with_snapshot: bool = Field(False, description="Whether to include a snapshot")
     snapshot_write_method: str = Field("UPSERT", description="Snapshot write method: UPSERT or INSERT", pattern="^(UPSERT|INSERT)$")
-    agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
-    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
-    saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
-    query_read_only: bool = Field(True, description="Query Studio read-only mode. True (default) runs SELECT-only. False allows UPDATE/INSERT/DELETE; the UI must acknowledge harm before sending false.")
-    agent_alias: Optional[str] = Field(None, description="Published AI agent alias (required when task_type is ai_agent_run)")
-    agent_version: Optional[int] = Field(None, description="Optional published AI agent version")
-    agent_input: Optional[Dict[str, Any]] = Field(None, description="Optional JSON object template interpolated into the AI run input")
-    prompt_template: Optional[str] = Field(None, description="Prompt template with {{dotted.path}} tokens filled from the allow-listed payload")
-    payload_allow_list: Optional[List[str]] = Field(None, description="Dotted payload paths that may be copied into the prompt")
-    idempotency_key: Optional[str] = Field(None, description="Optional idempotency key template for AI run creation")
-    allow_ai_run_loop: bool = Field(False, description="Allow this ai_agent_run action to fire from an AI_RUN_* platform event (one hop)")
     execution_mode: ChainedEventMode = Field(ChainedEventMode.ASYNC, description="async: fire-and-forget; sync: wait for corehub webhook callback before next event")
     webhook_timeout_seconds: int = Field(3600, description="Timeout in seconds for waiting on webhook callback in sync mode (default: 3600 = 1 hour)", ge=1)
 
@@ -182,7 +231,13 @@ class ScheduleConfig(BaseModel):
         return v
 
 
-class JobBase(QueryStudioValidatorMixin, AiAgentRunValidatorMixin, BaseModel):
+class JobBase(
+    QueryStudioFieldsMixin,
+    QueryStudioValidatorMixin,
+    AiAgentRunFieldsMixin,
+    AiAgentRunValidatorMixin,
+    BaseModel,
+):
     """Base model for job data with common fields"""
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
@@ -194,17 +249,6 @@ class JobBase(QueryStudioValidatorMixin, AiAgentRunValidatorMixin, BaseModel):
     group_ids: Optional[List[str]] = Field(None, description="List of group IDs to operate on (required for group operations)", example=["group-123", "group-456"])
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
     snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
-    agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
-    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
-    saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
-    query_read_only: bool = Field(True, description="Query Studio read-only mode. True (default) runs SELECT-only. False allows UPDATE/INSERT/DELETE; the UI must acknowledge harm before sending false.")
-    agent_alias: Optional[str] = Field(None, description="Published AI agent alias (required when task_type is ai_agent_run)")
-    agent_version: Optional[int] = Field(None, description="Optional published AI agent version")
-    agent_input: Optional[Dict[str, Any]] = Field(None, description="Optional JSON object template interpolated into the AI run input")
-    prompt_template: Optional[str] = Field(None, description="Prompt template with {{dotted.path}} tokens filled from the allow-listed payload")
-    payload_allow_list: Optional[List[str]] = Field(None, description="Dotted payload paths that may be copied into the prompt")
-    idempotency_key: Optional[str] = Field(None, description="Optional idempotency key template for AI run creation")
-    allow_ai_run_loop: bool = Field(False, description="Allow this ai_agent_run job to fire from an AI_RUN_* platform event (one hop)")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(

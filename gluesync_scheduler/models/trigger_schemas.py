@@ -30,7 +30,12 @@ import pytz
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, validator
 
 from gluesync_scheduler.models.models import TaskType
-from gluesync_scheduler.models.schemas import QueryStudioValidatorMixin, AiAgentRunValidatorMixin
+from gluesync_scheduler.models.schemas import (
+    AiAgentRunFieldsMixin,
+    AiAgentRunValidatorMixin,
+    QueryStudioFieldsMixin,
+    QueryStudioValidatorMixin,
+)
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 from gluesync_scheduler.services.origin_routing import (
     ROUTING_BROADCAST,
@@ -55,7 +60,13 @@ class TriggerRouting(str, Enum):
     BROADCAST = ROUTING_BROADCAST
 
 
-class TriggerEventBase(QueryStudioValidatorMixin, AiAgentRunValidatorMixin, BaseModel):
+class TriggerEventBase(
+    QueryStudioFieldsMixin,
+    QueryStudioValidatorMixin,
+    AiAgentRunFieldsMixin,
+    AiAgentRunValidatorMixin,
+    BaseModel,
+):
     task_type: TaskType = Field(..., description="Type of task to perform")
     pipeline_id: str = Field("", description="Pipeline ID to operate on. Optional for ai_agent_run.")
     entity_ids: Optional[List[str]] = Field(None, description="Entity IDs (required for entity operations)")
@@ -66,17 +77,6 @@ class TriggerEventBase(QueryStudioValidatorMixin, AiAgentRunValidatorMixin, Base
         description="Snapshot write method: UPSERT or INSERT",
         pattern="^(UPSERT|INSERT)$",
     )
-    agent_id: Optional[str] = Field(None, description="Query Studio agent ID (required when task_type is query_studio)")
-    query_sql: Optional[str] = Field(None, description="SQL to execute via Query Studio (required for custom query_studio; snapshot when saved_query_id is set)")
-    saved_query_id: Optional[str] = Field(None, description="Query Studio saved-query ID (optional; when set, Chronos targets that saved query)")
-    query_read_only: bool = Field(True, description="Query Studio read-only mode. True (default) runs SELECT-only. False allows UPDATE/INSERT/DELETE; the UI must acknowledge harm before sending false.")
-    agent_alias: Optional[str] = Field(None, description="Published AI agent alias (required when task_type is ai_agent_run)")
-    agent_version: Optional[int] = Field(None, description="Optional published AI agent version")
-    agent_input: Optional[Dict[str, Any]] = Field(None, description="Optional JSON object template interpolated into the AI run input")
-    prompt_template: Optional[str] = Field(None, description="Prompt template with {{dotted.path}} tokens filled from the allow-listed payload")
-    payload_allow_list: Optional[List[str]] = Field(None, description="Dotted payload paths that may be copied into the prompt")
-    idempotency_key: Optional[str] = Field(None, description="Optional idempotency key template for AI run creation")
-    allow_ai_run_loop: bool = Field(False, description="Allow this ai_agent_run action to fire from an AI_RUN_* platform event (one hop)")
     execution_mode: TriggerEventMode = Field(
         TriggerEventMode.ASYNC,
         description="async: fire-and-forget; sync: wait for corehub webhook callback before next event",
