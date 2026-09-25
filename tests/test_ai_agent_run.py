@@ -216,6 +216,29 @@ def test_execute_ai_agent_run_posts_then_polls_to_success():
     assert calls[1]["path"] == "/api/ai/v1/runs/run-42"
 
 
+def test_execute_ai_agent_run_polls_through_waiting_approval_without_resolving():
+    from gluesync_scheduler.core.play_pause import CoreHubClient
+
+    calls = []
+
+    def fake_fetch(path, method="GET", body=None, params=None, timeout=None, raw=False):
+        calls.append({"path": path, "method": method})
+        if method == "POST":
+            return {"id": "run-42", "status": "QUEUED"}
+        return {"id": "run-42", "status": "WAITING_APPROVAL"}
+
+    client = CoreHubClient.__new__(CoreHubClient)
+    client.AI_AGENT_RUN_TIMEOUT_SECONDS = 0.05
+    client.AI_AGENT_RUN_POLL_SECONDS = 0.01
+    client.fetch_core_hub = fake_fetch
+    ok = CoreHubClient.execute_ai_agent_run(
+        client, "agent/daily-report", {"prompt": "hi", "source": "chronos"}, wait=True
+    )
+    assert ok is False
+    assert any(call["method"] == "GET" for call in calls)
+    assert not any("/approvals/" in call["path"] and call["method"] == "POST" for call in calls)
+
+
 def test_execute_ai_agent_run_does_not_treat_ambiguous_as_success():
     from gluesync_scheduler.core.play_pause import CoreHubClient
 

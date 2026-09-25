@@ -1452,6 +1452,11 @@ class CoreHubClient:
             if status_name in self.AI_AGENT_FAILURE_STATUSES:
                 logger.error("ai_agent_run %s ended with status %s", run_id, status_name)
                 return False
+            if status_name == "WAITING_APPROVAL":
+                logger.info(
+                    "ai_agent_run %s is waiting for a human approval; Chronos will not resolve it",
+                    run_id,
+                )
             time.sleep(self.AI_AGENT_RUN_POLL_SECONDS)
         logger.error("ai_agent_run %s timed out waiting for a terminal status", run_id)
         return False
