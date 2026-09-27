@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field, validator, field_validator, field_seriali
 
 from gluesync_scheduler.models.models import TaskType, ExecutionMode, require_query_studio_fields, coerce_query_read_only
 from gluesync_scheduler.models.ai_agent_run import parse_json_list, parse_json_object, require_ai_agent_run_fields
+from gluesync_scheduler.models.entity_validation import VALIDATION_RECONCILE, require_entity_validation_fields
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 
@@ -149,6 +150,35 @@ class AiAgentRunValidatorMixin:
         return self
 
 
+class EntityValidationFieldsMixin:
+    """Fields shared by schedulable Validator (data comparison) actions."""
+
+    validation_reconcile: bool = Field(
+        False,
+        description=(
+            "When task_type is entity_validate: write every difference back to the target "
+            "after the comparison. When false the job fails if differences are found."
+        ),
+    )
+
+
+class EntityValidationValidatorMixin:
+    """Shared validation for Validator tasks."""
+
+    @field_validator("validation_reconcile", mode="before")
+    @classmethod
+    def _coerce_validation_reconcile(cls, v):
+        """The UI sends null for non-Validator actions; treat it as "do not reconcile"."""
+        return bool(v) if v is not None else False
+
+    @model_validator(mode="after")
+    def _validate_entity_validation(self):
+        require_entity_validation_fields(self.task_type, getattr(self, "entity_ids", None))
+        if getattr(self, "task_type", None) == TaskType.ENTITY_VALIDATE:
+            object.__setattr__(self, VALIDATION_RECONCILE, bool(getattr(self, VALIDATION_RECONCILE, False)))
+        return self
+
+
 class ChainedEventMode(str, Enum):
     """Execution mode for a chained event"""
     ASYNC = "async"   # fire-and-forget; don't wait for completion
@@ -160,6 +190,8 @@ class ChainedEventBase(
     QueryStudioValidatorMixin,
     AiAgentRunFieldsMixin,
     AiAgentRunValidatorMixin,
+    EntityValidationFieldsMixin,
+    EntityValidationValidatorMixin,
     BaseModel,
 ):
     """Fields shared by create and response schemas for chained events"""
@@ -236,12 +268,14 @@ class JobBase(
     QueryStudioValidatorMixin,
     AiAgentRunFieldsMixin,
     AiAgentRunValidatorMixin,
+    EntityValidationFieldsMixin,
+    EntityValidationValidatorMixin,
     BaseModel,
 ):
     """Base model for job data with common fields"""
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
-    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent\n- ai_agent_run: Execute a published AI agent with a templated prompt")
+    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent\n- ai_agent_run: Execute a published AI agent with a templated prompt\n- entity_validate: Compare source and target rows of specific entities with the Validator, optionally reconciling the target (validation_reconcile)")
     schedule: Optional[ScheduleConfig] = Field(None, description="User-friendly schedule configuration")
     cron_expression: Optional[str] = Field(None, description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight). Not required if schedule is provided.", example="0 0 * * *")
     pipeline_id: str = Field("", description="ID of the pipeline to operate on. Optional for ai_agent_run.", example="pipeline-123")
@@ -305,6 +339,7 @@ class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
     payload_allow_list: Optional[List[str]] = Field(None, description="Updated payload allow-list")
     idempotency_key: Optional[str] = Field(None, description="Updated AI run idempotency key template")
     allow_ai_run_loop: Optional[bool] = Field(None, description="Updated AI_RUN_* loop toggle")
+    validation_reconcile: Optional[bool] = Field(None, description="Updated Validator reconcile toggle (entity_validate)")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(None, description="Replace all chained events with this list (pass empty list to clear)")

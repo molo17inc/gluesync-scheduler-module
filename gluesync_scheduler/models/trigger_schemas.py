@@ -33,6 +33,8 @@ from gluesync_scheduler.models.models import TaskType
 from gluesync_scheduler.models.schemas import (
     AiAgentRunFieldsMixin,
     AiAgentRunValidatorMixin,
+    EntityValidationFieldsMixin,
+    EntityValidationValidatorMixin,
     QueryStudioFieldsMixin,
     QueryStudioValidatorMixin,
 )
@@ -65,6 +67,8 @@ class TriggerEventBase(
     QueryStudioValidatorMixin,
     AiAgentRunFieldsMixin,
     AiAgentRunValidatorMixin,
+    EntityValidationFieldsMixin,
+    EntityValidationValidatorMixin,
     BaseModel,
 ):
     task_type: TaskType = Field(..., description="Type of task to perform")

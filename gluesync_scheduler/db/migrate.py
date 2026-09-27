@@ -69,6 +69,7 @@ def run_migrations():
             ("migrate_add_settings_updated_at", "add_settings_updated_at_column"),
             ("migrate_add_query_studio_fields", "add_query_studio_fields"),
             ("migrate_add_ai_agent_run_fields", "add_ai_agent_run_fields"),
+            ("migrate_add_entity_validation_fields", "add_entity_validation_fields"),
         ]
 
         # Import the database engine from the main app

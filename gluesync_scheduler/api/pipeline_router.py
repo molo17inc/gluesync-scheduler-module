@@ -1134,3 +1134,81 @@ async def execute_ai_agent_run(
             detail=f"Error executing AI agent run: {str(e)}",
         )
 
+
+def _parse_entity_validation_body(body: Optional[dict]) -> dict:
+    from gluesync_scheduler.models.entity_validation import VALIDATION_RECONCILE
+
+    body = body or {}
+    raw_ids = body.get("entity_ids")
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+    entity_ids = [str(item).strip() for item in (raw_ids or []) if str(item).strip()]
+    if not entity_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="entity_validate requires at least one entity_id",
+        )
+    return {
+        "entity_ids": entity_ids,
+        "reconcile": bool(body.get(VALIDATION_RECONCILE, False)),
+    }
+
+
+@router.post(
+    "/{pipeline_id}/validate",
+    response_model=OperationResponse,
+    summary="Validate entities with the CoreHub Validator (data comparison)",
+)
+async def execute_entity_validation(
+    request: Request,
+    pipeline_id: str = Path(..., description="Pipeline the entities belong to"),
+    body: dict = Body(default=None),
+):
+    """Compare source and target rows of the given entities via CoreHub.
+
+    Blocks until every comparison (and the optional reconciliation) has finished.
+    Without ``validation_reconcile`` any difference is reported as a failure whose
+    ``detail`` carries the breakdown, so the scheduled job records it as its error.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers (cron, chains, trigger flows).
+    """
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    parsed = _parse_entity_validation_body(body)
+    logger.info(
+        "Received entity validation request pipeline=%s entities=%s reconcile=%s",
+        pipeline_id, parsed["entity_ids"], parsed["reconcile"],
+    )
+    try:
+        pipeline_manager = PipelineManager()
+        outcomes = []
+        for entity_id in parsed["entity_ids"]:
+            success, message, details = await pipeline_manager.execute_entity_validation(
+                pipeline_id, entity_id, parsed["reconcile"],
+            )
+            outcomes.append({"entity_id": entity_id, "success": success, "message": message, **(details or {})})
+
+        failures = [o for o in outcomes if not o["success"]]
+        if failures:
+            message = " | ".join(o["message"] for o in failures)
+            _handle_operation_failure(message, cron_job_identifier)
+
+        _mark_job_succeeded(cron_job_identifier)
+        return {
+            "success": True,
+            "message": " | ".join(o["message"] for o in outcomes),
+            "data": {
+                "pipeline_id": pipeline_id,
+                "reconcile": parsed["reconcile"],
+                "entities": outcomes,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error executing entity validation")
+        _mark_job_failed(cron_job_identifier, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error executing entity validation: {str(e)}",
+        )
+

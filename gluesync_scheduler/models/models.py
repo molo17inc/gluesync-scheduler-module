@@ -48,6 +48,7 @@ class TaskType(enum.Enum):
     PIPELINE_EXIT_MAINTENANCE = "pipeline_exit_maintenance"
     QUERY_STUDIO = "query_studio"
     AI_AGENT_RUN = "ai_agent_run"
+    ENTITY_VALIDATE = "entity_validate"
 
 
 QUERY_STUDIO_SQL_PREVIEW_LEN = 200
@@ -149,6 +150,7 @@ class ScheduledJob(Base):
     payload_allow_list = Column(Text, nullable=True)
     idempotency_key = Column(String, nullable=True)
     allow_ai_run_loop = Column(Boolean, default=False, nullable=False)
+    validation_reconcile = Column(Boolean, default=False, nullable=False)
     enabled = Column(Boolean, default=True)
     command = Column(Text, nullable=False)
     cron_job_identifier = Column(String, nullable=False, unique=True)
@@ -192,6 +194,7 @@ class ChainedJobEvent(Base):
     payload_allow_list = Column(Text, nullable=True)
     idempotency_key = Column(String, nullable=True)
     allow_ai_run_loop = Column(Boolean, default=False, nullable=False)
+    validation_reconcile = Column(Boolean, default=False, nullable=False)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     webhook_timeout_seconds = Column(Integer, nullable=False, default=3600)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
@@ -239,6 +242,7 @@ class TriggerFlowEvent(Base):
     payload_allow_list = Column(Text, nullable=True)
     idempotency_key = Column(String, nullable=True)
     allow_ai_run_loop = Column(Boolean, default=False, nullable=False)
+    validation_reconcile = Column(Boolean, default=False, nullable=False)
     execution_mode = Column(Enum(ExecutionMode), nullable=False, default=ExecutionMode.ASYNC)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))

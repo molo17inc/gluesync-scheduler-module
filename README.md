@@ -48,6 +48,7 @@ The project follows [Semantic Versioning](https://semver.org/) (SemVer) for vers
   - Start/stop entity groups
   - Schedule snapshots for entities, pipelines, or groups
   - Run a Query Studio SQL query (`query_studio`) on schedule, platform event, or webhook
+  - Validate entities with the CoreHub Validator (`entity_validate`), optionally reconciling the target
   - More task types can be easily added
 - **Job Management**: View, create, update, disable/enable, and delete scheduled jobs
 - **Containerized Deployment**: Docker support for easy deployment
@@ -437,6 +438,34 @@ The Control Plane Scheduler UI should bind:
 - a **saved-query picker** to `saved_query_id` (optional; omit for custom SQL)
 - a **SQL code editor** to `query_sql` (custom SQL, or snapshot when targeting a saved query)
 - a **read-only toggle** to `query_read_only` (default on; turning it off requires harm acknowledgment)
+
+## Entity validation (`entity_validate`)
+
+Chronos can ask the CoreHub Validator (data comparison) to compare one or more entities between source and target, on schedule, on a platform event, or from a webhook trigger flow.
+
+Stored fields:
+
+- `pipeline_id` — pipeline the entities belong to
+- `entity_ids` — one or more entities to validate (required); each entity is validated sequentially
+- `validation_reconcile` — default `false`. When `true`, every difference found is written back to the target (`reconcileAll`). When `false`, a run that finds differences **fails the job** and the difference breakdown becomes the job's `last_error_message`.
+
+On fire, Chronos calls CoreHub:
+
+```http
+POST {corehub}/data-comparison/runs
+{"pipelineId": "<pipeline>", "entityId": "<entity>"}
+```
+
+CoreHub resolves the source/target agents and the primary-key comparison key from the entity definition. Chronos then polls `GET {corehub}/data-comparison/runs/{jobId}` until the run is terminal:
+
+- `COMPLETED` (no differences) → success
+- `COMPLETED_WITH_WARNINGS` and `validation_reconcile: true` → `POST {corehub}/data-comparison/runs/{jobId}/reconciliation` with `{"reconcileAll": true}`; success only when nothing is skipped and there are no schema differences
+- `COMPLETED_WITH_WARNINGS` and `validation_reconcile: false` → failure with the counts (`N only in source, N only in target, N mismatching rows, N schema differences`)
+- `FAILED` / `CANCELLED` / timeout → failure
+
+CoreHub emits `DATA_VALIDATION_STARTED`, `DATA_VALIDATION_COMPLETED`, `DATA_VALIDATION_DIFFERENCES_FOUND` (WARNING), `DATA_VALIDATION_FAILED` (CRITICAL) and `DATA_VALIDATION_RECONCILED` platform events for every run, so CoreHub webhooks / e-mail and Chronos platform-event trigger flows can react to drift.
+
+Tuning: `SCHEDULER_VALIDATION_TIMEOUT_SECONDS` (default `3600`, per entity) and `SCHEDULER_VALIDATION_POLL_SECONDS` (default `2`). The internal HTTP call is extended automatically so the scheduler outlives the poll deadline.
 
 ## Scheduling Options
 

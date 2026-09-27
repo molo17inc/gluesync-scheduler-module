@@ -50,6 +50,10 @@ from gluesync_scheduler.models.ai_agent_run import (
     pipeline_path_id,
     source_run_or_fire_id,
 )
+from gluesync_scheduler.models.entity_validation import (
+    entity_validation_http_payload,
+    validation_http_timeout_seconds,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +84,7 @@ class ExecutableEvent:
     payload_allow_list: Optional[Any] = None
     idempotency_key: Optional[str] = None
     allow_ai_run_loop: bool = False
+    validation_reconcile: bool = False
     resolved_input: Optional[dict] = None
     resolved_idempotency_key: Optional[str] = None
     correlation_id: Optional[str] = None
@@ -109,6 +114,7 @@ class ExecutableEvent:
             payload_allow_list=getattr(event, "payload_allow_list", None),
             idempotency_key=getattr(event, "idempotency_key", None),
             allow_ai_run_loop=bool(getattr(event, "allow_ai_run_loop", False)),
+            validation_reconcile=bool(getattr(event, "validation_reconcile", False)),
         )
 
     @staticmethod
@@ -209,6 +215,9 @@ def _task_type_to_webhook_events(task_type: TaskType) -> list:
         TaskType.PIPELINE_EXIT_MAINTENANCE: ["PIPELINE_EXIT_MAINTENANCE"],
         TaskType.QUERY_STUDIO: [],
         TaskType.AI_AGENT_RUN: [],
+        # The validate route already blocks until the run is terminal, so the
+        # HTTP response is the completion signal (no Hub webhook needed).
+        TaskType.ENTITY_VALIDATE: [],
     }
     return mapping.get(task_type, ["ENTITY_SNAPSHOT_COMPLETED", "ENTITY_CDC_STARTED", "ENTITY_CDC_STOPPED"])
 
@@ -823,6 +832,11 @@ class ChainExecutionService:
             payload = _event_payload(event)
 
             timeout = int(os.getenv("SCHEDULER_INTERNAL_HTTP_TIMEOUT", "120"))
+            if event.task_type == TaskType.ENTITY_VALIDATE:
+                timeout = max(
+                    timeout,
+                    validation_http_timeout_seconds(len(_parse_json_list(event.entity_ids))),
+                )
             ssl_skip = os.getenv("SSL_SKIP_VERIFY", "False").lower() in ("true", "1", "t")
             verify = not ssl_skip if ssl_enabled else True
 
@@ -1248,6 +1262,7 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
         TaskType.PIPELINE_EXIT_MAINTENANCE: "exit-maintenance",
         TaskType.QUERY_STUDIO: "query-studio",
         TaskType.AI_AGENT_RUN: "ai-agent-run",
+        TaskType.ENTITY_VALIDATE: "validate",
     }
     return mapping.get(task_type)
 
@@ -1259,6 +1274,8 @@ def _event_payload(event: ExecutableEvent) -> dict:
     if event.task_type == TaskType.AI_AGENT_RUN:
         wait = event.execution_mode == ExecutionMode.SYNC
         return ai_agent_run_http_payload(event, wait=wait)
+    if event.task_type == TaskType.ENTITY_VALIDATE:
+        return entity_validation_http_payload(event, _parse_json_list(event.entity_ids))
     payload: dict = {}
     entity_ids = _parse_json_list(event.entity_ids)
     group_ids = _parse_json_list(event.group_ids)

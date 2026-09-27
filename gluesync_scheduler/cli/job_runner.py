@@ -207,6 +207,8 @@ def _endpoint_for_job(base_url: str, job: ScheduledJob) -> Optional[str]:
     if job.task_type == TaskType.AI_AGENT_RUN:
         from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
         return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/ai-agent-run"
+    if job.task_type == TaskType.ENTITY_VALIDATE:
+        return f"{base_url}/pipelines/{job.pipeline_id}/validate"
     logger.error(f"Unknown task type: {job.task_type}")
     return None
 
@@ -239,8 +241,15 @@ def _payload_for_job(job: ScheduledJob, entity_ids: list, group_ids: list) -> tu
         from gluesync_scheduler.models.ai_agent_run import ai_agent_run_http_payload
         json_data = ai_agent_run_http_payload(job, wait=True)
         request_timeout = 120
+    if job.task_type == TaskType.ENTITY_VALIDATE:
+        from gluesync_scheduler.models.entity_validation import (
+            entity_validation_http_payload,
+            validation_http_timeout_seconds,
+        )
+        json_data = entity_validation_http_payload(job, entity_ids)
+        request_timeout = validation_http_timeout_seconds(len(entity_ids))
 
-    if job.task_type not in (TaskType.QUERY_STUDIO, TaskType.AI_AGENT_RUN) and entity_ids:
+    if job.task_type not in (TaskType.QUERY_STUDIO, TaskType.AI_AGENT_RUN, TaskType.ENTITY_VALIDATE) and entity_ids:
         json_data["entity_ids"] = entity_ids
 
     if group_ids and job.task_type == TaskType.GROUP_REDO:

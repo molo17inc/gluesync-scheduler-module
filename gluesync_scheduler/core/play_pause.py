@@ -1461,6 +1461,155 @@ class CoreHubClient:
         logger.error("ai_agent_run %s timed out waiting for a terminal status", run_id)
         return False
 
+    # ------------------------------------------------------------------
+    # Validator (data comparison)
+    # ------------------------------------------------------------------
+
+    DATA_VALIDATION_TRIGGER_TIMEOUT_SECONDS = 60
+    DATA_VALIDATION_RECONCILE_TIMEOUT_SECONDS = 3600
+
+    def execute_entity_validation(
+        self,
+        pipeline_id: str,
+        entity_id: str,
+        reconcile: bool = False,
+    ) -> tuple:
+        """Run a Validator comparison for one entity and wait for its outcome.
+
+        Returns ``(success, message, details)``. The message carries the full
+        difference breakdown so it can be stored as the job error and shipped
+        through webhooks / e-mail by whoever consumes the job result.
+
+        * no differences → success
+        * differences and ``reconcile`` → reconcile everything, success when
+          nothing is left behind
+        * differences and not ``reconcile`` → failure with the breakdown
+        * FAILED / CANCELLED / timeout → failure
+        """
+        from gluesync_scheduler.models.entity_validation import (
+            VALIDATION_FAILURE_STATUSES,
+            describe_differences,
+            total_differences,
+            validation_run_summary,
+        )
+
+        entity = (entity_id or "").strip()
+        if not entity:
+            return False, "entity_validate requires a non-empty entity id", {}
+
+        trigger = self.fetch_core_hub(
+            "/data-comparison/runs",
+            method="POST",
+            body={"pipelineId": pipeline_id, "entityId": entity},
+            timeout=self.DATA_VALIDATION_TRIGGER_TIMEOUT_SECONDS,
+            raw=True,
+        )
+        if not isinstance(trigger, dict) or trigger.get("status") == "error":
+            reason = trigger.get("message") if isinstance(trigger, dict) else trigger
+            message = f"Validation of entity {entity} could not be started: {reason}"
+            logger.error(message)
+            return False, message, {"entityId": entity}
+        job_id = trigger.get("jobId")
+        if not job_id:
+            message = f"Validation of entity {entity} was accepted without a job id: {trigger}"
+            logger.error(message)
+            return False, message, {"entityId": entity}
+
+        run = self._poll_data_validation(job_id)
+        if run is None:
+            message = f"Validation of entity {entity} (run {job_id}) did not finish in time"
+            logger.error(message)
+            return False, message, {"entityId": entity, "jobId": job_id}
+
+        details = {"entityId": entity, **validation_run_summary(run)}
+        status_name = str(run.get("status") or "").upper()
+        if status_name in VALIDATION_FAILURE_STATUSES:
+            reason = run.get("errorMessage") or status_name.lower()
+            message = f"Validation of entity {entity} {status_name.lower()}: {reason}"
+            logger.error(message)
+            return False, message, details
+
+        differences = total_differences(run)
+        if differences == 0:
+            message = (
+                f"Validation of entity {entity} completed: source and target match "
+                f"({details['sourceRowsScanned']} source rows, {details['targetRowsScanned']} target rows)"
+            )
+            logger.info(message)
+            return True, message, details
+
+        breakdown = describe_differences(run)
+        if not reconcile:
+            message = (
+                f"Validation of entity {entity} found {differences} difference(s): {breakdown}. "
+                "Reconciliation is disabled for this job."
+            )
+            logger.error(message)
+            return False, message, details
+
+        reconciliation = self.fetch_core_hub(
+            f"/data-comparison/runs/{job_id}/reconciliation",
+            method="POST",
+            body={"reconcileAll": True},
+            timeout=self.DATA_VALIDATION_RECONCILE_TIMEOUT_SECONDS,
+            raw=True,
+        )
+        if not isinstance(reconciliation, dict) or reconciliation.get("status") == "error":
+            reason = reconciliation.get("message") if isinstance(reconciliation, dict) else reconciliation
+            message = (
+                f"Validation of entity {entity} found {differences} difference(s): {breakdown}. "
+                f"Reconciliation failed: {reason}"
+            )
+            logger.error(message)
+            return False, message, details
+
+        applied = {
+            key: int(reconciliation.get(key) or 0)
+            for key in ("insertedCount", "deletedCount", "updatedCount", "skippedCount")
+        }
+        details["reconciliation"] = applied
+        schema_differences = int(details.get("schemaDifferencesCount") or 0)
+        left_behind = applied["skippedCount"] + schema_differences
+        applied_total = applied["insertedCount"] + applied["deletedCount"] + applied["updatedCount"]
+        summary = (
+            f"{applied['insertedCount']} inserted, {applied['deletedCount']} deleted, "
+            f"{applied['updatedCount']} updated"
+        )
+        if left_behind > 0:
+            message = (
+                f"Validation of entity {entity} found {differences} difference(s): {breakdown}. "
+                f"Reconciled {applied_total} ({summary}) but {left_behind} could not be fixed "
+                f"({applied['skippedCount']} skipped, {schema_differences} schema differences)"
+            )
+            logger.error(message)
+            return False, message, details
+
+        message = (
+            f"Validation of entity {entity} found {differences} difference(s): {breakdown}. "
+            f"Reconciled all of them ({summary})"
+        )
+        logger.info(message)
+        return True, message, details
+
+    def _poll_data_validation(self, job_id: str):
+        from gluesync_scheduler.models.entity_validation import (
+            VALIDATION_TERMINAL_STATUSES,
+            validation_poll_seconds,
+            validation_timeout_seconds,
+        )
+
+        deadline = time.time() + validation_timeout_seconds()
+        poll = validation_poll_seconds()
+        path = f"/data-comparison/runs/{job_id}"
+        while time.time() < deadline:
+            run = self.fetch_core_hub(path, method="GET", raw=True, timeout=15)
+            if isinstance(run, dict) and run.get("status") != "error":
+                status_name = str(run.get("status") or "").upper()
+                if status_name in VALIDATION_TERMINAL_STATUSES:
+                    return run
+            time.sleep(poll)
+        return None
+
 
 class PipelineManager:
     """Manager for pipeline operations"""
@@ -1937,6 +2086,26 @@ class PipelineManager:
             idempotency_key,
             correlation_id,
             wait,
+        )
+
+    async def execute_entity_validation(
+        self,
+        pipeline_id: str,
+        entity_id: str,
+        reconcile: bool = False,
+    ) -> tuple:
+        """Validate one entity through the CoreHub Validator; see CoreHubClient."""
+        logger.info(
+            "Validator execute pipeline=%s entity=%s reconcile=%s",
+            pipeline_id, entity_id, reconcile,
+        )
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            self.client.execute_entity_validation,
+            pipeline_id,
+            entity_id,
+            reconcile,
         )
 
 

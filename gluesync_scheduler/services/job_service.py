@@ -42,6 +42,12 @@ from gluesync_scheduler.models.ai_agent_run import (
     pipeline_path_id,
     require_ai_agent_run_fields,
 )
+from gluesync_scheduler.models.entity_validation import (
+    entity_validation_http_payload,
+    entity_validation_orm_kwargs,
+    require_entity_validation_fields,
+    validation_http_timeout_seconds,
+)
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
@@ -107,6 +113,20 @@ def _parse_json_list_field(raw_value, field_name: str, warn: bool = True) -> lis
         return []
 
 
+def _response_detail(response) -> Optional[str]:
+    """Extract FastAPI's `detail` (or a plain `message`) from an error body."""
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    detail = body.get("detail") or body.get("message")
+    if isinstance(detail, str) and detail.strip():
+        return detail.strip()
+    return None
+
+
 def _chained_event_orm(parent_job_id: int, pos: int, ce) -> ChainedJobEvent:
     return ChainedJobEvent(
         parent_job_id=parent_job_id,
@@ -124,6 +144,7 @@ def _chained_event_orm(parent_job_id: int, pos: int, ce) -> ChainedJobEvent:
         execution_mode=ExecutionMode(ce.execution_mode.value),
         webhook_timeout_seconds=ce.webhook_timeout_seconds,
         **ai_agent_run_orm_kwargs(ce),
+        **entity_validation_orm_kwargs(ce),
     )
 
 
@@ -155,6 +176,13 @@ def _validate_ai_agent_run_chain(job_data) -> None:
             )
 
 
+def _validate_entity_validation_chain(task_type, entity_ids, chained_events) -> None:
+    require_entity_validation_fields(task_type, entity_ids)
+    if chained_events:
+        for ce in chained_events:
+            require_entity_validation_fields(ce.task_type, ce.entity_ids)
+
+
 def _task_type_to_action(task_type) -> Optional[str]:
     if task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.GROUP_START]:
         return "play"
@@ -176,6 +204,8 @@ def _task_type_to_action(task_type) -> Optional[str]:
         return "query-studio"
     if task_type == TaskType.AI_AGENT_RUN:
         return "ai-agent-run"
+    if task_type == TaskType.ENTITY_VALIDATE:
+        return "validate"
     return None
 
 
@@ -558,6 +588,7 @@ class JobService:
                 job_data.saved_query_id, job_data.chained_events,
             )
             _validate_ai_agent_run_chain(job_data)
+            _validate_entity_validation_chain(job_data.task_type, job_data.entity_ids, job_data.chained_events)
 
             db_job = ScheduledJob(
                 name=job_data.name,
@@ -582,6 +613,7 @@ class JobService:
                 timezone_name=self._get_configured_timezone(),
                 is_cron_expression=is_cron_expression,
                 **ai_agent_run_orm_kwargs(job_data),
+                **entity_validation_orm_kwargs(job_data),
             )
 
             db_job.cron_job_identifier = f"gluesync_job_{uuid.uuid4().hex[:8]}"
@@ -903,6 +935,11 @@ class JobService:
                         getattr(ce, "agent_input", None),
                         getattr(ce, "idempotency_key", None),
                     )
+            _validate_entity_validation_chain(
+                final_task_type,
+                update_data.get("entity_ids", db_job.entity_ids),
+                job_data.chained_events,
+            )
 
             cron_updated = self._apply_schedule_to_update_data(update_data)
             self._apply_update_fields_to_job(db_job, update_data)
@@ -1154,8 +1191,10 @@ class JobService:
             json_data = query_studio_http_payload(job)
         if job.task_type == TaskType.AI_AGENT_RUN:
             json_data = ai_agent_run_http_payload(job, wait=True)
+        if job.task_type == TaskType.ENTITY_VALIDATE:
+            json_data = entity_validation_http_payload(job, entity_ids)
 
-        if job.task_type not in (TaskType.QUERY_STUDIO, TaskType.AI_AGENT_RUN) and entity_ids:
+        if job.task_type not in (TaskType.QUERY_STUDIO, TaskType.AI_AGENT_RUN, TaskType.ENTITY_VALIDATE) and entity_ids:
             json_data["entity_ids"] = entity_ids
 
         if group_ids and job.task_type == TaskType.GROUP_REDO:
@@ -1197,6 +1236,12 @@ class JobService:
 
         truncated_response = response.text[:100] + '...' if len(response.text) > 100 else response.text
         error_msg = f"Job execution failed with status {response.status_code}"
+        # The internal router puts the human-readable reason (e.g. the Validator
+        # difference breakdown) in `detail`; surface it in last_error_message so
+        # the UI and any notification built from it explain what went wrong.
+        detail = _response_detail(response)
+        if detail:
+            error_msg = f"{error_msg}: {detail}"
         logger.error(f"{error_msg}: {truncated_response}")
         result = {
             "status_code": response.status_code,
@@ -1261,6 +1306,13 @@ class JobService:
             try:
                 verify, cert = self._http_ssl_options(protocol)
                 internal_http_timeout = int(os.getenv('SCHEDULER_INTERNAL_HTTP_TIMEOUT', '120'))
+                if job.task_type == TaskType.ENTITY_VALIDATE:
+                    # The validate route blocks until CoreHub finishes the
+                    # comparison (and the optional reconciliation).
+                    internal_http_timeout = max(
+                        internal_http_timeout,
+                        validation_http_timeout_seconds(len(entity_ids)),
+                    )
                 response = requests.request(
                     method=method,
                     url=endpoint,
@@ -1456,6 +1508,7 @@ def _rows_to_chained_responses(rows: list) -> list:
             payload_allow_list=row.payload_allow_list,
             idempotency_key=row.idempotency_key,
             allow_ai_run_loop=bool(getattr(row, "allow_ai_run_loop", False)),
+            validation_reconcile=bool(getattr(row, "validation_reconcile", False)),
         )
         result.append(resp)
     return result

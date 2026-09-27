@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 
 from gluesync_scheduler.models.models import ExecutionMode, TaskType, TriggerFlow, TriggerFlowEvent, TriggerFlowExecutionLog, require_query_studio_fields, query_read_only_of
 from gluesync_scheduler.models.ai_agent_run import ai_agent_run_orm_kwargs, require_ai_agent_run_fields
+from gluesync_scheduler.models.entity_validation import entity_validation_orm_kwargs, require_entity_validation_fields
 from gluesync_scheduler.models.trigger_schemas import (
     TriggerEventCreate,
     TriggerFlowCreate,
@@ -88,6 +89,7 @@ def _events_to_orm(
             getattr(ev, "agent_input", None),
             getattr(ev, "idempotency_key", None),
         )
+        require_entity_validation_fields(ev.task_type, ev.entity_ids)
         orm = TriggerFlowEvent(
             trigger_flow_id=flow_id,
             position=pos,
@@ -103,6 +105,7 @@ def _events_to_orm(
             query_read_only=query_read_only_of(ev),
             execution_mode=ExecutionMode(ev.execution_mode.value),
             **ai_agent_run_orm_kwargs(ev),
+            **entity_validation_orm_kwargs(ev),
         )
         result.append(orm)
     return result
