@@ -49,6 +49,7 @@ The project follows [Semantic Versioning](https://semver.org/) (SemVer) for vers
   - Schedule snapshots for entities, pipelines, or groups
   - Run a Query Studio SQL query (`query_studio`) on schedule, platform event, or webhook
   - Validate entities with the CoreHub Validator (`entity_validate`), optionally reconciling the target
+  - Rebuild the Enterprise brain schema graph (`brain_reindex`)
   - More task types can be easily added
 - **Job Management**: View, create, update, disable/enable, and delete scheduled jobs
 - **Containerized Deployment**: Docker support for easy deployment
@@ -466,6 +467,26 @@ CoreHub resolves the source/target agents and the primary-key comparison key fro
 CoreHub emits `DATA_VALIDATION_STARTED`, `DATA_VALIDATION_COMPLETED`, `DATA_VALIDATION_DIFFERENCES_FOUND` (WARNING), `DATA_VALIDATION_FAILED` (CRITICAL) and `DATA_VALIDATION_RECONCILED` platform events for every run, so CoreHub webhooks / e-mail and Chronos platform-event trigger flows can react to drift.
 
 Tuning: `SCHEDULER_VALIDATION_TIMEOUT_SECONDS` (default `3600`, per entity) and `SCHEDULER_VALIDATION_POLL_SECONDS` (default `2`). The internal HTTP call is extended automatically so the scheduler outlives the poll deadline.
+
+## Enterprise brain reindex (`brain_reindex`)
+
+Chronos can rebuild the Enterprise brain schema graph on a schedule, on a platform event, or from a webhook trigger flow. The task is global: it does not take a pipeline, group, or entity. CoreHub walks every SQL-capable agent.
+
+On fire, Chronos calls CoreHub:
+
+```http
+POST {corehub}/api/ai/v1/brain/job
+```
+
+CoreHub accepts the trigger immediately (`CREATING`) and indexes in the background. Chronos polls `GET {corehub}/api/ai/v1/brain/job` until the singleton job settles:
+
+- `READY` → success, with the table and edge counts
+- `FAILED` → the job fails and the brain `message` becomes `last_error_message`, so webhook and e-mail notifications carry it
+- timeout → failure
+
+A rebuild that is already `CREATING` is waited on instead of started twice. A `READY` or `FAILED` row left by a previous build is not reported as this run's result.
+
+Tuning: `SCHEDULER_BRAIN_REINDEX_TIMEOUT_SECONDS` (default `3600`) and `SCHEDULER_BRAIN_REINDEX_POLL_SECONDS` (default `2`). The caller needs the same permission CoreHub requires to publish the brain (`requireBrainPublisher`).
 
 ## Scheduling Options
 

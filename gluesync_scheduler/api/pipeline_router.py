@@ -1135,6 +1135,46 @@ async def execute_ai_agent_run(
         )
 
 
+@router.post(
+    "/{pipeline_id}/brain-reindex",
+    response_model=OperationResponse,
+    summary="Rebuild the Enterprise brain schema graph",
+)
+async def execute_brain_reindex(
+    request: Request,
+    pipeline_id: str = Path(..., description="Unused placeholder; the brain walks every pipeline"),
+):
+    """Start an Enterprise brain rebuild via CoreHub and block until it settles.
+
+    A failed or timed-out rebuild is a job failure whose ``detail`` is the brain
+    status message, so scheduled jobs record it and notifications can forward it.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers (cron, chains, trigger flows).
+    """
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    logger.info("Received Enterprise brain reindex request pipeline=%s", pipeline_id)
+    try:
+        pipeline_manager = PipelineManager()
+        success, message, details = await pipeline_manager.execute_brain_reindex()
+        if not success:
+            _handle_operation_failure(message, cron_job_identifier)
+        _mark_job_succeeded(cron_job_identifier)
+        return {
+            "success": True,
+            "message": message,
+            "data": {"pipeline_id": pipeline_id, "job": details or {}},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error rebuilding the Enterprise brain")
+        _mark_job_failed(cron_job_identifier, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error rebuilding the Enterprise brain: {str(e)}",
+        )
+
+
 def _parse_entity_validation_body(body: Optional[dict]) -> dict:
     from gluesync_scheduler.models.entity_validation import VALIDATION_RECONCILE
 

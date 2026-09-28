@@ -1473,6 +1473,73 @@ class CoreHubClient:
         return False
 
     # ------------------------------------------------------------------
+    # Enterprise brain reindex
+    # ------------------------------------------------------------------
+
+    def execute_brain_reindex(self) -> tuple:
+        """Start an Enterprise brain rebuild and wait until it settles.
+
+        Returns ``(success, message, details)``. CoreHub accepts the trigger
+        immediately and walks every SQL-capable agent in the background, so
+        Chronos polls ``GET /api/ai/v1/brain/job``. A rebuild that was already
+        CREATING is waited on; a READY/FAILED row from a previous build is not
+        treated as this trigger's result. FAILED (and timeout) fail the job
+        with the brain message, which is what webhooks and e-mail forward.
+        """
+        from gluesync_scheduler.models.brain_reindex import (
+            BRAIN_JOB_PATH,
+            STATUS_CREATING,
+            STATUS_FAILED,
+            brain_job_message,
+            brain_job_status,
+            brain_rebuild_settled,
+            brain_reindex_poll_seconds,
+            brain_reindex_timeout_seconds,
+        )
+
+        before = self._read_brain_job()
+        before_known = isinstance(before, dict) and before.get("status") != "error"
+        before_generation = before.get("generation") if before_known else None
+        saw_creating = before_known and brain_job_status(before) == STATUS_CREATING
+
+        started = self.fetch_core_hub(
+            BRAIN_JOB_PATH,
+            method="POST",
+            body={},
+            timeout=60,
+            raw=True,
+        )
+        if not isinstance(started, dict) or started.get("status") == "error":
+            reason = started.get("message") if isinstance(started, dict) else started
+            return False, f"Enterprise brain reindex could not be started: {reason}", {}
+
+        deadline = time.time() + brain_reindex_timeout_seconds()
+        last = started
+        while time.time() < deadline:
+            current = self._read_brain_job()
+            if isinstance(current, dict) and current.get("status") != "error":
+                last = current
+                if brain_job_status(current) == STATUS_CREATING:
+                    saw_creating = True
+                if brain_rebuild_settled(current, saw_creating, before_generation, before_known):
+                    message = brain_job_message(current)
+                    if brain_job_status(current) == STATUS_FAILED:
+                        return False, message, current
+                    return True, message, current
+            time.sleep(brain_reindex_poll_seconds())
+
+        message = (
+            f"Enterprise brain reindex timed out after {brain_reindex_timeout_seconds()}s. "
+            f"Last status: {brain_job_message(last) if isinstance(last, dict) else last}"
+        )
+        return False, message, last if isinstance(last, dict) else {}
+
+    def _read_brain_job(self):
+        from gluesync_scheduler.models.brain_reindex import BRAIN_JOB_PATH
+
+        return self.fetch_core_hub(BRAIN_JOB_PATH, method="GET", raw=True, timeout=30)
+
+    # ------------------------------------------------------------------
     # Validator (data comparison)
     # ------------------------------------------------------------------
 
@@ -2098,6 +2165,12 @@ class PipelineManager:
             correlation_id,
             wait,
         )
+
+    async def execute_brain_reindex(self) -> tuple:
+        """Rebuild the Enterprise brain and wait; see CoreHubClient."""
+        logger.info("Enterprise brain reindex requested")
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.client.execute_brain_reindex)
 
     async def execute_entity_validation(
         self,

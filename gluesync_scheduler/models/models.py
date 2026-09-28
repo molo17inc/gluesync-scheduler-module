@@ -49,6 +49,7 @@ class TaskType(enum.Enum):
     QUERY_STUDIO = "query_studio"
     AI_AGENT_RUN = "ai_agent_run"
     ENTITY_VALIDATE = "entity_validate"
+    BRAIN_REINDEX = "brain_reindex"
 
 
 QUERY_STUDIO_SQL_PREVIEW_LEN = 200

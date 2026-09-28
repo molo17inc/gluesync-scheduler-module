@@ -218,6 +218,8 @@ def _task_type_to_webhook_events(task_type: TaskType) -> list:
         # The validate route already blocks until the run is terminal, so the
         # HTTP response is the completion signal (no Hub webhook needed).
         TaskType.ENTITY_VALIDATE: [],
+        # The brain-reindex route blocks until CoreHub reports READY or FAILED.
+        TaskType.BRAIN_REINDEX: [],
     }
     return mapping.get(task_type, ["ENTITY_SNAPSHOT_COMPLETED", "ENTITY_CDC_STARTED", "ENTITY_CDC_STOPPED"])
 
@@ -837,6 +839,11 @@ class ChainExecutionService:
                     timeout,
                     validation_http_timeout_seconds(len(_parse_json_list(event.entity_ids))),
                 )
+            if event.task_type == TaskType.BRAIN_REINDEX:
+                from gluesync_scheduler.models.brain_reindex import (
+                    brain_reindex_http_timeout_seconds,
+                )
+                timeout = max(timeout, brain_reindex_http_timeout_seconds())
             ssl_skip = os.getenv("SSL_SKIP_VERIFY", "False").lower() in ("true", "1", "t")
             verify = not ssl_skip if ssl_enabled else True
 
@@ -1263,6 +1270,7 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
         TaskType.QUERY_STUDIO: "query-studio",
         TaskType.AI_AGENT_RUN: "ai-agent-run",
         TaskType.ENTITY_VALIDATE: "validate",
+        TaskType.BRAIN_REINDEX: "brain-reindex",
     }
     return mapping.get(task_type)
 

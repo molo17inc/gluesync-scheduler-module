@@ -206,6 +206,8 @@ def _task_type_to_action(task_type) -> Optional[str]:
         return "ai-agent-run"
     if task_type == TaskType.ENTITY_VALIDATE:
         return "validate"
+    if task_type == TaskType.BRAIN_REINDEX:
+        return "brain-reindex"
     return None
 
 
@@ -1194,7 +1196,12 @@ class JobService:
         if job.task_type == TaskType.ENTITY_VALIDATE:
             json_data = entity_validation_http_payload(job, entity_ids)
 
-        if job.task_type not in (TaskType.QUERY_STUDIO, TaskType.AI_AGENT_RUN, TaskType.ENTITY_VALIDATE) and entity_ids:
+        if job.task_type not in (
+            TaskType.QUERY_STUDIO,
+            TaskType.AI_AGENT_RUN,
+            TaskType.ENTITY_VALIDATE,
+            TaskType.BRAIN_REINDEX,
+        ) and entity_ids:
             json_data["entity_ids"] = entity_ids
 
         if group_ids and job.task_type == TaskType.GROUP_REDO:
@@ -1312,6 +1319,14 @@ class JobService:
                     internal_http_timeout = max(
                         internal_http_timeout,
                         validation_http_timeout_seconds(len(entity_ids)),
+                    )
+                if job.task_type == TaskType.BRAIN_REINDEX:
+                    from gluesync_scheduler.models.brain_reindex import (
+                        brain_reindex_http_timeout_seconds,
+                    )
+                    internal_http_timeout = max(
+                        internal_http_timeout,
+                        brain_reindex_http_timeout_seconds(),
                     )
                 response = requests.request(
                     method=method,
