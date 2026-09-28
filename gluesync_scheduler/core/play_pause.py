@@ -969,7 +969,14 @@ class CoreHubClient:
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         params = {
             'entity': entity_id,
-            'snapshotWriteMethod': snapshot_write_method
+            'snapshotWriteMethod': snapshot_write_method,
+            # A scheduled run is independent of the previous one, so the migration
+            # checkpoint must always be reset. CoreHub defaults fromScratch to false and
+            # then resumes positionally: with a relative where clause the query selects a
+            # different set of rows on the next run, and those rows are skipped without
+            # any error (GSSD-1346). This resets the migration checkpoint only, unlike
+            # redo, which also drops the CDC read position.
+            'fromScratch': 'true'
         }
         
         try:
@@ -1094,7 +1101,9 @@ class CoreHubClient:
         # Now perform the snapshot
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot'
         params = {
-            'snapshotWriteMethod': snapshot_write_method
+            'snapshotWriteMethod': snapshot_write_method,
+            # Always reset the migration checkpoint, see resync_entity (GSSD-1346).
+            'fromScratch': 'true'
         }
         
         try:
@@ -1185,7 +1194,9 @@ class CoreHubClient:
         path = f'/pipelines/{pipeline_id}/commands/sync/one-time-snapshot-group'
         params = {
             'groupId': group_id,
-            'snapshotWriteMethod': snapshot_write_method
+            'snapshotWriteMethod': snapshot_write_method,
+            # Always reset the migration checkpoint, see resync_entity (GSSD-1346).
+            'fromScratch': 'true'
         }
         
         try:
