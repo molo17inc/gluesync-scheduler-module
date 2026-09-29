@@ -1175,6 +1175,79 @@ async def execute_brain_reindex(
         )
 
 
+def _parse_visualize_refresh_body(body: Optional[dict]) -> dict:
+    body = body or {}
+    viz_id = str(body.get("viz_id") or body.get("vizId") or "").strip()
+    if not viz_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="visualize_refresh requires a non-empty viz_id",
+        )
+    parameters = body.get("parameters")
+    if parameters is None:
+        parameters = body.get("visualize_parameters")
+    schedule_id = body.get("schedule_id", body.get("scheduleId"))
+    if schedule_id == "":
+        schedule_id = None
+    return {"viz_id": viz_id, "parameters": parameters, "schedule_id": schedule_id}
+
+
+@router.post(
+    "/{pipeline_id}/visualize-refresh",
+    response_model=OperationResponse,
+    summary="Refresh a visualization on its schedule",
+)
+async def execute_visualize_refresh(
+    request: Request,
+    pipeline_id: str = Path(..., description="Unused placeholder; Visualize is not pipeline-scoped"),
+    body: dict = Body(default=None),
+):
+    """POST Core Hub ``/visualize/refresh`` as the chronos module.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers (cron, chains, trigger flows).
+    """
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    parsed = _parse_visualize_refresh_body(body)
+    logger.info(
+        "Received visualize refresh pipeline=%s viz_id=%s schedule_id=%s",
+        pipeline_id, parsed["viz_id"], parsed["schedule_id"],
+    )
+    try:
+        pipeline_manager = PipelineManager()
+        result = await pipeline_manager.execute_visualize_refresh(
+            parsed["viz_id"], parsed["parameters"], parsed["schedule_id"],
+        )
+        if not result.get("success"):
+            message = result.get("message") or "Visualize refresh failed"
+            _mark_job_failed(cron_job_identifier, message)
+            # 4xx from Hub is terminal. 5xx was already retried inside the client.
+            http_status = status.HTTP_400_BAD_REQUEST
+            if result.get("retryable"):
+                http_status = status.HTTP_502_BAD_GATEWAY
+            elif result.get("disable_schedule"):
+                http_status = status.HTTP_404_NOT_FOUND
+            raise HTTPException(status_code=http_status, detail=message)
+        _mark_job_succeeded(cron_job_identifier)
+        return {
+            "success": True,
+            "message": result.get("message") or "Visualize refresh accepted",
+            "data": {
+                "pipeline_id": pipeline_id,
+                "viz_id": parsed["viz_id"],
+                "schedule_id": parsed["schedule_id"],
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error executing visualize refresh")
+        _mark_job_failed(cron_job_identifier, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error executing visualize refresh: {str(e)}",
+        )
+
+
 def _parse_entity_validation_body(body: Optional[dict]) -> dict:
     from gluesync_scheduler.models.entity_validation import VALIDATION_RECONCILE
 

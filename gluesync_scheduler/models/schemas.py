@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field, validator, field_validator, field_seriali
 from gluesync_scheduler.models.models import TaskType, ExecutionMode, require_query_studio_fields, coerce_query_read_only
 from gluesync_scheduler.models.ai_agent_run import parse_json_list, parse_json_object, require_ai_agent_run_fields
 from gluesync_scheduler.models.entity_validation import VALIDATION_RECONCILE, require_entity_validation_fields
+from gluesync_scheduler.models.visualize_refresh import coerce_parameter_map, require_visualize_refresh_fields
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 
@@ -144,7 +145,7 @@ class AiAgentRunValidatorMixin:
             object.__setattr__(self, "pipeline_id", getattr(self, "pipeline_id", None) or "")
             object.__setattr__(self, "allow_ai_run_loop", bool(getattr(self, "allow_ai_run_loop", False)))
             object.__setattr__(self, "payload_allow_list", getattr(self, "payload_allow_list", None) or [])
-        elif self.task_type == TaskType.BRAIN_REINDEX:
+        elif self.task_type in (TaskType.BRAIN_REINDEX, TaskType.VISUALIZE_REFRESH):
             object.__setattr__(self, "pipeline_id", getattr(self, "pipeline_id", None) or "")
         elif not (getattr(self, "pipeline_id", None) or "").strip():
             if getattr(self, "pipeline_id", None) is not None:
@@ -181,6 +182,36 @@ class EntityValidationValidatorMixin:
         return self
 
 
+
+class VisualizeRefreshFieldsMixin:
+    """Fields shared by schedulable Visualize refresh actions."""
+
+    viz_id: Optional[str] = Field(
+        None,
+        description="Visualization id (required when task_type is visualize_refresh)",
+    )
+    visualize_parameters: Optional[Dict[str, str]] = Field(
+        None,
+        description="Optional string map posted as the Hub refresh parameters",
+    )
+
+
+class VisualizeRefreshValidatorMixin:
+    """Shared validation for visualize.refresh tasks."""
+
+    @field_validator("visualize_parameters", mode="before")
+    @classmethod
+    def _parse_visualize_parameters(cls, v):
+        if v is None:
+            return None
+        return coerce_parameter_map(v)
+
+    @model_validator(mode="after")
+    def _validate_visualize_refresh(self):
+        require_visualize_refresh_fields(getattr(self, "task_type", None), getattr(self, "viz_id", None))
+        return self
+
+
 class ChainedEventMode(str, Enum):
     """Execution mode for a chained event"""
     ASYNC = "async"   # fire-and-forget; don't wait for completion
@@ -194,11 +225,13 @@ class ChainedEventBase(
     AiAgentRunValidatorMixin,
     EntityValidationFieldsMixin,
     EntityValidationValidatorMixin,
+    VisualizeRefreshFieldsMixin,
+    VisualizeRefreshValidatorMixin,
     BaseModel,
 ):
     """Fields shared by create and response schemas for chained events"""
     task_type: TaskType = Field(..., description="Type of task to perform")
-    pipeline_id: str = Field("", description="Pipeline ID to operate on. Optional for ai_agent_run.")
+    pipeline_id: str = Field("", description="Pipeline ID to operate on. Optional for ai_agent_run, brain_reindex, and visualize_refresh.")
     entity_ids: Optional[List[str]] = Field(None, description="Entity IDs (required for entity operations)")
     group_ids: Optional[List[str]] = Field(None, description="Group IDs (required for group operations)")
     with_snapshot: bool = Field(False, description="Whether to include a snapshot")
@@ -272,15 +305,17 @@ class JobBase(
     AiAgentRunValidatorMixin,
     EntityValidationFieldsMixin,
     EntityValidationValidatorMixin,
+    VisualizeRefreshFieldsMixin,
+    VisualizeRefreshValidatorMixin,
     BaseModel,
 ):
     """Base model for job data with common fields"""
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
-    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent\n- ai_agent_run: Execute a published AI agent with a templated prompt\n- entity_validate: Compare source and target rows of specific entities with the Validator, optionally reconciling the target (validation_reconcile)\n- brain_reindex: Rebuild the Enterprise brain schema graph across every SQL-capable agent")
+    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent\n- ai_agent_run: Execute a published AI agent with a templated prompt\n- entity_validate: Compare source and target rows of specific entities with the Validator, optionally reconciling the target (validation_reconcile)\n- brain_reindex: Rebuild the Enterprise brain schema graph across every SQL-capable agent\n- visualize_refresh: POST a scheduled Visualize refresh to Core Hub as the chronos module")
     schedule: Optional[ScheduleConfig] = Field(None, description="User-friendly schedule configuration")
     cron_expression: Optional[str] = Field(None, description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight). Not required if schedule is provided.", example="0 0 * * *")
-    pipeline_id: str = Field("", description="ID of the pipeline to operate on. Optional for ai_agent_run and brain_reindex.", example="pipeline-123")
+    pipeline_id: str = Field("", description="ID of the pipeline to operate on. Optional for ai_agent_run, brain_reindex, and visualize_refresh.", example="pipeline-123")
     entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on (required for entity operations)", example=["entity-456", "entity-789"])
     group_ids: Optional[List[str]] = Field(None, description="List of group IDs to operate on (required for group operations)", example=["group-123", "group-456"])
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
@@ -342,9 +377,18 @@ class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
     idempotency_key: Optional[str] = Field(None, description="Updated AI run idempotency key template")
     allow_ai_run_loop: Optional[bool] = Field(None, description="Updated AI_RUN_* loop toggle")
     validation_reconcile: Optional[bool] = Field(None, description="Updated Validator reconcile toggle (entity_validate)")
+    viz_id: Optional[str] = Field(None, description="Updated visualization id (visualize_refresh)")
+    visualize_parameters: Optional[Dict[str, str]] = Field(None, description="Updated Visualize refresh parameter map")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     chained_events: Optional[List[ChainedEventCreate]] = Field(None, description="Replace all chained events with this list (pass empty list to clear)")
+
+    @field_validator("visualize_parameters", mode="before")
+    @classmethod
+    def _parse_visualize_parameters(cls, v):
+        if v is None:
+            return None
+        return coerce_parameter_map(v)
 
     @model_validator(mode="after")
     def _validate_query_studio(self):
@@ -360,6 +404,8 @@ class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
                 self.agent_input,
                 self.idempotency_key,
             )
+        if self.task_type == TaskType.VISUALIZE_REFRESH:
+            require_visualize_refresh_fields(self.task_type, self.viz_id)
         return self
 
     model_config = ConfigDict(

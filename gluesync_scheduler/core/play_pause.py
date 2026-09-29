@@ -1472,6 +1472,15 @@ class CoreHubClient:
         logger.error("ai_agent_run %s timed out waiting for a terminal status", run_id)
         return False
 
+    def execute_visualize_refresh(self, viz_id: str, parameters=None, schedule_id=None) -> dict:
+        """POST /visualize/refresh with the module JWT. See visualize_refresh.py."""
+        from gluesync_scheduler.models.visualize_refresh import post_visualize_refresh
+
+        def _post(path, body):
+            return self.fetch_core_hub(path, method="POST", body=body)
+
+        return post_visualize_refresh(_post, viz_id, parameters, schedule_id)
+
     # ------------------------------------------------------------------
     # Enterprise brain reindex
     # ------------------------------------------------------------------
@@ -2164,6 +2173,14 @@ class PipelineManager:
             idempotency_key,
             correlation_id,
             wait,
+        )
+
+    async def execute_visualize_refresh(self, viz_id: str, parameters=None, schedule_id=None) -> dict:
+        """POST a Visualize refresh to Core Hub; see CoreHubClient."""
+        logger.info("Visualize refresh requested viz_id=%s schedule_id=%s", viz_id, schedule_id)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.execute_visualize_refresh, viz_id, parameters, schedule_id,
         )
 
     async def execute_brain_reindex(self) -> tuple:

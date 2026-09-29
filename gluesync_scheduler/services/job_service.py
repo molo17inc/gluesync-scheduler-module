@@ -48,6 +48,11 @@ from gluesync_scheduler.models.entity_validation import (
     require_entity_validation_fields,
     validation_http_timeout_seconds,
 )
+from gluesync_scheduler.models.visualize_refresh import (
+    require_visualize_refresh_fields,
+    visualize_internal_payload,
+    visualize_refresh_orm_kwargs,
+)
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
@@ -145,6 +150,7 @@ def _chained_event_orm(parent_job_id: int, pos: int, ce) -> ChainedJobEvent:
         webhook_timeout_seconds=ce.webhook_timeout_seconds,
         **ai_agent_run_orm_kwargs(ce),
         **entity_validation_orm_kwargs(ce),
+        **visualize_refresh_orm_kwargs(ce),
     )
 
 
@@ -208,6 +214,8 @@ def _task_type_to_action(task_type) -> Optional[str]:
         return "validate"
     if task_type == TaskType.BRAIN_REINDEX:
         return "brain-reindex"
+    if task_type == TaskType.VISUALIZE_REFRESH:
+        return "visualize-refresh"
     return None
 
 
@@ -591,6 +599,10 @@ class JobService:
             )
             _validate_ai_agent_run_chain(job_data)
             _validate_entity_validation_chain(job_data.task_type, job_data.entity_ids, job_data.chained_events)
+            require_visualize_refresh_fields(job_data.task_type, job_data.viz_id)
+            if job_data.chained_events:
+                for ce in job_data.chained_events:
+                    require_visualize_refresh_fields(ce.task_type, ce.viz_id)
 
             db_job = ScheduledJob(
                 name=job_data.name,
@@ -616,6 +628,7 @@ class JobService:
                 is_cron_expression=is_cron_expression,
                 **ai_agent_run_orm_kwargs(job_data),
                 **entity_validation_orm_kwargs(job_data),
+                **visualize_refresh_orm_kwargs(job_data),
             )
 
             db_job.cron_job_identifier = f"gluesync_job_{uuid.uuid4().hex[:8]}"
@@ -661,6 +674,9 @@ class JobService:
             update_data["agent_input"] = json.dumps(update_data["agent_input"]) if update_data["agent_input"] else None
         if "payload_allow_list" in update_data:
             update_data["payload_allow_list"] = json.dumps(update_data["payload_allow_list"]) if update_data["payload_allow_list"] else None
+        if "visualize_parameters" in update_data:
+            params = update_data["visualize_parameters"]
+            update_data["visualize_parameters"] = json.dumps(params) if params else None
         if "snapshot_write_method" in update_data and update_data["snapshot_write_method"] is None:
             update_data["snapshot_write_method"] = 'UPSERT'
 
@@ -942,6 +958,12 @@ class JobService:
                 update_data.get("entity_ids", db_job.entity_ids),
                 job_data.chained_events,
             )
+            require_visualize_refresh_fields(
+                final_task_type, update_data.get("viz_id", db_job.viz_id),
+            )
+            if job_data.chained_events:
+                for ce in job_data.chained_events:
+                    require_visualize_refresh_fields(ce.task_type, ce.viz_id)
 
             cron_updated = self._apply_schedule_to_update_data(update_data)
             self._apply_update_fields_to_job(db_job, update_data)
@@ -1195,12 +1217,15 @@ class JobService:
             json_data = ai_agent_run_http_payload(job, wait=True)
         if job.task_type == TaskType.ENTITY_VALIDATE:
             json_data = entity_validation_http_payload(job, entity_ids)
+        if job.task_type == TaskType.VISUALIZE_REFRESH:
+            json_data = visualize_internal_payload(job)
 
         if job.task_type not in (
             TaskType.QUERY_STUDIO,
             TaskType.AI_AGENT_RUN,
             TaskType.ENTITY_VALIDATE,
             TaskType.BRAIN_REINDEX,
+            TaskType.VISUALIZE_REFRESH,
         ) and entity_ids:
             json_data["entity_ids"] = entity_ids
 

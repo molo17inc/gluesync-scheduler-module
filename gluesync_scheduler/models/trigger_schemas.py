@@ -37,6 +37,8 @@ from gluesync_scheduler.models.schemas import (
     EntityValidationValidatorMixin,
     QueryStudioFieldsMixin,
     QueryStudioValidatorMixin,
+    VisualizeRefreshFieldsMixin,
+    VisualizeRefreshValidatorMixin,
 )
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 from gluesync_scheduler.services.origin_routing import (
@@ -69,10 +71,12 @@ class TriggerEventBase(
     AiAgentRunValidatorMixin,
     EntityValidationFieldsMixin,
     EntityValidationValidatorMixin,
+    VisualizeRefreshFieldsMixin,
+    VisualizeRefreshValidatorMixin,
     BaseModel,
 ):
     task_type: TaskType = Field(..., description="Type of task to perform")
-    pipeline_id: str = Field("", description="Pipeline ID to operate on. Optional for ai_agent_run and brain_reindex.")
+    pipeline_id: str = Field("", description="Pipeline ID to operate on. Optional for ai_agent_run, brain_reindex, and visualize_refresh.")
     entity_ids: Optional[List[str]] = Field(None, description="Entity IDs (required for entity operations)")
     group_ids: Optional[List[str]] = Field(None, description="Group IDs (required for group operations)")
     with_snapshot: bool = Field(False, description="Whether to include a snapshot")

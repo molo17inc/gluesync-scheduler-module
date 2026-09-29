@@ -54,6 +54,7 @@ from gluesync_scheduler.models.entity_validation import (
     entity_validation_http_payload,
     validation_http_timeout_seconds,
 )
+from gluesync_scheduler.models.visualize_refresh import visualize_internal_payload
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +86,9 @@ class ExecutableEvent:
     idempotency_key: Optional[str] = None
     allow_ai_run_loop: bool = False
     validation_reconcile: bool = False
+    viz_id: Optional[str] = None
+    visualize_parameters: Optional[Any] = None
+    schedule_id: Optional[int] = None
     resolved_input: Optional[dict] = None
     resolved_idempotency_key: Optional[str] = None
     correlation_id: Optional[str] = None
@@ -115,6 +119,9 @@ class ExecutableEvent:
             idempotency_key=getattr(event, "idempotency_key", None),
             allow_ai_run_loop=bool(getattr(event, "allow_ai_run_loop", False)),
             validation_reconcile=bool(getattr(event, "validation_reconcile", False)),
+            viz_id=getattr(event, "viz_id", None),
+            visualize_parameters=getattr(event, "visualize_parameters", None),
+            schedule_id=getattr(event, "parent_job_id", None),
         )
 
     @staticmethod
@@ -220,6 +227,7 @@ def _task_type_to_webhook_events(task_type: TaskType) -> list:
         TaskType.ENTITY_VALIDATE: [],
         # The brain-reindex route blocks until CoreHub reports READY or FAILED.
         TaskType.BRAIN_REINDEX: [],
+        TaskType.VISUALIZE_REFRESH: [],
     }
     return mapping.get(task_type, ["ENTITY_SNAPSHOT_COMPLETED", "ENTITY_CDC_STARTED", "ENTITY_CDC_STOPPED"])
 
@@ -1271,6 +1279,7 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
         TaskType.AI_AGENT_RUN: "ai-agent-run",
         TaskType.ENTITY_VALIDATE: "validate",
         TaskType.BRAIN_REINDEX: "brain-reindex",
+        TaskType.VISUALIZE_REFRESH: "visualize-refresh",
     }
     return mapping.get(task_type)
 
@@ -1284,6 +1293,8 @@ def _event_payload(event: ExecutableEvent) -> dict:
         return ai_agent_run_http_payload(event, wait=wait)
     if event.task_type == TaskType.ENTITY_VALIDATE:
         return entity_validation_http_payload(event, _parse_json_list(event.entity_ids))
+    if event.task_type == TaskType.VISUALIZE_REFRESH:
+        return visualize_internal_payload(event)
     payload: dict = {}
     entity_ids = _parse_json_list(event.entity_ids)
     group_ids = _parse_json_list(event.group_ids)

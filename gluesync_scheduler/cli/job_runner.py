@@ -212,6 +212,9 @@ def _endpoint_for_job(base_url: str, job: ScheduledJob) -> Optional[str]:
     if job.task_type == TaskType.BRAIN_REINDEX:
         from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
         return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/brain-reindex"
+    if job.task_type == TaskType.VISUALIZE_REFRESH:
+        from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
+        return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/visualize-refresh"
     logger.error(f"Unknown task type: {job.task_type}")
     return None
 
@@ -254,12 +257,16 @@ def _payload_for_job(job: ScheduledJob, entity_ids: list, group_ids: list) -> tu
     if job.task_type == TaskType.BRAIN_REINDEX:
         from gluesync_scheduler.models.brain_reindex import brain_reindex_http_timeout_seconds
         request_timeout = brain_reindex_http_timeout_seconds()
+    if job.task_type == TaskType.VISUALIZE_REFRESH:
+        from gluesync_scheduler.models.visualize_refresh import visualize_internal_payload
+        json_data = visualize_internal_payload(job)
 
     if job.task_type not in (
         TaskType.QUERY_STUDIO,
         TaskType.AI_AGENT_RUN,
         TaskType.ENTITY_VALIDATE,
         TaskType.BRAIN_REINDEX,
+        TaskType.VISUALIZE_REFRESH,
     ) and entity_ids:
         json_data["entity_ids"] = entity_ids
 

@@ -58,4 +58,7 @@ python3 "$SCRIPT_DIR/migrate_add_query_studio_fields.py" "$@"
 echo "Running migration: migrate_add_ai_agent_run_fields.py"
 python3 "$SCRIPT_DIR/migrate_add_ai_agent_run_fields.py" "$@"
 
+echo "Running migration: migrate_add_visualize_refresh_fields.py"
+python3 "$SCRIPT_DIR/migrate_add_visualize_refresh_fields.py" "$@"
+
 echo "All migrations completed."
