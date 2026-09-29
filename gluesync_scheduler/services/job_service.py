@@ -219,6 +219,15 @@ def _task_type_to_action(task_type) -> Optional[str]:
     return None
 
 
+
+def _store_optional_json(update_data: dict, key: str) -> None:
+    """JSON-encode a present field. Empty values are stored as None."""
+    if key not in update_data:
+        return
+    value = update_data[key]
+    update_data[key] = json.dumps(value) if value else None
+
+
 class JobService:
     """Service for managing scheduled jobs"""
 
@@ -674,9 +683,7 @@ class JobService:
             update_data["agent_input"] = json.dumps(update_data["agent_input"]) if update_data["agent_input"] else None
         if "payload_allow_list" in update_data:
             update_data["payload_allow_list"] = json.dumps(update_data["payload_allow_list"]) if update_data["payload_allow_list"] else None
-        if "visualize_parameters" in update_data:
-            params = update_data["visualize_parameters"]
-            update_data["visualize_parameters"] = json.dumps(params) if params else None
+        _store_optional_json(update_data, "visualize_parameters")
         if "snapshot_write_method" in update_data and update_data["snapshot_write_method"] is None:
             update_data["snapshot_write_method"] = 'UPSERT'
 
