@@ -14,6 +14,44 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# (module in migrations/, function to call) in the order they should be run.
+# A migration that alters a table must come after the migration that
+# creates it; tests/test_schema_upgrade.py enforces this.
+MIGRATIONS = [
+    ("migrate_add_settings_table", "create_settings_table"),
+    ("migrate_add_snapshot_write_method", "add_snapshot_write_method_column"),
+    ("migrate_add_is_cron_expression", "add_is_cron_expression_column"),
+    ("migrate_add_group_ids_field", "migrate_add_group_ids_field"),
+    ("migrate_add_chained_events", "create_chained_job_events_table"),
+    ("migrate_add_webhook_timeout_seconds", "add_webhook_timeout_seconds_column"),
+    ("migrate_add_trigger_flows", "migrate_add_trigger_flows"),
+    ("migrate_add_platform_event", "add_platform_event_column"),
+    ("migrate_add_trigger_routing", "add_routing_column"),
+    ("migrate_add_execution_logs", "create_execution_logs_table"),
+    ("migrate_add_settings_updated_at", "add_settings_updated_at_column"),
+    ("migrate_add_query_studio_fields", "add_query_studio_fields"),
+    ("migrate_add_ai_agent_run_fields", "add_ai_agent_run_fields"),
+    ("migrate_add_entity_validation_fields", "add_entity_validation_fields"),
+    ("migrate_add_visualize_refresh_fields", "add_visualize_refresh_fields"),
+]
+
+
+def prepare_database():
+    """Run pending migrations, then create any table that is still missing."""
+    from gluesync_scheduler.db.database import Base, engine
+    import gluesync_scheduler.models.models  # noqa: F401 - registers the tables on Base
+
+    logger.info("Checking for pending database migrations...")
+    try:
+        run_migrations()
+        logger.info("Database migrations completed successfully")
+    except Exception as mig_error:
+        logger.warning("Migration check completed (may not be critical): %s", mig_error)
+
+    logger.info("Creating database tables if they don't exist...")
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables verified/created successfully")
+
 
 def run_migrations():
     """
@@ -54,25 +92,6 @@ def run_migrations():
 
         logger.info("Starting database migrations...")
 
-        # Define the migration functions in the order they should be run
-        migration_functions = [
-            ("migrate_add_settings_table", "create_settings_table"),
-            ("migrate_add_snapshot_write_method", "add_snapshot_write_method_column"),
-            ("migrate_add_is_cron_expression", "add_is_cron_expression_column"),
-            ("migrate_add_group_ids_field", "migrate_add_group_ids_field"),
-            ("migrate_add_webhook_timeout_seconds", "add_webhook_timeout_seconds_column"),
-            ("migrate_add_chained_events", "create_chained_job_events_table"),
-            ("migrate_add_trigger_flows", "migrate_add_trigger_flows"),
-            ("migrate_add_platform_event", "add_platform_event_column"),
-            ("migrate_add_trigger_routing", "add_routing_column"),
-            ("migrate_add_execution_logs", "create_execution_logs_table"),
-            ("migrate_add_settings_updated_at", "add_settings_updated_at_column"),
-            ("migrate_add_query_studio_fields", "add_query_studio_fields"),
-            ("migrate_add_ai_agent_run_fields", "add_ai_agent_run_fields"),
-            ("migrate_add_entity_validation_fields", "add_entity_validation_fields"),
-            ("migrate_add_visualize_refresh_fields", "add_visualize_refresh_fields"),
-        ]
-
         # Import the database engine from the main app
         try:
             sys.path.insert(0, os.path.join(project_root, "gluesync_scheduler"))
@@ -83,7 +102,7 @@ def run_migrations():
             return
 
         # Run each migration function
-        for module_name, function_name in migration_functions:
+        for module_name, function_name in MIGRATIONS:
             script_path = os.path.join(migrations_dir, f"{module_name}.py")
 
             if not os.path.exists(script_path):
