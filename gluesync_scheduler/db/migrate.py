@@ -102,7 +102,7 @@ def _run_migration(engine, migrations_dir, module_name, function_name):
         migration_func(engine)
         logger.info("Migration %s completed successfully", module_name)
     except Exception as e:
-        logger.error("Error running migration %s: %s", module_name, e)
+        logger.exception("Error running migration %s: %s", module_name, e)
 
 
 def run_migrations():
@@ -129,7 +129,7 @@ def run_migrations():
             from gluesync_scheduler.db.database import engine
             logger.info("Database engine imported successfully")
         except ImportError as e:
-            logger.error("Failed to import database engine: %s", e)
+            logger.exception("Failed to import database engine: %s", e)
             return
 
         for module_name, function_name in MIGRATIONS:
@@ -138,5 +138,5 @@ def run_migrations():
         logger.info("Database migrations completed")
 
     except Exception as e:
-        logger.error("Error during migration process: %s", e)
+        logger.exception("Error during migration process: %s", e)
         raise
