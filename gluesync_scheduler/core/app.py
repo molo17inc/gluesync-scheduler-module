@@ -239,149 +239,175 @@ if ssl_enabled:
 # Add exception handling middleware
 app.middleware("http")(catch_exceptions_middleware)
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize resources on startup"""
-    # Display version at startup
+def _ssl_enabled_flag() -> bool:
+    return os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
+
+
+def _print_version_banner():
+    """Display version at startup"""
     print(f"\n{'='*80}")
     print(f"Gluesync Chronos module v{__version__}")
     print(f"{'='*80}\n")
-    
-    logger.info("Starting Gluesync Chronos module...")
-    
-    # Create necessary directories
+
+
+def _ensure_runtime_dirs():
+    """Create necessary directories"""
     os.makedirs(os.getenv('DATA_DIR', './data'), exist_ok=True)
     os.makedirs(os.getenv('LOG_DIR', './logs'), exist_ok=True)
     os.makedirs(os.getenv('CRON_LOG_DIR', './logs'), exist_ok=True)
+
+
+def _resolve_db_url() -> str:
+    """Use DB_URL when provided, otherwise the SQLite file under DATA_DIR"""
     db_url = os.getenv('DB_URL')
-    if db_url:
-        # Use provided DB_URL
-        pass
-    else:
+    if not db_url:
         # Convert relative path to absolute path for consistency
         abs_data_dir = os.path.abspath(os.getenv('DATA_DIR', './data'))
         db_url = f'sqlite:///{abs_data_dir}/scheduler.db'
         logger.info(f"Using absolute database path: {abs_data_dir}/scheduler.db")
-    
-    # Initialize database
+    return db_url
+
+
+def _log_sqlite_file_state(db_url: str):
+    """For SQLite, verify the database file"""
+    if not db_url.startswith('sqlite:'):
+        return
+    db_path = db_url.replace('sqlite:///', '')
+    # Handle Windows paths
+    if ':' in db_path and len(db_path) > 2 and db_path[1] == ':':
+        db_path = db_path[2:]  # Remove the leading / from /C:/path
+
+    db_path = os.path.abspath(db_path)
+    logger.info(f"DATABASE: Resolved database file path: {db_path}")
+
+    # Check if database file exists
+    if os.path.exists(db_path):
+        db_size = os.path.getsize(db_path)
+        logger.info(f"DATABASE: Database file exists, size: {db_size} bytes")
+    else:
+        logger.info("DATABASE: Database file does not exist, it will be created")
+
+
+def _init_database(db_url: str):
     try:
         logger.info("Verifying database schema...")
         logger.info(f"DATABASE: Application DB_URL: {db_url}")
-        
-        # For SQLite, verify the database file
-        if db_url.startswith('sqlite:'):
-            db_path = db_url.replace('sqlite:///', '')
-            # Handle Windows paths
-            if ':' in db_path and len(db_path) > 2 and db_path[1] == ':':
-                db_path = db_path[2:]  # Remove the leading / from /C:/path
-            
-            db_path = os.path.abspath(db_path)
-            logger.info(f"DATABASE: Resolved database file path: {db_path}")
-            
-            # Check if database file exists
-            if os.path.exists(db_path):
-                db_size = os.path.getsize(db_path)
-                logger.info(f"DATABASE: Database file exists, size: {db_size} bytes")
-            else:
-                logger.info("DATABASE: Database file does not exist, it will be created")
-        
+        _log_sqlite_file_state(db_url)
+
         from gluesync_scheduler.db.migrate import prepare_database
         prepare_database()
     except Exception as e:
-        logger.error(f"Error initializing database: {e}")
+        logger.exception(f"Error initializing database: {e}")
         # Continue startup even if there's an error, as the schema might be partially functional
-    
-    # Initialize default settings
+
+
+def _log_timezone_setting(settings_service):
+    """Load the timezone setting from the database"""
+    timezone_setting = settings_service.get_setting_by_key("timezone")
+    if timezone_setting and timezone_setting.value:
+        logger.info(f"SSL_ENABLED before timezone update: {_ssl_enabled_flag()}")
+        timezone_value = timezone_setting.value
+        logger.info(f"Updated TIMEZONE to: {timezone_value}")
+        logger.info(f"SSL_ENABLED after timezone update: {_ssl_enabled_flag()}")
+        logger.info(f"Loaded timezone from database: {timezone_value}")
+
+
+def _apply_default_settings(db):
+    try:
+        from gluesync_scheduler.services.settings_service import SettingsService
+        settings_service = SettingsService(db)
+
+        created_settings = settings_service.initialize_default_settings()
+        if created_settings:
+            logger.info("Initialized default settings")
+        else:
+            logger.info("Default settings already exist")
+
+        _log_timezone_setting(settings_service)
+    except Exception as e:
+        logger.warning(f"Could not initialize settings (table may be empty): {e}")
+
+
+def _init_default_settings():
     try:
         from gluesync_scheduler.db.database import SessionLocal
         db = SessionLocal()
-        
+
         # Check if settings table exists
         from sqlalchemy import inspect
         inspector = inspect(db.get_bind())
-        
-        logger.info(f"SSL_ENABLED before settings service: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
-        
+
+        logger.info(f"SSL_ENABLED before settings service: {_ssl_enabled_flag()}")
+
         if 'settings' in inspector.get_table_names():
-            try:
-                from gluesync_scheduler.services.settings_service import SettingsService
-                settings_service = SettingsService(db)
-                
-                # Initialize default settings
-                created_settings = settings_service.initialize_default_settings()
-                if created_settings:
-                    logger.info("Initialized default settings")
-                else:
-                    logger.info("Default settings already exist")
-                
-                # Load settings from database
-                timezone_setting = settings_service.get_setting_by_key("timezone")
-                if timezone_setting and timezone_setting.value:
-                    logger.info(f"SSL_ENABLED before timezone update: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
-                    timezone_value = timezone_setting.value
-                    logger.info(f"Updated TIMEZONE to: {timezone_value}")
-                    logger.info(f"SSL_ENABLED after timezone update: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
-                    logger.info(f"Loaded timezone from database: {timezone_value}")
-                    
-            except Exception as e:
-                logger.warning(f"Could not initialize settings (table may be empty): {e}")
+            _apply_default_settings(db)
         else:
             logger.warning("Settings table does not exist yet. Will be created when settings are first saved.")
-            
-        # Close the session
+
         db.close()
     except Exception as e:
-        logger.error(f"Error initializing settings: {e}")
+        logger.exception(f"Error initializing settings: {e}")
         logger.warning("The application will continue with default settings")
         db.close()
-    
-    # Initialize the Gluesync SDK client
+
+
+def _log_sdk_corehub_url():
+    """Extract the CoreHub URL from the SDK client"""
+    if hasattr(gluesync_sdk_client, 'corehub_url') and gluesync_sdk_client.corehub_url:
+        corehub_url = gluesync_sdk_client.corehub_url
+        logger.info(f"Extracted CoreHub URL from SDK client: {corehub_url}")
+        logger.info(f"CoreHub URL from SDK client: {corehub_url}")
+
+
+def _log_corehub_url_from_discovery():
+    """Try to extract the CoreHub URL directly from the SDK client connection"""
+    client = getattr(gluesync_sdk_client, '_client', None)
+    if not client:
+        return
+    discovery_result = getattr(client, '_discovery_result', None)
+    if not discovery_result:
+        return
+    host = discovery_result.get('host')
+    port = discovery_result.get('port', 1717)
+    use_ssl = discovery_result.get('ssl', False)
+
+    if host:
+        scheme = "https" if use_ssl else "http"
+        logger.info(f"Extracted CoreHub URL from discovery result: {scheme}://{host}:{port}")
+
+
+def _log_configured_corehub_url():
+    gluesync_host = os.getenv('GLUESYNC_HOST', '')
+    if gluesync_host:
+        logger.info(f"CoreHub URL is set to: {gluesync_host}")
+    else:
+        logger.warning("CoreHub URL is not set yet. Will attempt to extract it from the SDK client.")
+        _log_corehub_url_from_discovery()
+
+
+async def _init_sdk_client():
     try:
         logger.info("Initializing Gluesync SDK client...")
         await gluesync_sdk_client.initialize()
         logger.info("Gluesync SDK client initialized successfully")
-        
+
         # Wait a short time to ensure the SDK client has had time to extract the CoreHub URL
         await asyncio.sleep(0.5)
-        
-        # Extract the CoreHub URL from the SDK client
-        corehub_url = None
-        if hasattr(gluesync_sdk_client, 'corehub_url') and gluesync_sdk_client.corehub_url:
-            corehub_url = gluesync_sdk_client.corehub_url
-            logger.info(f"Extracted CoreHub URL from SDK client: {corehub_url}")
-            
-            # Update settings with the discovered URL
-            # Note: Since we removed the settings system, we can't update it anymore
-            logger.info(f"CoreHub URL from SDK client: {corehub_url}")
-        
-        # If we have a CoreHub URL in settings, log it
-        gluesync_host = os.getenv('GLUESYNC_HOST', '')
-        if gluesync_host:
-            logger.info(f"CoreHub URL is set to: {gluesync_host}")
-        else:
-            logger.warning("CoreHub URL is not set yet. Will attempt to extract it from the SDK client.")
-            
-            # Try to extract it directly from the SDK client connection
-            if hasattr(gluesync_sdk_client, '_client') and gluesync_sdk_client._client:
-                if hasattr(gluesync_sdk_client._client, '_discovery_result') and gluesync_sdk_client._client._discovery_result:
-                    host = gluesync_sdk_client._client._discovery_result.get('host')
-                    port = gluesync_sdk_client._client._discovery_result.get('port', 1717)
-                    use_ssl = gluesync_sdk_client._client._discovery_result.get('ssl', False)
-                    
-                    if host:
-                        scheme = "https" if use_ssl else "http"
-                        corehub_url = f"{scheme}://{host}:{port}"
-                        logger.info(f"Extracted CoreHub URL from discovery result: {corehub_url}")
-            
+
+        _log_sdk_corehub_url()
+        _log_configured_corehub_url()
+
         # Create a CoreHubClient instance to initialize the singleton with the URL
         from gluesync_scheduler.core.play_pause import CoreHubClient
-        client = CoreHubClient()
+        CoreHubClient()
         logger.info("Initialized CoreHubClient singleton for later use")
     except Exception as e:
-        logger.error(f"Failed to initialize Gluesync SDK client: {e}")
+        logger.exception(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("The application will continue, but some functionality may be limited")
 
-    # Start the CoreHub health check background task
+
+def _start_health_check():
+    """Start the CoreHub health check background task"""
     try:
         from gluesync_scheduler.core.health_check import health_check
         health_check.start()
@@ -389,66 +415,66 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"Failed to start CoreHub health check (non-fatal): {e}")
 
-    # Load existing jobs into the scheduler
+
+def _schedule_job(db, job):
+    try:
+        job_id = scheduler_service.create_job(job)
+        logger.info(f"Loaded job '{job.name}' (ID: {job.id}) into scheduler with scheduler ID: {job_id}")
+
+        # Update the command field to store the scheduler job ID
+        job.command = f"Scheduled job ID: {job_id}"
+        db.commit()
+    except Exception as job_error:
+        logger.exception(f"Failed to load job '{job.name}' (ID: {job.id}) into scheduler: {job_error}")
+
+
+def _load_enabled_jobs(db, engine):
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    if 'scheduled_jobs' not in inspector.get_table_names():
+        logger.warning("scheduled_jobs table does not exist yet. No jobs to load.")
+        return
+
+    enabled_jobs = db.query(ScheduledJob).filter(ScheduledJob.enabled == True).all()
+    if not enabled_jobs:
+        logger.info("No enabled jobs found to load into scheduler")
+        return
+
+    logger.info(f"Found {len(enabled_jobs)} enabled job(s) to load into scheduler")
+    for job in enabled_jobs:
+        _schedule_job(db, job)
+    logger.info("Successfully loaded existing jobs into scheduler")
+
+
+def _load_existing_jobs():
+    """Load existing jobs into the scheduler"""
     try:
         logger.info("Loading existing jobs into scheduler...")
-        
-        # Import database components
-        from gluesync_scheduler.db.database import Base, engine, SessionLocal
-        from sqlalchemy import inspect
-        
-        # Create a database session
+        from gluesync_scheduler.db.database import engine, SessionLocal
+
         db = SessionLocal()
         try:
-            # Check if the scheduled_jobs table exists
-            inspector = inspect(engine)
-            if 'scheduled_jobs' in inspector.get_table_names():
-                # Get all enabled jobs from the database
-                enabled_jobs = db.query(ScheduledJob).filter(ScheduledJob.enabled == True).all()
-                
-                if enabled_jobs:
-                    logger.info(f"Found {len(enabled_jobs)} enabled job(s) to load into scheduler")
-                    
-                    # Add each enabled job to the scheduler
-                    for job in enabled_jobs:
-                        try:
-                            # Use the scheduler service to create the job
-                            job_id = scheduler_service.create_job(job)
-                            logger.info(f"Loaded job '{job.name}' (ID: {job.id}) into scheduler with scheduler ID: {job_id}")
-                            
-                            # Update the command field to store the scheduler job ID
-                            job.command = f"Scheduled job ID: {job_id}"
-                            db.commit()
-                        except Exception as job_error:
-                            logger.error(f"Failed to load job '{job.name}' (ID: {job.id}) into scheduler: {job_error}")
-                            continue
-                    
-                    logger.info("Successfully loaded existing jobs into scheduler")
-                else:
-                    logger.info("No enabled jobs found to load into scheduler")
-            else:
-                logger.warning("scheduled_jobs table does not exist yet. No jobs to load.")
+            _load_enabled_jobs(db, engine)
         finally:
-            # Ensure the database session is closed
             db.close()
-            
     except Exception as e:
-        logger.error(f"Error loading jobs into scheduler: {e}")
+        logger.exception(f"Error loading jobs into scheduler: {e}")
         logger.warning("The scheduler will continue, but existing jobs may not be loaded")
-    
-    # Log configuration
+
+
+def _log_configuration(db_url: str):
     logger.info(f"Host: {os.getenv('HOST', '0.0.0.0')}")
     logger.info(f"Port: {int(os.getenv('PORT', '8000'))}")
     logger.info(f"Database URL: {db_url}")
-    logger.info(f"SSL Enabled: {os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')}")
+    logger.info(f"SSL Enabled: {_ssl_enabled_flag()}")
     logger.info(f"CoreHub URL: {os.getenv('GLUESYNC_HOST', '')}")
     logger.info(f"Gluesync Module Tag: {os.getenv('GLUESYNC_MODULE_TAG', 'chronos')}")
     logger.info(f"Gluesync License File: {os.getenv('GLUESYNC_LICENSE_FILE', '/opt/gluesync/shared/gs-license.dat')}")
     logger.info(f"Gluesync Security Config: {os.getenv('GLUESYNC_SECURITY_CONFIG', '/opt/gluesync/shared/security-config.json')}")
-    
-    logger.info("Gluesync Scheduler Module started successfully")
 
-    # Clean up any stale one-shot webhooks left in CoreHub from a previous run
+
+async def _cleanup_stale_webhooks():
+    """Clean up any stale one-shot webhooks left in CoreHub from a previous run"""
     try:
         from gluesync_scheduler.services.chain_execution_service import ChainExecutionService
         removed = await ChainExecutionService.cleanup_stale_webhooks()
@@ -456,6 +482,26 @@ async def startup_event():
             logger.info("Startup cleanup removed %d stale webhook(s) from CoreHub", removed)
     except Exception as e:
         logger.warning("Stale webhook cleanup failed (non-fatal): %s", e)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize resources on startup"""
+    _print_version_banner()
+    logger.info("Starting Gluesync Chronos module...")
+
+    _ensure_runtime_dirs()
+    db_url = _resolve_db_url()
+    _init_database(db_url)
+    _init_default_settings()
+    await _init_sdk_client()
+    _start_health_check()
+    _load_existing_jobs()
+    _log_configuration(db_url)
+
+    logger.info("Gluesync Scheduler Module started successfully")
+
+    await _cleanup_stale_webhooks()
 
 @app.on_event("shutdown")
 async def shutdown_event():
