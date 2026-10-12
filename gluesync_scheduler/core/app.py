@@ -284,20 +284,8 @@ async def startup_event():
             else:
                 logger.info("DATABASE: Database file does not exist, it will be created")
         
-        # Run any pending migrations BEFORE creating tables
-        logger.info("Checking for pending database migrations...")
-        from gluesync_scheduler.db.migrate import run_migrations
-        try:
-            run_migrations()
-            logger.info("Database migrations completed successfully")
-        except Exception as mig_error:
-            logger.warning(f"Migration check completed (may not be critical): {mig_error}")
-        
-        # Create all database tables if they don't exist
-        from gluesync_scheduler.db.database import Base, engine
-        logger.info("Creating database tables if they don't exist...")
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables verified/created successfully")
+        from gluesync_scheduler.db.migrate import prepare_database
+        prepare_database()
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
         # Continue startup even if there's an error, as the schema might be partially functional
@@ -391,7 +379,15 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to initialize Gluesync SDK client: {e}")
         logger.warning("The application will continue, but some functionality may be limited")
-    
+
+    # Start the CoreHub health check background task
+    try:
+        from gluesync_scheduler.core.health_check import health_check
+        health_check.start()
+        logger.info("CoreHub health check started (interval=%ds)", health_check._interval)
+    except Exception as e:
+        logger.warning(f"Failed to start CoreHub health check (non-fatal): {e}")
+
     # Load existing jobs into the scheduler
     try:
         logger.info("Loading existing jobs into scheduler...")
@@ -464,7 +460,15 @@ async def startup_event():
 async def shutdown_event():
     """Clean up resources on shutdown"""
     logger.info("Shutting down Gluesync Scheduler Module...")
-    
+
+    # Stop the CoreHub health check
+    try:
+        from gluesync_scheduler.core.health_check import health_check
+        await health_check.stop()
+        logger.info("CoreHub health check stopped")
+    except Exception as e:
+        logger.warning(f"Error stopping CoreHub health check: {e}")
+
     # Shutdown the CoreHub introspector httpx client (if it was ever
     # materialised). Uses lazy import so the security module is not
     # loaded on shutdown paths that never called it.

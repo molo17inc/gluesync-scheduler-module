@@ -143,36 +143,39 @@ gluesync-scheduler-module/
 
 Configure the application using environment variables:
 
-| Variable | Description | Default |
-|----------|-------------|----------|
-| `GLUESYNC_HOST` | URL of the Gluesync Core Hub (dynamically updated from SDK discovery if available) | `http://localhost:1717` |
-| `HOST` | Host to bind the API server | `0.0.0.0` |
-| `PORT` | Port to bind the API server | `1717` |
-| `DEBUG` | Enable debug mode for Uvicorn server logs | `False` |
-| `LOG_LEVEL` | Application logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` |
-| `DB_URL` | Database connection URL | `sqlite:///./scheduler.db` |
-| `DATA_DIR` | Directory for storing application data | `/app/data` |
-| `ENTITY_START_TIMEOUT` | Timeout in seconds for entity start operations | `2` |
-| `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
-| `CRONTAB_USER` | User for crontab operations (None for current user) | `None` |
-| `CHRONOS_SDK_TOKEN_REFRESH_ON_401` | Whether to automatically refresh the SDK token on 401 Unauthorized and retry outbound CoreHub calls exactly once | `True` |
-| `CHRONOS_REDO_PAUSE_TIMEOUT` | Maximum seconds to wait for entities to leave the Active state (Hold, Error, or Warning accepted) before issuing a redo command. See [Pause before redo](#pause-before-redo). | `60` |
-| `CHRONOS_REDO_POLL_INTERVAL` | Seconds between CoreHub `entities-status` checks while polling for entities to leave the Active state (Hold, Error, or Warning accepted) before a redo. See [Pause before redo](#pause-before-redo). | `5` |
-| `TZ` | Preferred timezone environment variable for job scheduling. If set, it takes precedence over `TIMEZONE`. | `UTC` |
-| `TIMEZONE` | Deprecated timezone environment variable for job scheduling. Used only as fallback when `TZ` is not set. | `UTC` |
+| Variable                                | Description                                                                                                                                                                                          | Default                    |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `GLUESYNC_HOST`                         | URL of the Gluesync Core Hub (dynamically updated from SDK discovery if available)                                                                                                                   | `http://localhost:1717`    |
+| `HOST`                                  | Host to bind the API server                                                                                                                                                                          | `0.0.0.0`                  |
+| `PORT`                                  | Port to bind the API server                                                                                                                                                                          | `1717`                     |
+| `DEBUG`                                 | Enable debug mode for Uvicorn server logs                                                                                                                                                            | `False`                    |
+| `LOG_LEVEL`                             | Application logging level (DEBUG, INFO, WARNING, ERROR)                                                                                                                                              | `INFO`                     |
+| `DB_URL`                                | Database connection URL                                                                                                                                                                              | `sqlite:///./scheduler.db` |
+| `DATA_DIR`                              | Directory for storing application data                                                                                                                                                               | `/app/data`                |
+| `ENTITY_START_TIMEOUT`                  | Timeout in seconds for entity start operations                                                                                                                                                       | `2`                        |
+| `ALLOWED_ORIGINS`                       | CORS allowed origins (comma-separated)                                                                                                                                                               | `*`                        |
+| `CRONTAB_USER`                          | User for crontab operations (None for current user)                                                                                                                                                  | `None`                     |
+| `CHRONOS_SDK_TOKEN_REFRESH_ON_401`      | Whether to automatically refresh the SDK token on 401 Unauthorized and retry outbound CoreHub calls exactly once                                                                                     | `True`                     |
+| `CHRONOS_REDO_PAUSE_TIMEOUT`            | Maximum seconds to wait for entities to leave the Active state (Hold, Error, or Warning accepted) before issuing a redo command. See [Pause before redo](#pause-before-redo).                        | `60`                       |
+| `CHRONOS_REDO_POLL_INTERVAL`            | Seconds between CoreHub `entities-status` checks while polling for entities to leave the Active state (Hold, Error, or Warning accepted) before a redo. See [Pause before redo](#pause-before-redo). | `5`                        |
+| `CHRONOS_HEALTH_CHECK_ENABLED`          | Whether the periodic CoreHub connection health check is enabled. See [Connection health check](#connection-health-check).                                                                            | `true`                     |
+| `CHRONOS_HEALTH_CHECK_INTERVAL_SECONDS` | Seconds between CoreHub health check calls (`GET /authentication/me`). See [Connection health check](#connection-health-check).                                                                      | `300`                      |
+| `CHRONOS_HEALTH_CHECK_TIMEOUT_SECONDS`  | HTTP timeout in seconds for each health check call.                                                                                                                                                  | `10`                       |
+| `TZ`                                    | Preferred timezone environment variable for job scheduling. If set, it takes precedence over `TIMEZONE`.                                                                                             | `UTC`                      |
+| `TIMEZONE`                              | Deprecated timezone environment variable for job scheduling. Used only as fallback when `TZ` is not set.                                                                                             | `UTC`                      |
 
 ### Gluesync SDK Configuration
 
 Additional environment variables for the Gluesync SDK integration:
 
-| Variable | Description | Default |
-|----------|-------------|----------|
-| `GLUESYNC_LICENSE_FILE` | Path to the Gluesync license file | `gs-license.dat` |
-| `SSL_ENABLED` | Whether to use SSL for CoreHub connection | `False` |
-| `SSL_SKIP_VERIFY` | Skip SSL certificate verification | `True` |
-| `GLUESYNC_SECURITY_CONFIG` | Path to security configuration file | `/opt/gluesync/data/security-config.json` |
-| `GLUESYNC_KEYSTORE_PATH` | Path to JKS keystore file for SSL | `None` |
-| `GLUESYNC_KEYSTORE_PASSWORD` | Password for JKS keystore | `None` |
+| Variable                     | Description                               | Default                                   |
+| ---------------------------- | ----------------------------------------- | ----------------------------------------- |
+| `GLUESYNC_LICENSE_FILE`      | Path to the Gluesync license file         | `gs-license.dat`                          |
+| `SSL_ENABLED`                | Whether to use SSL for CoreHub connection | `False`                                   |
+| `SSL_SKIP_VERIFY`            | Skip SSL certificate verification         | `True`                                    |
+| `GLUESYNC_SECURITY_CONFIG`   | Path to security configuration file       | `/opt/gluesync/data/security-config.json` |
+| `GLUESYNC_KEYSTORE_PATH`     | Path to JKS keystore file for SSL         | `None`                                    |
+| `GLUESYNC_KEYSTORE_PASSWORD` | Password for JKS keystore                 | `None`                                    |
 
 > **Note**: The module identifier (`GLUESYNC_MODULE_TAG`) is hardcoded as `chronos` and cannot be changed externally.
 
@@ -188,21 +191,21 @@ Browsers reach chronos through the same origin as CoreHub (Traefik),
 so the `gs-auth` cookie set at login is forwarded automatically.
 CLI / script callers must send `Authorization: Bearer <jwt>` themselves.
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CHRONOS_AUTH_CACHE_TTL` | TTL (seconds) for cached `/auth/me` lookups. Revoke-latency ≤ this value. | `30` |
-| `CHRONOS_AUTH_TIMEOUT_MS` | httpx timeout for outbound `/auth/me` calls. | `5000` |
-| `CHRONOS_COREHUB_URL_OVERRIDE` | Force the base URL used for `/auth/me` instead of relying on SDK discovery. | *(unset)* |
-| `CHRONOS_AUTH_FAIL_OPEN` | **DEBUG ONLY.** When `true`, every request is accepted as SUPER_ADMIN. Logs a warning on every request. Never enable in production. | `false` |
+| Variable                       | Description                                                                                                                         | Default   |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `CHRONOS_AUTH_CACHE_TTL`       | TTL (seconds) for cached `/auth/me` lookups. Revoke-latency ≤ this value.                                                           | `30`      |
+| `CHRONOS_AUTH_TIMEOUT_MS`      | httpx timeout for outbound `/auth/me` calls.                                                                                        | `5000`    |
+| `CHRONOS_COREHUB_URL_OVERRIDE` | Force the base URL used for `/auth/me` instead of relying on SDK discovery.                                                         | _(unset)_ |
+| `CHRONOS_AUTH_FAIL_OPEN`       | **DEBUG ONLY.** When `true`, every request is accepted as SUPER_ADMIN. Logs a warning on every request. Never enable in production. | `false`   |
 
 Permission matrix (mirrors CoreHub `UserRole` + gluesync-nodejs-monorepo UI):
 
-| Guard | SUPER_ADMIN | MANAGER | MONITOR | VIEWER | EXTERNAL_MODULE |
-|-------|-------------|---------|---------|--------|-----------------|
-| Read jobs / read settings (`current_user`) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Run / enable / disable schedule (`require_control`) | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Create / edit / delete schedule (`require_manage`) | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Change chronos configuration (`require_config`) | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Guard                                               | SUPER_ADMIN | MANAGER | MONITOR | VIEWER | EXTERNAL_MODULE |
+| --------------------------------------------------- | ----------- | ------- | ------- | ------ | --------------- |
+| Read jobs / read settings (`current_user`)          | ✅          | ✅      | ✅      | ✅     | ✅              |
+| Run / enable / disable schedule (`require_control`) | ✅          | ✅      | ✅      | ❌     | ❌              |
+| Create / edit / delete schedule (`require_manage`)  | ✅          | ✅      | ❌      | ❌     | ❌              |
+| Change chronos configuration (`require_config`)     | ✅          | ✅      | ❌      | ❌     | ❌              |
 
 The legacy `/api/pipelines/*` routes are chronos-internal (invoked by
 cron jobs) and remain protected by the existing `verify_localhost`
@@ -302,8 +305,8 @@ The module includes a settings management system that allows you to configure ap
 
 ### Available Settings
 
-| Setting Key | Description | Default |
-|-------------|-------------|----------|
+| Setting Key | Description                       | Default                                                   |
+| ----------- | --------------------------------- | --------------------------------------------------------- |
 | `timezone`  | Timezone used for scheduling jobs | Value from `TZ` env var, or `TIMEZONE` if `TZ` is not set |
 
 ### Settings API Endpoints
@@ -381,20 +384,20 @@ http://localhost:1717/redoc
 
 ### API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-----------|
-| `/api/jobs` | `GET` | List all scheduled jobs |
-| `/api/jobs/{job_id}` | `GET` | Get a specific job |
-| `/api/jobs` | `POST` | Create a new scheduled job |
-| `/api/jobs/{job_id}` | `PUT` | Update an existing job |
-| `/api/jobs/{job_id}` | `DELETE` | Delete a job |
-| `/api/jobs/{job_id}/run` | `POST` | Manually trigger a job |
-| `/api/jobs/{job_id}/status` | `PATCH` | Enable/disable a job |
-| `/api/settings` | `GET` | List all settings |
-| `/api/settings/{key}` | `GET` | Get a specific setting |
-| `/api/settings` | `POST` | Create a new setting |
-| `/api/settings/{key}` | `PUT` | Update a setting |
-| `/api/query-studio/agents` | `GET` | List Query Studio agents from CoreHub (UI agent picker) |
+| Endpoint                    | Method   | Description                                             |
+| --------------------------- | -------- | ------------------------------------------------------- |
+| `/api/jobs`                 | `GET`    | List all scheduled jobs                                 |
+| `/api/jobs/{job_id}`        | `GET`    | Get a specific job                                      |
+| `/api/jobs`                 | `POST`   | Create a new scheduled job                              |
+| `/api/jobs/{job_id}`        | `PUT`    | Update an existing job                                  |
+| `/api/jobs/{job_id}`        | `DELETE` | Delete a job                                            |
+| `/api/jobs/{job_id}/run`    | `POST`   | Manually trigger a job                                  |
+| `/api/jobs/{job_id}/status` | `PATCH`  | Enable/disable a job                                    |
+| `/api/settings`             | `GET`    | List all settings                                       |
+| `/api/settings/{key}`       | `GET`    | Get a specific setting                                  |
+| `/api/settings`             | `POST`   | Create a new setting                                    |
+| `/api/settings/{key}`       | `PUT`    | Update a setting                                        |
+| `/api/query-studio/agents`  | `GET`    | List Query Studio agents from CoreHub (UI agent picker) |
 
 ## Query Studio on event (`query_studio`)
 
@@ -496,7 +499,7 @@ The scheduler supports the following task types for job creation:
 **Entity-Level Operations:**
 
 - `entity_start` - Start synchronization for specific entities within a pipeline
-- `entity_stop` - Stop synchronization for specific entities within a pipeline  
+- `entity_stop` - Stop synchronization for specific entities within a pipeline
 - `entity_snapshot` - Create a snapshot (one-time synchronization) for specific entities
 
 **Pipeline-Level Operations:**
@@ -514,7 +517,7 @@ The scheduler supports the following task types for job creation:
 **Operation Parameters:**
 
 - For entity operations: Requires `entity_ids` array
-- For group operations: Requires `group_ids` array  
+- For group operations: Requires `group_ids` array
 - For pipeline operations: No additional IDs needed (operates on entire pipeline)
 - Snapshot operations support `with_snapshot` (boolean) and `snapshot_write_method` ("UPSERT" or "INSERT")
 
@@ -592,15 +595,15 @@ Examples:
 
 In cron expressions, days of the week are represented as numbers:
 
-| Day | Number |
-|-----|--------|
-| Sunday | 0 |
-| Monday | 1 |
-| Tuesday | 2 |
-| Wednesday | 3 |
-| Thursday | 4 |
-| Friday | 5 |
-| Saturday | 6 |
+| Day       | Number |
+| --------- | ------ |
+| Sunday    | 0      |
+| Monday    | 1      |
+| Tuesday   | 2      |
+| Wednesday | 3      |
+| Thursday  | 4      |
+| Friday    | 5      |
+| Saturday  | 6      |
 
 #### Scheduling for Specific Days
 
@@ -679,20 +682,50 @@ All redo operations (`entity_redo`, `pipeline_redo`, `group_redo`) now pause the
 
 The polling uses CoreHub's `GET /pipelines/{pipeline_id}/entities-status` endpoint, which returns the same runtime status the MPP UI uses to render Active / Hold / Error / Warning. An entity is considered settled (ready to proceed) when it reports Hold, Error, or Warning. Hub !2219 puts Warning on `errorState.severity` (`WARNING` vs `ERROR`). Warning and Error remain settled even if `isSyncActive` / `isMigrationActive` are still true — an entity can keep running while Warning, same as Error.
 
-| Redo operation | Pause target | What is polled |
-|----------------|--------------|----------------|
-| `entity_redo` | The single entity (`stop` with `entity` param) | That entity leaving Active (Hold, Error, or Warning) |
-| `pipeline_redo` | The whole pipeline (`stop`) | All entities in the pipeline leaving Active (Hold, Error, or Warning) |
-| `group_redo` | The group (`stop-group`) | All entities belonging to the group leaving Active (Hold, Error, or Warning) |
+| Redo operation  | Pause target                                   | What is polled                                                               |
+| --------------- | ---------------------------------------------- | ---------------------------------------------------------------------------- |
+| `entity_redo`   | The single entity (`stop` with `entity` param) | That entity leaving Active (Hold, Error, or Warning)                         |
+| `pipeline_redo` | The whole pipeline (`stop`)                    | All entities in the pipeline leaving Active (Hold, Error, or Warning)        |
+| `group_redo`    | The group (`stop-group`)                       | All entities belonging to the group leaving Active (Hold, Error, or Warning) |
 
 If the pause call itself fails, the redo is aborted. If polling times out before every target entity leaves the Active state, the redo is also aborted and an error is logged. When the affected entity IDs cannot be resolved (for example the config endpoint returns nothing), Chronos proceeds with the redo and logs a warning rather than blocking indefinitely.
 
 The polling behavior is configurable through two environment variables:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CHRONOS_REDO_PAUSE_TIMEOUT` | `60` | Maximum seconds to wait for all target entities to leave the Active state before giving up. |
-| `CHRONOS_REDO_POLL_INTERVAL` | `5` | Seconds between status checks while polling. |
+| Variable                     | Default | Description                                                                                 |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------------- |
+| `CHRONOS_REDO_PAUSE_TIMEOUT` | `60`    | Maximum seconds to wait for all target entities to leave the Active state before giving up. |
+| `CHRONOS_REDO_POLL_INTERVAL` | `5`     | Seconds between status checks while polling.                                                |
+
+### Connection health check
+
+Chronos runs a background task that periodically calls CoreHub's
+`GET /authentication/me` using the SDK client's JWT token. This
+proactively detects stale connections — for example when CoreHub
+has been restarted or a network blip invalidated the WebSocket
+session — before a scheduled job fails.
+
+When the health check receives a 401 (token rejected) or cannot
+reach CoreHub at all, it automatically triggers a force-reconnect
+of the SDK client (`initialize(force_reconnect=True)`), which
+disconnects the old WebSocket, creates a fresh client, and performs
+a new login handshake. This is the same mechanism used by the
+401-retry path in outbound CoreHub API calls.
+
+A 5xx response from CoreHub is treated as a transient server-side
+issue and does **not** trigger a reconnect — the token is likely
+still valid and CoreHub will recover on its own.
+
+The health check starts after the SDK client initializes (during
+FastAPI startup) and stops cleanly during shutdown. If the SDK
+client is not yet initialized, the health check skips that tick
+and waits for the next one.
+
+| Variable                                | Default | Description                                                |
+| --------------------------------------- | ------- | ---------------------------------------------------------- |
+| `CHRONOS_HEALTH_CHECK_ENABLED`          | `true`  | Set to `false` to disable the health check entirely.       |
+| `CHRONOS_HEALTH_CHECK_INTERVAL_SECONDS` | `300`   | Seconds between health check calls (5 minutes by default). |
+| `CHRONOS_HEALTH_CHECK_TIMEOUT_SECONDS`  | `10`    | HTTP timeout for each `GET /authentication/me` call.       |
 
 ## Testing
 
