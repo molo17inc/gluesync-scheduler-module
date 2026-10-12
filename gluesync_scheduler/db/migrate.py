@@ -34,9 +34,19 @@ MIGRATIONS = [
 
 
 def prepare_database():
-    """Run pending migrations, then create any table that is still missing."""
+    """
+    Bring the database schema in line with the models at startup.
+
+    Missing tables are created from the models first, so they always get every
+    column; the migrations then only add columns to tables an older release
+    created. This is the same order entrypoint.sh uses in the Linux image.
+    """
     from gluesync_scheduler.db.database import Base, engine
     import gluesync_scheduler.models.models  # noqa: F401 - registers the tables on Base
+
+    logger.info("Creating database tables if they don't exist...")
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables verified/created successfully")
 
     logger.info("Checking for pending database migrations...")
     try:
@@ -44,10 +54,6 @@ def prepare_database():
         logger.info("Database migrations completed successfully")
     except Exception as mig_error:
         logger.warning("Migration check completed (may not be critical): %s", mig_error)
-
-    logger.info("Creating database tables if they don't exist...")
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables verified/created successfully")
 
 
 def run_migrations():
