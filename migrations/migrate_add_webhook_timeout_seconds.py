@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 
 def add_webhook_timeout_seconds_column(engine):
     """Add webhook_timeout_seconds column to chained_job_events table."""
+    table_sql = text(
+        "SELECT count(*) FROM sqlite_master "
+        "WHERE type='table' AND name='chained_job_events'"
+    )
     check_sql = text(
         "SELECT count(*) FROM pragma_table_info('chained_job_events') "
         "WHERE name = 'webhook_timeout_seconds'"
@@ -24,6 +28,9 @@ def add_webhook_timeout_seconds_column(engine):
     )
 
     with engine.connect() as conn:
+        if not conn.execute(table_sql).scalar():
+            logger.info("Table chained_job_events does not exist, skipping webhook_timeout_seconds")
+            return
         exists = conn.execute(check_sql).scalar()
         if exists:
             logger.info("Column webhook_timeout_seconds already exists, skipping")
