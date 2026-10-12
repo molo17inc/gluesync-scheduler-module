@@ -284,20 +284,8 @@ async def startup_event():
             else:
                 logger.info("DATABASE: Database file does not exist, it will be created")
         
-        # Run any pending migrations BEFORE creating tables
-        logger.info("Checking for pending database migrations...")
-        from gluesync_scheduler.db.migrate import run_migrations
-        try:
-            run_migrations()
-            logger.info("Database migrations completed successfully")
-        except Exception as mig_error:
-            logger.warning(f"Migration check completed (may not be critical): {mig_error}")
-        
-        # Create all database tables if they don't exist
-        from gluesync_scheduler.db.database import Base, engine
-        logger.info("Creating database tables if they don't exist...")
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables verified/created successfully")
+        from gluesync_scheduler.db.migrate import prepare_database
+        prepare_database()
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
         # Continue startup even if there's an error, as the schema might be partially functional
