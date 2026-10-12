@@ -56,6 +56,52 @@ def prepare_database():
         logger.warning("Migration check completed (may not be critical): %s", mig_error)
 
 
+def _find_project_root():
+    """Return the directory holding pyproject.toml, else PROJECT_ROOT, else a relative guess."""
+    path_parts = os.path.abspath(os.path.dirname(__file__)).split(os.sep)
+    for i in range(len(path_parts) - 1, -1, -1):
+        candidate_root = os.sep.join(path_parts[:i+1])
+        if os.path.exists(os.path.join(candidate_root, 'pyproject.toml')):
+            return candidate_root
+    return os.environ.get('PROJECT_ROOT') or os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    )
+
+
+def _load_migration(migrations_dir, module_name, function_name):
+    """Return the migration function, or None (and log why) when it cannot be loaded."""
+    script_path = os.path.join(migrations_dir, f"{module_name}.py")
+    if not os.path.exists(script_path):
+        logger.warning("Migration script not found: %s.py", module_name)
+        return None
+
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    if spec is None or spec.loader is None:
+        logger.error("Could not load migration module: %s", module_name)
+        return None
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    if not hasattr(module, function_name):
+        logger.error("Migration function %s not found in %s", function_name, module_name)
+        return None
+    return getattr(module, function_name)
+
+
+def _run_migration(engine, migrations_dir, module_name, function_name):
+    """Run one migration; a failure is logged and the remaining migrations still run."""
+    logger.info("Running migration: %s", module_name)
+    try:
+        migration_func = _load_migration(migrations_dir, module_name, function_name)
+        if migration_func is None:
+            return
+        migration_func(engine)
+        logger.info("Migration %s completed successfully", module_name)
+    except Exception as e:
+        logger.error("Error running migration %s: %s", module_name, e)
+
+
 def run_migrations():
     """
     Run all pending database migrations in the correct order.
@@ -64,33 +110,12 @@ def run_migrations():
     to ensure the database schema is up to date.
     """
     try:
-        # Get the project root directory - find it by looking for pyproject.toml
-        current_path = os.path.abspath(os.path.dirname(__file__))
-        project_root = None
+        project_root = _find_project_root()
+        logger.info("Using project root: %s", project_root)
 
-        # Walk up the directory tree looking for pyproject.toml
-        path_parts = current_path.split(os.sep)
-        for i in range(len(path_parts) - 1, -1, -1):
-            candidate_root = os.sep.join(path_parts[:i+1])
-            if os.path.exists(os.path.join(candidate_root, 'pyproject.toml')):
-                project_root = candidate_root
-                break
-
-        # Fallback to environment variable or relative path calculation
-        if not project_root:
-            # Try environment variable first
-            project_root = os.environ.get('PROJECT_ROOT')
-            if not project_root:
-                # Fallback to relative calculation
-                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
-        logger.info(f"Using project root: {project_root}")
-
-        # Get the migrations directory
         migrations_dir = os.path.join(project_root, "migrations")
-
         if not os.path.exists(migrations_dir):
-            logger.warning(f"Migrations directory not found: {migrations_dir}")
+            logger.warning("Migrations directory not found: %s", migrations_dir)
             return
 
         logger.info("Starting database migrations...")
@@ -101,47 +126,14 @@ def run_migrations():
             from gluesync_scheduler.db.database import engine
             logger.info("Database engine imported successfully")
         except ImportError as e:
-            logger.error(f"Failed to import database engine: {e}")
+            logger.error("Failed to import database engine: %s", e)
             return
 
-        # Run each migration function
         for module_name, function_name in MIGRATIONS:
-            script_path = os.path.join(migrations_dir, f"{module_name}.py")
-
-            if not os.path.exists(script_path):
-                logger.warning(f"Migration script not found: {module_name}.py")
-                continue
-
-            logger.info(f"Running migration: {module_name}")
-
-            try:
-                # Load the migration module directly
-                spec = importlib.util.spec_from_file_location(module_name, script_path)
-                if spec is None or spec.loader is None:
-                    logger.error(f"Could not load migration module: {module_name}")
-                    continue
-
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-
-                # Get the migration function
-                if not hasattr(module, function_name):
-                    logger.error(f"Migration function {function_name} not found in {module_name}")
-                    continue
-
-                migration_func = getattr(module, function_name)
-
-                # Call the migration function with the engine
-                migration_func(engine)
-
-                logger.info(f"Migration {module_name} completed successfully")
-
-            except Exception as e:
-                logger.error(f"Error running migration {module_name}: {e}")
-                # Continue with other migrations even if one fails
+            _run_migration(engine, migrations_dir, module_name, function_name)
 
         logger.info("Database migrations completed")
 
     except Exception as e:
-        logger.error(f"Error during migration process: {e}")
+        logger.error("Error during migration process: %s", e)
         raise
