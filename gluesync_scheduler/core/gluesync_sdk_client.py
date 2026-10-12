@@ -122,16 +122,23 @@ class GluesyncSDKClient:
         scheme = "https" if os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't') else "http"
         return f"{scheme}://{host}:{port}"
     
-    async def initialize(self):
+    async def initialize(self, force_reconnect: bool = False):
         """Initialize the Gluesync client with indefinite retries and exponential backoff
-        
+
         The method will retry indefinitely with exponential backoff starting at 1 second,
         doubling each time up to 30 seconds, then resetting back to 1 second.
+
+        Args:
+            force_reconnect: When True, disconnect and discard the existing client
+                so a fresh login handshake is performed. This is used by the 401
+                retry path in CoreHubClient to recover from stale/invalidated tokens.
         """
-        if self._initializing:
+        if force_reconnect:
+            await self._force_reconnect_disconnect()
+        elif self._initializing:
             logger.info("Gluesync SDK client is already initializing, skipping duplicate initialization call")
             return
-            
+
         self._initializing = True
         try:
             if self._is_initialized and self._token:
@@ -140,7 +147,7 @@ class GluesyncSDKClient:
             elif self._is_initialized and not self._token:
                 logger.warning("SDK client marked as initialized but no token available - reinitializing")
                 self._is_initialized = False
-            
+
             # If client already exists and is active (connected or reconnecting), do not re-create it
             if self._client and (self._client.is_connected or getattr(self._client, '_reconnecting', False)):
                 logger.info("SDK client already exists and is connected or reconnecting, skipping recreation")
@@ -150,187 +157,209 @@ class GluesyncSDKClient:
                         self._is_initialized = True
                 return
 
-            # Determine SSL settings early for URL normalization
             ssl_enabled = os.getenv('SSL_ENABLED', 'False').lower() in ('true', '1', 't')
             ssl_skip_verify = os.getenv('SSL_SKIP_VERIFY', 'False').lower() in ('true', '1', 't')
             logger.info(f"SSL is {'enabled' if ssl_enabled else 'disabled'}")
 
-            # Parse host and port from GLUESYNC_HOST if provided
-            host = None
-            port = None
-            gluesync_host = os.getenv('GLUESYNC_HOST', '')
-            if gluesync_host:
-                logger.info(f"GLUESYNC_HOST environment variable set to: {gluesync_host}")
-                normalized_host, normalized_port, normalized_url = normalize_corehub_host(
-                    gluesync_host,
-                    ssl_enabled,
-                    DEFAULT_COREHUB_PORT,
-                )
+            host, port = self._resolve_host_and_port(ssl_enabled)
+            license_file_path = self._resolve_license_file()
+            security_config = self._resolve_security_config(ssl_enabled)
 
-                if normalized_host:
-                    host = normalized_host
-                    port = normalized_port
-                    if normalized_url and normalized_url != gluesync_host:
-                        os.environ['GLUESYNC_HOST'] = normalized_url
-                        logger.info(f"Normalized GLUESYNC_HOST to: {normalized_url}")
-                else:
-                    logger.warning("Unable to parse GLUESYNC_HOST value, falling back to discovery")
-            else:
-                logger.info("No CoreHub URL provided, will use UDP discovery instead")
-
-            # Get license file path with fallback resolution
-            license_file_path, license_exists = resolve_gluesync_file(
-                'GLUESYNC_LICENSE_FILE', 'gs-license.dat'
+            client_args = self._build_client_args(
+                host, port, ssl_enabled, ssl_skip_verify,
+                license_file_path, security_config,
             )
-            if not license_exists:
-                logger.warning(
-                    "License file not found at %s (including legacy fallbacks), will attempt to proceed without it",
-                    license_file_path,
-                )
 
-            # Security configuration
-            security_config = None
-            config_path, config_exists = resolve_gluesync_file(
-                'GLUESYNC_SECURITY_CONFIG', 'security-config.json'
-            )
-            if ssl_enabled:  # Only process security config if SSL is enabled
-                if config_exists:
-                    logger.info(f"Using security config from: {config_path}")
-                    security_config = config_path
-                else:
-                    logger.warning(
-                        "Security config file not found at %s (including legacy fallbacks), will use default settings",
-                        config_path,
-                    )
-            elif config_exists:
-                # SSL is disabled, so don't use security config even if it exists
-                logger.info(
-                    "Security config found at %s but SSL is disabled - ignoring security config",
-                    config_path,
-                )
-                
-            # Determine the protocol based on ssl_enabled
-            protocol = 'https' if ssl_enabled else 'http'
-            
-            # Log final configuration before creating client
-            logger.info(f"Creating GluesyncClient with:")
-            logger.info(f"  - host: {host}")
-            logger.info(f"  - port: {port if port is not None else DEFAULT_COREHUB_PORT}")
-            logger.info(f"  - protocol: {protocol}")
-            logger.info(f"  - use_ssl: {ssl_enabled}")
-            logger.info(f"  - verify_ssl: {not ssl_skip_verify}")
-            logger.info(f"  - security_config: {security_config}")
-            logger.info(f"  - module_tag: {os.getenv('GLUESYNC_MODULE_TAG', 'chronos')}")
-            
-            # Prepare the client arguments
-            client_args = {
-                'host': host,  # None will trigger UDP discovery
-                'port': port if port is not None else 1717,  # Default port 1717 if None
-                'license_file_path': license_file_path,
-                'module_tag': os.getenv('GLUESYNC_MODULE_TAG', 'chronos'),
-                'use_ssl': ssl_enabled,
-                'security_config': security_config,
-                'verify_ssl': not ssl_skip_verify,
-                # Add other default parameters as needed
-                'ping_interval': 5.0,
-                'timeout': 10.0,
-                'discovery_start_port': 1717,
-                'discovery_port_range': 10
-            }
-            
-            # Log the arguments (without sensitive data)
-            safe_args = client_args.copy()
-            if 'security_config' in safe_args and safe_args['security_config']:
-                safe_args['security_config'] = '[REDACTED]'
-            logger.info(f"Initializing GluesyncClient with args: {safe_args}")
-            
-            # Create the client
             self._client = GluesyncClient(**client_args)
-            
-            # Set up event handlers
-            self._client.on_connected = self._on_connected
-            self._client.on_disconnected = self._on_disconnected
-            self._client.on_error = self._on_error
-            # Note: on_reconnecting, on_reconnected, and on_token_updated are not supported by the current SDK
-            
-            # Connect to CoreHub with indefinite retry logic for both GLUESYNC_HOST and UDP discovery
-            retry_count = 0
-            backoff_delay = 1  # Start with 1 second delay
-            max_backoff = 30  # Maximum backoff of 30 seconds
-            cycle_count = 0   # Count full cycles of backoff
+            self._setup_event_handlers()
 
-            while True:  # Retry indefinitely for both GLUESYNC_HOST and UDP discovery
-                try:
-                    if host and port:
-                        if retry_count == 0:
-                            logger.info(f"Connecting to CoreHub at {protocol}://{host}:{port}...")
-                        else:
-                            logger.info(f"Retry {retry_count} (cycle {cycle_count}) connecting to CoreHub at {protocol}://{host}:{port}...")
-                        await self._client.connect()
-                        break  # Connection successful
-                    else:
-                        # UDP discovery mode
-                        if retry_count > 0:
-                            logger.info(f"Retry {retry_count} (cycle {cycle_count}) for UDP discovery...")
-                        else:
-                            logger.info("Starting UDP discovery to find CoreHub...")
+            protocol = 'https' if ssl_enabled else 'http'
+            await self._connect_with_retry(host, port, protocol)
 
-                        await self._client.connect()
-
-                        # After connect, check if we have a host (discovery worked)
-                        if self._client.host:
-                            logger.info(f"UDP discovery successful! Found CoreHub at {self._client.host}:{self._client.port}")
-                            # Update the discovered host/port for future use
-                            host = self._client.host
-                            port = self._client.port
-                            corehub_url = self._build_corehub_url(host, port)
-                            logger.info(f"Updated CoreHub URL to {corehub_url}")
-                            break  # Connection successful
-                        else:
-                            # If no host was discovered, raise an error to trigger retry
-                            raise GluesyncConnectionError("UDP discovery did not find a CoreHub")
-
-                except GluesyncConnectionError as e:
-                    retry_count += 1
-                    logger.warning(f"Connection attempt {retry_count} failed: {e}")
-
-                    # Calculate backoff with exponential increase
-                    logger.info(f"Waiting {backoff_delay} seconds before next retry...")
-                    await asyncio.sleep(backoff_delay)
-
-                    # Double the backoff for next time, up to the maximum
-                    backoff_delay = min(backoff_delay * 2, max_backoff)
-
-                    # If we've reached max backoff, reset on the next failure
-                    if backoff_delay >= max_backoff:
-                        backoff_delay = 1  # Reset to 1 second
-                        cycle_count += 1   # Increment cycle count
-                        logger.info(f"Completed backoff cycle {cycle_count}, resetting delay to 1 second")
-
-                except (GluesyncLicenseError, GluesyncAuthenticationError) as e:
-                    # Don't retry for these errors
-                    logger.error(f"{type(e).__name__}: {e}")
-                    raise
-            
-            # Verify we have a token after connection
-            connection_timeout = 10  # seconds
-            token_check_interval = 0.5  # seconds
-            total_wait = 0
-            
-            while total_wait < connection_timeout and not self._token:
-                await asyncio.sleep(token_check_interval)
-                total_wait += token_check_interval
-                logger.debug(f"Waiting for token... ({total_wait}s/{connection_timeout}s)")
-            
-            if self._token:
-                self._is_initialized = True
-                logger.info("Gluesync SDK client initialized successfully with token")
-            else:
-                self._is_initialized = False
-                logger.error("SDK client connected but no token received within timeout")
-                raise GluesyncAuthenticationError("No authentication token received after connection")
+            await self._wait_for_token()
         finally:
             self._initializing = False
+
+    async def _force_reconnect_disconnect(self):
+        """Disconnect and clear the existing client to force a fresh login."""
+        if self._client:
+            try:
+                if self._client.is_connected:
+                    logger.info("Force-reconnect: disconnecting existing SDK client...")
+                    await self._client.disconnect()
+            except Exception as e:
+                logger.warning(f"Force-reconnect: error during disconnect: {e}")
+            self._client = None
+        self._token = None
+        self._is_initialized = False
+        self._initializing = False
+
+    def _resolve_host_and_port(self, ssl_enabled):
+        """Parse host and port from GLUESYNC_HOST, falling back to UDP discovery."""
+        host = None
+        port = None
+        gluesync_host = os.getenv('GLUESYNC_HOST', '')
+        if not gluesync_host:
+            logger.info("No CoreHub URL provided, will use UDP discovery instead")
+            return host, port
+
+        logger.info(f"GLUESYNC_HOST environment variable set to: {gluesync_host}")
+        normalized_host, normalized_port, normalized_url = normalize_corehub_host(
+            gluesync_host, ssl_enabled, DEFAULT_COREHUB_PORT,
+        )
+        if normalized_host:
+            host = normalized_host
+            port = normalized_port
+            if normalized_url and normalized_url != gluesync_host:
+                os.environ['GLUESYNC_HOST'] = normalized_url
+                logger.info(f"Normalized GLUESYNC_HOST to: {normalized_url}")
+        else:
+            logger.warning("Unable to parse GLUESYNC_HOST value, falling back to discovery")
+        return host, port
+
+    def _resolve_license_file(self):
+        """Resolve the license file path, warning if not found."""
+        license_file_path, license_exists = resolve_gluesync_file(
+            'GLUESYNC_LICENSE_FILE', 'gs-license.dat'
+        )
+        if not license_exists:
+            logger.warning(
+                "License file not found at %s (including legacy fallbacks), will attempt to proceed without it",
+                license_file_path,
+            )
+        return license_file_path
+
+    def _resolve_security_config(self, ssl_enabled):
+        """Resolve the security config path, only when SSL is enabled."""
+        config_path, config_exists = resolve_gluesync_file(
+            'GLUESYNC_SECURITY_CONFIG', 'security-config.json'
+        )
+        if ssl_enabled:
+            if config_exists:
+                logger.info(f"Using security config from: {config_path}")
+                return config_path
+            logger.warning(
+                "Security config file not found at %s (including legacy fallbacks), will use default settings",
+                config_path,
+            )
+            return None
+        if config_exists:
+            logger.info(
+                "Security config found at %s but SSL is disabled - ignoring security config",
+                config_path,
+            )
+        return None
+
+    def _build_client_args(self, host, port, ssl_enabled, ssl_skip_verify,
+                           license_file_path, security_config):
+        """Build the GluesyncClient constructor arguments and log them."""
+        protocol = 'https' if ssl_enabled else 'http'
+        logger.info(f"Creating GluesyncClient with:")
+        logger.info(f"  - host: {host}")
+        logger.info(f"  - port: {port if port is not None else DEFAULT_COREHUB_PORT}")
+        logger.info(f"  - protocol: {protocol}")
+        logger.info(f"  - use_ssl: {ssl_enabled}")
+        logger.info(f"  - verify_ssl: {not ssl_skip_verify}")
+        logger.info(f"  - security_config: {security_config}")
+        logger.info(f"  - module_tag: {os.getenv('GLUESYNC_MODULE_TAG', 'chronos')}")
+
+        client_args = {
+            'host': host,
+            'port': port if port is not None else 1717,
+            'license_file_path': license_file_path,
+            'module_tag': os.getenv('GLUESYNC_MODULE_TAG', 'chronos'),
+            'use_ssl': ssl_enabled,
+            'security_config': security_config,
+            'verify_ssl': not ssl_skip_verify,
+            'ping_interval': 5.0,
+            'timeout': 10.0,
+            'discovery_start_port': 1717,
+            'discovery_port_range': 10,
+        }
+
+        safe_args = client_args.copy()
+        if safe_args.get('security_config'):
+            safe_args['security_config'] = '[REDACTED]'
+        logger.info(f"Initializing GluesyncClient with args: {safe_args}")
+        return client_args
+
+    def _setup_event_handlers(self):
+        """Attach connection event handlers to the SDK client."""
+        self._client.on_connected = self._on_connected
+        self._client.on_disconnected = self._on_disconnected
+        self._client.on_error = self._on_error
+
+    async def _connect_with_retry(self, host, port, protocol):
+        """Connect to CoreHub with indefinite retry and exponential backoff."""
+        retry_count = 0
+        backoff_delay = 1
+        max_backoff = 30
+        cycle_count = 0
+
+        while True:
+            try:
+                if host and port:
+                    await self._connect_direct(host, port, protocol, retry_count, cycle_count)
+                    break
+                else:
+                    await self._connect_discovery(retry_count, cycle_count)
+                    host = self._client.host
+                    port = self._client.port
+                    break
+            except GluesyncConnectionError as e:
+                retry_count += 1
+                logger.warning(f"Connection attempt {retry_count} failed: {e}")
+                logger.info(f"Waiting {backoff_delay} seconds before next retry...")
+                await asyncio.sleep(backoff_delay)
+                backoff_delay = min(backoff_delay * 2, max_backoff)
+                if backoff_delay >= max_backoff:
+                    backoff_delay = 1
+                    cycle_count += 1
+                    logger.info(f"Completed backoff cycle {cycle_count}, resetting delay to 1 second")
+            except (GluesyncLicenseError, GluesyncAuthenticationError) as e:
+                logger.exception(f"{type(e).__name__}: {e}")
+                raise
+
+    async def _connect_direct(self, host, port, protocol, retry_count, cycle_count):
+        """Connect using a known host and port."""
+        if retry_count == 0:
+            logger.info(f"Connecting to CoreHub at {protocol}://{host}:{port}...")
+        else:
+            logger.info(f"Retry {retry_count} (cycle {cycle_count}) connecting to CoreHub at {protocol}://{host}:{port}...")
+        await self._client.connect()
+
+    async def _connect_discovery(self, retry_count, cycle_count):
+        """Connect using UDP discovery."""
+        if retry_count > 0:
+            logger.info(f"Retry {retry_count} (cycle {cycle_count}) for UDP discovery...")
+        else:
+            logger.info("Starting UDP discovery to find CoreHub...")
+        await self._client.connect()
+        if self._client.host:
+            logger.info(f"UDP discovery successful! Found CoreHub at {self._client.host}:{self._client.port}")
+            corehub_url = self._build_corehub_url(self._client.host, self._client.port)
+            logger.info(f"Updated CoreHub URL to {corehub_url}")
+        else:
+            raise GluesyncConnectionError("UDP discovery did not find a CoreHub")
+
+    async def _wait_for_token(self):
+        """Wait for the SDK token to arrive after connection, with a timeout."""
+        connection_timeout = 10
+        token_check_interval = 0.5
+        total_wait = 0
+
+        while total_wait < connection_timeout and not self._token:
+            await asyncio.sleep(token_check_interval)
+            total_wait += token_check_interval
+            logger.debug(f"Waiting for token... ({total_wait}s/{connection_timeout}s)")
+
+        if self._token:
+            self._is_initialized = True
+            logger.info("Gluesync SDK client initialized successfully with token")
+        else:
+            self._is_initialized = False
+            logger.error("SDK client connected but no token received within timeout")
+            raise GluesyncAuthenticationError("No authentication token received after connection")
     
     async def shutdown(self):
         """Shutdown the Gluesync client"""
