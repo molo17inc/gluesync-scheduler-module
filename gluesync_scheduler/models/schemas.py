@@ -298,6 +298,12 @@ class ScheduleConfig(BaseModel):
         return v
 
 
+_DAY_OR_DESCRIPTION = (
+    "When both day-of-month and day-of-week are restricted, true fires when either matches "
+    "(standard cron OR), false requires both to match (AND, e.g. first Saturday of the month: '0 9 1-7 * 6')"
+)
+
+
 class JobBase(
     QueryStudioFieldsMixin,
     QueryStudioValidatorMixin,
@@ -322,6 +328,7 @@ class JobBase(
     snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
+    day_or: bool = Field(True, description=_DAY_OR_DESCRIPTION)
     chained_events: Optional[List[ChainedEventCreate]] = Field(
         None,
         description="Ordered list of additional tasks to fire after this job completes"
@@ -347,7 +354,8 @@ class JobCreate(JobBase):
                 "pipeline_id": "pipeline-123",
                 "entity_ids": ["entity-456", "entity-789"],
                 "with_snapshot": True,
-                "enabled": True
+                "enabled": True,
+                "day_or": True
             }
         }
     )
@@ -381,6 +389,7 @@ class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
     visualize_parameters: Optional[Dict[str, str]] = Field(None, description="Updated Visualize refresh parameter map")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
+    day_or: Optional[bool] = Field(None, description=f"Updated: {_DAY_OR_DESCRIPTION}")
     chained_events: Optional[List[ChainedEventCreate]] = Field(None, description="Replace all chained events with this list (pass empty list to clear)")
 
     @field_validator("visualize_parameters", mode="before")
@@ -421,7 +430,8 @@ class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
                 },
                 "snapshot_write_method": "INSERT",
                 "enabled": True,
-                "is_cron_expression": False
+                "is_cron_expression": False,
+                "day_or": True
             }
         }
     )
@@ -443,6 +453,7 @@ class Job(JobBase):
     # Explicitly re-define snapshot_write_method to ensure it's included in the response
     snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
+    day_or: bool = Field(True, description=_DAY_OR_DESCRIPTION)
     
     # Ensure schedule_days is always populated
     @validator('schedule_days', always=True)
@@ -521,7 +532,7 @@ class Job(JobBase):
             now = datetime.now(tz)
             
             # Use croniter to calculate the next run time
-            cron_iter = croniter(cron, now)
+            cron_iter = croniter(cron, now, day_or=values.get('day_or') is not False)
             next_datetime = cron_iter.get_next(datetime)
             
             # Make sure the datetime has the correct timezone
@@ -574,6 +585,7 @@ class Job(JobBase):
                 "with_snapshot": True,
                 "snapshot_write_method": "UPSERT",
                 "enabled": True,
+                "day_or": True,
                 "command": "python3 play_pause.py resync --pipeline pipeline-123 --entity entity-456,entity-789",
                 "cron_job_identifier": "gluesync_job_1",
                 "created_at": "2025-03-20T10:00:00+02:00",

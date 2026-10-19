@@ -198,6 +198,7 @@ async def create_job(job_data: Annotated[JobCreate, Body(description="Job data t
     - **with_snapshot**: Whether to include snapshot (optional, default: false)
     - **snapshot_write_method**: Write method for snapshot operations - UPSERT or INSERT (optional, default: UPSERT)
     - **enabled**: Whether the job is enabled (optional, default: true)
+    - **day_or**: When both day-of-month and day-of-week are restricted, true (default) fires when either matches like standard cron, false requires both to match (optional)
     
     ## Returns
     The created job object with all details including the generated ID
@@ -324,6 +325,7 @@ async def update_job(job_id: Annotated[int, Path(description="The ID of the job 
     - **with_snapshot**: Updated snapshot setting
     - **snapshot_write_method**: Updated snapshot write method (UPSERT or INSERT)
     - **enabled**: Updated enabled status
+    - **day_or**: Updated day-of-month/day-of-week combination (true = either matches, false = both must match)
     
     ## Returns
     The updated job object with all details

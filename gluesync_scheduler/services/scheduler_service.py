@@ -27,6 +27,7 @@ import sys
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
@@ -37,6 +38,31 @@ from gluesync_scheduler.models.models import ScheduledJob
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 logger = logging.getLogger(__name__)
+
+_WILDCARD = "*"
+
+
+def _day_or_applies(job: ScheduledJob) -> bool:
+    """True when day-of-month and day-of-week must be OR-ed (standard cron) for this job."""
+    if getattr(job, 'day_or', None) is False:
+        return False
+    try:
+        expanded = croniter(job.cron_expression).expanded
+    except ValueError:
+        return False
+    return expanded[2][0] != _WILDCARD and expanded[4][0] != _WILDCARD
+
+
+def _build_trigger(use_or, minute, hour, day, month, day_of_week, tz):
+    """Build the APScheduler trigger: a CronTrigger (AND) or two OR-ed CronTriggers on the day fields."""
+    common = dict(minute=minute, hour=hour, month=month, timezone=tz)
+    if not use_or:
+        return CronTrigger(day=day, day_of_week=day_of_week, **common)
+    return OrTrigger([
+        CronTrigger(day=day, day_of_week=_WILDCARD, **common),
+        CronTrigger(day=_WILDCARD, day_of_week=day_of_week, **common),
+    ])
+
 
 class SchedulerService:
     """Service for managing scheduled jobs using APScheduler"""
@@ -153,16 +179,6 @@ class SchedulerService:
                 logger.info("Job will run every day")
                 cron_dow = "*"
             
-            # Create the trigger with the job's timezone
-            trigger = CronTrigger(
-                minute=minute,
-                hour=hour,
-                day=day,
-                month=month,
-                day_of_week=cron_dow,
-                timezone=job_timezone
-            )
-            
             # Calculate the next run time based on the trigger
             from datetime import datetime
             import pytz
@@ -172,14 +188,8 @@ class SchedulerService:
             now = datetime.now(tz)  # Get current time in job's timezone
             
             # Create the trigger with explicit timezone
-            trigger = CronTrigger(
-                minute=minute,
-                hour=hour,
-                day=day,
-                month=month,
-                day_of_week=cron_dow,
-                timezone=tz
-            )
+            use_or = _day_or_applies(job)
+            trigger = _build_trigger(use_or, minute, hour, day, month, cron_dow, tz)
             
             # Get next run time and ensure it's in the correct timezone
             next_run = trigger.get_next_fire_time(None, now)
@@ -207,7 +217,7 @@ class SchedulerService:
                     0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"
                 }
                 actual_day = python_to_apscheduler[python_weekday]
-                if cron_dow != '*' and actual_day not in expected_days:
+                if not use_or and cron_dow != '*' and actual_day not in expected_days:
                     logger.warning(f"WARNING: Next run date {next_run.strftime('%Y-%m-%d')} is a {weekday_name} ({actual_day}), but job is configured to run on weekdays: {cron_dow}. This may indicate a timezone issue or that the next valid run time is in a future week.")
             else:
                 logger.warning(f"Could not determine next run time for job {job_id} with cron expression {job.cron_expression}")

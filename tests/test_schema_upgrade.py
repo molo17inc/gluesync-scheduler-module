@@ -160,3 +160,66 @@ def test_second_startup_is_a_no_op(engine, caplog):
 
     assert _migration_errors(caplog) == []
     assert _missing_columns(engine) == {}
+
+
+def _scheduled_job_rows(engine):
+    with sqlite3.connect(engine.url.database) as conn:
+        return conn.execute("SELECT name, day_or FROM scheduled_jobs ORDER BY id").fetchall()
+
+
+_LEGACY_JOB_INSERT = (
+    "INSERT INTO scheduled_jobs "
+    "(name, task_type, cron_expression, pipeline_id, enabled, command, "
+    "cron_job_identifier, snapshot_write_method, is_cron_expression{extra_column}) "
+    "VALUES (?, 'PIPELINE_START', '0 3 * * *', 'p1', 1, 'pending', ?, 'UPSERT', 1{extra_value})"
+)
+
+
+def _insert_legacy_jobs(engine, names):
+    with sqlite3.connect(engine.url.database) as conn:
+        has_query_read_only = any(
+            row[1] == "query_read_only" for row in conn.execute("PRAGMA table_info(scheduled_jobs)")
+        )
+        statement = _LEGACY_JOB_INSERT.format(
+            extra_column=", query_read_only" if has_query_read_only else "",
+            extra_value=", 1" if has_query_read_only else "",
+        )
+        for name in names:
+            conn.execute(statement, (name, f"gluesync_job_{name}"))
+
+
+@pytest.mark.parametrize("baseline", BASELINES[1:], ids=BASELINE_IDS[1:])
+def test_day_or_migration_keeps_existing_jobs_on_and(engine, baseline, caplog):
+    _load_baseline(engine, baseline)
+    _insert_legacy_jobs(engine, ["first", "second"])
+
+    with caplog.at_level(logging.INFO):
+        prepare_database()
+
+    assert _scheduled_job_rows(engine) == [("first", 0), ("second", 0)]
+    assert "Set day_or=0 (AND) on 2 existing jobs" in caplog.text
+    assert _migration_errors(caplog) == []
+
+
+@pytest.mark.parametrize("baseline", BASELINES[1:], ids=BASELINE_IDS[1:])
+def test_day_or_migration_new_jobs_default_to_or_and_rerun_is_a_no_op(engine, baseline):
+    _load_baseline(engine, baseline)
+    _insert_legacy_jobs(engine, ["legacy"])
+    prepare_database()
+    session = sessionmaker(bind=engine)()
+    try:
+        session.add(ScheduledJob(
+            name="created-after",
+            task_type=TaskType.PIPELINE_START,
+            cron_expression="0 3 * * *",
+            pipeline_id="p1",
+            command="pending",
+            cron_job_identifier="gluesync_job_created_after",
+        ))
+        session.commit()
+    finally:
+        session.close()
+
+    prepare_database()
+
+    assert _scheduled_job_rows(engine) == [("legacy", 0), ("created-after", 1)]

@@ -421,7 +421,7 @@ class JobService:
 
         # Request-scoped caches keyed by cron expression (many jobs share expressions)
         schedule_days_cache: Dict[str, List[str]] = {}
-        next_run_cache: Dict[str, Optional[datetime]] = {}
+        next_run_cache: Dict[Tuple[str, bool], Optional[datetime]] = {}
 
         # Convert to Pydantic models with timezone handling
         job_responses = []
@@ -438,9 +438,10 @@ class JobService:
             # next_run: prefer the persisted DB value; only compute (and backfill)
             # legacy rows where it was never stored.
             if job.next_run is None and cron:
-                if cron not in next_run_cache:
-                    next_run_cache[cron] = self._compute_next_run(cron, tz, now)
-                computed = next_run_cache[cron]
+                cache_key = (cron, job.day_or is not False)
+                if cache_key not in next_run_cache:
+                    next_run_cache[cache_key] = self._compute_next_run(cron, tz, now, cache_key[1])
+                computed = next_run_cache[cache_key]
                 if computed is not None:
                     job_model.next_run = computed
                     job.next_run = computed  # backfill so future reads are cheap
@@ -464,10 +465,11 @@ class JobService:
         cron_expression: str,
         tz: "pytz.BaseTzInfo",
         now: datetime,
+        day_or: bool = True,
     ) -> Optional[datetime]:
         """Compute the next run datetime for a cron expression in the given timezone."""
         try:
-            cron_iter = croniter(cron_expression, now)
+            cron_iter = croniter(cron_expression, now, day_or=day_or)
             nxt = cron_iter.get_next(datetime)
             if nxt.tzinfo is None:
                 nxt = tz.localize(nxt)
@@ -536,7 +538,7 @@ class JobService:
                 detail=f"Failed to convert schedule to cron expression: {str(e)}"
             )
 
-    def _calculate_next_run_times(self, cron_expression: str):
+    def _calculate_next_run_times(self, cron_expression: str, day_or: bool = True):
         """Return (next_run_time_str, next_run_dt) or (None, None) on failure."""
         if not cron_expression:
             return None, None
@@ -545,7 +547,7 @@ class JobService:
             tz = pytz.timezone(current_timezone)
             logger.info(f"Using timezone for calculation: {current_timezone}")
             now = datetime.now(tz)
-            cron_iter = croniter(cron_expression, now)
+            cron_iter = croniter(cron_expression, now, day_or=day_or)
             next_run_datetime = cron_iter.get_next(datetime)
             if next_run_datetime.tzinfo is None:
                 next_run_datetime = tz.localize(next_run_datetime)
@@ -598,7 +600,7 @@ class JobService:
         """
         try:
             self._ensure_cron_expression_from_schedule(job_data)
-            next_run_time, next_run_dt = self._calculate_next_run_times(job_data.cron_expression)
+            next_run_time, next_run_dt = self._calculate_next_run_times(job_data.cron_expression, job_data.day_or)
             is_cron_expression = bool(job_data.cron_expression and not job_data.schedule)
 
             self._validate_group_task_type(job_data.task_type, job_data.group_ids)
@@ -635,6 +637,7 @@ class JobService:
                 next_run=next_run_dt,
                 timezone_name=self._get_configured_timezone(),
                 is_cron_expression=is_cron_expression,
+                day_or=job_data.day_or,
                 **ai_agent_run_orm_kwargs(job_data),
                 **entity_validation_orm_kwargs(job_data),
                 **visualize_refresh_orm_kwargs(job_data),
@@ -686,6 +689,8 @@ class JobService:
         _store_optional_json(update_data, "visualize_parameters")
         if "snapshot_write_method" in update_data and update_data["snapshot_write_method"] is None:
             update_data["snapshot_write_method"] = 'UPSERT'
+        if update_data.get("day_or", True) is None:
+            del update_data["day_or"]
 
     def _validate_group_ids_for_update(self, final_task_type, final_group_ids) -> None:
         if final_task_type not in _GROUP_TASK_TYPES:
@@ -795,7 +800,7 @@ class JobService:
         if "cron_expression" in update_data:
             update_data["is_cron_expression"] = True
             return True
-        return "cron_expression" in update_data
+        return "day_or" in update_data
 
     def _log_schedule_original_days(self, value) -> None:
         if isinstance(value, dict):
@@ -848,7 +853,7 @@ class JobService:
             logger.info(f"Using timezone for calculation: {current_timezone}")
             now = datetime.now(tz)
             self._log_cron_actual_days(db_job.cron_expression)
-            cron_iter = croniter(db_job.cron_expression, now)
+            cron_iter = croniter(db_job.cron_expression, now, day_or=db_job.day_or is not False)
             next_run_datetime = cron_iter.get_next(datetime)
             if next_run_datetime.tzinfo is None:
                 next_run_datetime = tz.localize(next_run_datetime)

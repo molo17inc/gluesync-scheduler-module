@@ -24,7 +24,7 @@
 import enum
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Enum, Text, Boolean, ForeignKey
-from sqlalchemy.sql.expression import text
+from sqlalchemy.sql.expression import text, true
 from sqlalchemy.sql.sqltypes import TIMESTAMP
 
 from gluesync_scheduler.config.settings import settings
@@ -168,6 +168,7 @@ class ScheduledJob(Base):
     start_time = Column(String, nullable=True)
     timezone_name = Column(String, nullable=True)
     is_cron_expression = Column(Boolean, default=False, nullable=False)
+    day_or = Column(Boolean, default=True, nullable=False, server_default=true())
 
 
 class ExecutionMode(enum.Enum):
