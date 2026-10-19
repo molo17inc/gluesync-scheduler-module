@@ -11,6 +11,10 @@ FROM nexus.hq.molo17.com/molo17-local/python:3.13.13-win-servercore-${WINDOWS_TA
 # Redeclare so the build arg is visible inside this stage (ARGs declared before FROM are not)
 ARG WINDOWS_TAG
 
+# Optional token for the private GitLab PyPI index (pass with
+# --build-arg GITLAB_TOKEN=...); empty means anonymous access.
+ARG GITLAB_TOKEN=""
+
 # Switch to Windows shell
 SHELL ["cmd", "/S", "/C"]
 

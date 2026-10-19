@@ -1,7 +1,23 @@
+# Base image and Python version (shared by both stages)
+# The floating cgr.dev/chainguard/python:latest-dev tag jumped to Python 3.15 in
+# Oct 2026, so prebuilt wheels stopped matching and pydantic-core was compiled
+# from Rust on every build (50+ min under QEMU arm64). The free Chainguard tier
+# only publishes latest/latest-dev for python, so we start from Wolfi base
+# pinned by digest and install a fixed Python minor from Wolfi packages.
+# Builder and runtime MUST use the same PYTHON_VERSION: the venv is copied as is.
+# To update: bump the digest (crane digest cgr.dev/chainguard/wolfi-base:latest)
+# and/or PYTHON_VERSION, after checking every requirement has manylinux wheels
+# for both amd64 and arm64 on that Python version.
+ARG BASE_IMAGE=cgr.dev/chainguard/wolfi-base:latest@sha256:c2a4815b6ca49b9bbafd451b4bde690d567a86b2b6b54877faac8082a7bc4296
+ARG PYTHON_VERSION=3.13
+
 # Build stage
-# Chainguard/Wolfi Python (-dev variant): glibc-based, continuously patched for
-# near-zero CVEs, and ships pip + a shell + apk for building dependencies.
-FROM cgr.dev/chainguard/python:latest-dev AS builder
+# Wolfi (glibc-based, continuously patched for near-zero CVEs) with a shell + apk.
+FROM ${BASE_IMAGE} AS builder
+ARG PYTHON_VERSION
+# Optional token for the private GitLab PyPI index. Pass with
+# --build-arg GITLAB_TOKEN=...; when unset the index is accessed anonymously.
+ARG GITLAB_TOKEN=""
 
 USER root
 WORKDIR /build
@@ -12,19 +28,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PATH="/opt/venv/bin:$PATH"
 
-# Native build toolchain for compiling any sdists (Wolfi/glibc package names)
+# Fixed Python minor plus the native toolchain for the few sdist-only deps
+# (twofish via pyjks). Rust is no longer needed: pydantic-core ships wheels.
 RUN apk add --no-cache \
+    python-${PYTHON_VERSION} \
+    python-${PYTHON_VERSION}-dev \
+    py${PYTHON_VERSION}-pip \
     build-base \
     gcc \
     glibc-dev \
     openssl-dev \
     libffi-dev \
     pkgconf \
-    rust \
     patchelf
 
 # Isolated virtual environment that is copied verbatim into the final stage
-RUN python -m venv /opt/venv && \
+RUN python${PYTHON_VERSION} -m venv /opt/venv && \
     python -m pip install --upgrade pip wheel setuptools
 
 # Install application dependencies into the venv
@@ -33,7 +52,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install \
     --extra-index-url "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple" \
     --prefer-binary \
-    --only-binary=cryptography,pyjks,websockets \
+    --only-binary=cryptography,pyjks,websockets,pydantic-core \
     -r requirements.txt
 
 # Build and install the application package into the venv
@@ -50,20 +69,20 @@ RUN pip install .
 RUN /opt/venv/bin/python -m pip uninstall -y pip
 
 # Final stage
-# Same Chainguard/Wolfi Python image: keeps a POSIX shell so entrypoint.sh and
-# the migration script still run, while dropping the Debian OS packages (perl,
-# curl, ncurses, sqlite, libssh2, ...) that carried unfixable CVEs.
-FROM cgr.dev/chainguard/python:latest-dev
+# Same pinned Wolfi base and Python minor as the builder: keeps a POSIX shell so
+# entrypoint.sh and the migration script still run, while dropping the Debian OS
+# packages (perl, curl, ncurses, sqlite, libssh2, ...) that carried unfixable CVEs.
+FROM ${BASE_IMAGE}
+ARG PYTHON_VERSION
 
 USER root
 WORKDIR /app
 
-# Minimal runtime OS packages (Wolfi, continuously patched).
-# latest-dev still ships setuptools 70.3.0 + msgpack 1.1.2 (HIGH); Wolfi
-# already has the fixed packages, but the public image has not rebuilt yet.
-RUN apk add --no-cache openssl procps tzdata py3-setuptools \
-    && python -m pip install --upgrade --force-reinstall --no-cache-dir \
-        'setuptools>=78.1.1' 'msgpack>=1.2.1'
+# Minimal runtime OS packages (Wolfi, continuously patched). Only the Python
+# interpreter is installed system-wide (no system pip/setuptools/msgpack), so the
+# old latest-dev setuptools/msgpack CVE workaround is no longer needed; the venv
+# copied below carries an up-to-date pip/setuptools from the builder.
+RUN apk add --no-cache python-${PYTHON_VERSION} bash openssl procps tzdata
 
 # Bring in the prebuilt virtual environment from the builder stage
 COPY --from=builder /opt/venv /opt/venv
