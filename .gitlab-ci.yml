@@ -207,9 +207,14 @@ deploy-linux:
         exit 1
       fi
 
-    # Export per-architecture tarballs to FTP
+    # Export per-architecture tarballs to FTP (not for beta tags: beta ships as Docker images only)
     - |
       set -euo pipefail
+
+      if [[ "$CI_COMMIT_TAG" == beta-* ]]; then
+        echo "Beta tag: skipping FTP tarball export/upload (Docker Hub + Nexus only)"
+        exit 0
+      fi
 
       TAR_DIR="docker-images-linux"
       mkdir -p "$TAR_DIR"
