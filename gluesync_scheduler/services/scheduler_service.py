@@ -25,8 +25,8 @@ import logging
 import os
 import sys
 from typing import Optional
-import pytz
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
@@ -214,7 +214,7 @@ class SchedulerService:
             cron_dow = _to_apscheduler_day_of_week(day_of_week)
             
             # Create the trigger with explicit timezone
-            tz = pytz.timezone(job_timezone)
+            tz = ZoneInfo(job_timezone)
             use_or = _day_or_applies(job)
             trigger = _build_trigger(use_or, minute, hour, day, month, cron_dow, tz)
             
@@ -225,8 +225,8 @@ class SchedulerService:
             return job_id
             
         except Exception as e:
-            logger.error(f"Error creating scheduled job: {str(e)}")
-            raise RuntimeError(f"Error creating scheduled job: {str(e)}")
+            logger.exception(f"Error creating scheduled job: {str(e)}")
+            raise RuntimeError(f"Error creating scheduled job: {str(e)}") from e
 
     def _add_job_to_scheduler(self, job: ScheduledJob, job_id: str, trigger) -> None:
         """Add the job to the scheduler; the trigger naturally determines the next run time."""
