@@ -31,6 +31,7 @@ from gluesync_scheduler.models.models import (
     TaskType,
 )
 from gluesync_scheduler.services.job_service import JobService
+from migrations.migrate_add_day_or import add_day_or_column
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = Path(__file__).resolve().parent / "data" / "schemas"
@@ -162,6 +163,11 @@ def test_second_startup_is_a_no_op(engine, caplog):
     assert _missing_columns(engine) == {}
 
 
+def _scheduled_job_next_runs(engine):
+    with sqlite3.connect(engine.url.database) as conn:
+        return conn.execute("SELECT name, next_run FROM scheduled_jobs ORDER BY id").fetchall()
+
+
 def _scheduled_job_rows(engine):
     with sqlite3.connect(engine.url.database) as conn:
         return conn.execute("SELECT name, day_or FROM scheduled_jobs ORDER BY id").fetchall()
@@ -170,8 +176,9 @@ def _scheduled_job_rows(engine):
 _LEGACY_JOB_INSERT = (
     "INSERT INTO scheduled_jobs "
     "(name, task_type, cron_expression, pipeline_id, enabled, command, "
-    "cron_job_identifier, snapshot_write_method, is_cron_expression{extra_column}) "
-    "VALUES (?, 'PIPELINE_START', '0 3 * * *', 'p1', 1, 'pending', ?, 'UPSERT', 1{extra_value})"
+    "cron_job_identifier, snapshot_write_method, is_cron_expression, next_run{extra_column}) "
+    "VALUES (?, 'PIPELINE_START', '0 3 * * *', 'p1', 1, 'pending', ?, 'UPSERT', 1, "
+    "'2026-01-01 03:00:00'{extra_value})"
 )
 
 
@@ -197,8 +204,33 @@ def test_day_or_migration_keeps_existing_jobs_on_and(engine, baseline, caplog):
         prepare_database()
 
     assert _scheduled_job_rows(engine) == [("first", 0), ("second", 0)]
-    assert "Set day_or=0 (AND) on 2 existing jobs" in caplog.text
+    assert "Set day_or=0 (AND) and cleared next_run on 2 existing jobs" in caplog.text
     assert _migration_errors(caplog) == []
+
+
+@pytest.mark.parametrize("baseline", BASELINES[1:], ids=BASELINE_IDS[1:])
+def test_day_or_migration_clears_stored_next_run(engine, baseline):
+    """The stored next_run was computed with croniter's OR default: it is recomputed on read."""
+    _load_baseline(engine, baseline)
+    _insert_legacy_jobs(engine, ["first", "second"])
+    assert _scheduled_job_next_runs(engine) == [
+        ("first", "2026-01-01 03:00:00"),
+        ("second", "2026-01-01 03:00:00"),
+    ]
+
+    prepare_database()
+
+    assert _scheduled_job_next_runs(engine) == [("first", None), ("second", None)]
+
+
+def test_day_or_migration_works_without_a_next_run_column(engine):
+    with sqlite3.connect(engine.url.database) as conn:
+        conn.execute("CREATE TABLE scheduled_jobs (id INTEGER PRIMARY KEY, name VARCHAR)")
+        conn.execute("INSERT INTO scheduled_jobs (name) VALUES ('legacy')")
+
+    add_day_or_column(engine)
+
+    assert _scheduled_job_rows(engine) == [("legacy", 0)]
 
 
 @pytest.mark.parametrize("baseline", BASELINES[1:], ids=BASELINE_IDS[1:])

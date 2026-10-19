@@ -273,9 +273,8 @@ def test_scheduled_job_has_day_or_column():
     assert "day_or" in columns, "GSSD-311: ScheduledJob has no mapped 'day_or' column"
     column = columns["day_or"]
     assert column.nullable is False, "GSSD-311: day_or column must be NOT NULL"
-    assert column.default is not None and column.default.arg is True, (
-        "GSSD-311: day_or column must default to True (cron standard OR)"
-    )
+    assert column.default is not None, "GSSD-311: day_or column must have a default"
+    assert column.default.arg is True, "GSSD-311: day_or column must default to True (cron standard OR)"
 
 
 # ---------------------------------------------------------------------------

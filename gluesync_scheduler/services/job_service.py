@@ -396,20 +396,7 @@ class JobService:
         # Apply pagination
         jobs = query.offset(skip).limit(limit).all()
 
-        # Batch-load chained events for all jobs in a single query (avoids N+1)
-        job_ids = [job.id for job in jobs]
-        if job_ids:
-            all_events = (
-                self.db.query(ChainedJobEvent)
-                .filter(ChainedJobEvent.parent_job_id.in_(job_ids))
-                .order_by(ChainedJobEvent.parent_job_id, ChainedJobEvent.position)
-                .all()
-            )
-            events_by_job: Dict[int, list] = {}
-            for row in all_events:
-                events_by_job.setdefault(row.parent_job_id, []).append(row)
-        else:
-            events_by_job = {}
+        events_by_job = self._load_chained_events_by_job(jobs)
 
         # Resolve the configured timezone once per request (avoids per-job lookups)
         tz_name = self._get_configured_timezone()
@@ -435,17 +422,8 @@ class JobService:
                 schedule_days_cache[cron] = self._extract_days_from_cron(cron)
             job_model.schedule_days = schedule_days_cache[cron]
 
-            # next_run: prefer the persisted DB value; only compute (and backfill)
-            # legacy rows where it was never stored.
-            if job.next_run is None and cron:
-                cache_key = (cron, job.day_or is not False)
-                if cache_key not in next_run_cache:
-                    next_run_cache[cache_key] = self._compute_next_run(cron, tz, now, cache_key[1])
-                computed = next_run_cache[cache_key]
-                if computed is not None:
-                    job_model.next_run = computed
-                    job.next_run = computed  # backfill so future reads are cheap
-                    backfilled = True
+            if self._backfill_next_run(job, job_model, tz, now, next_run_cache):
+                backfilled = True
 
             job_model.chained_events = _rows_to_chained_responses(events_by_job.get(job.id, []))
             job_responses.append(job_model)
@@ -459,6 +437,47 @@ class JobService:
                 self.db.rollback()
 
         return job_responses, total
+
+    def _load_chained_events_by_job(self, jobs: List[ScheduledJob]) -> Dict[int, list]:
+        """Batch-load chained events for all jobs in a single query (avoids N+1)."""
+        job_ids = [job.id for job in jobs]
+        if not job_ids:
+            return {}
+        all_events = (
+            self.db.query(ChainedJobEvent)
+            .filter(ChainedJobEvent.parent_job_id.in_(job_ids))
+            .order_by(ChainedJobEvent.parent_job_id, ChainedJobEvent.position)
+            .all()
+        )
+        events_by_job: Dict[int, list] = {}
+        for row in all_events:
+            events_by_job.setdefault(row.parent_job_id, []).append(row)
+        return events_by_job
+
+    def _backfill_next_run(
+        self,
+        job: ScheduledJob,
+        job_model: Job,
+        tz: "pytz.BaseTzInfo",
+        now: datetime,
+        next_run_cache: Dict[Tuple[str, bool], Optional[datetime]],
+    ) -> bool:
+        """
+        Prefer the persisted DB next_run; only compute (and backfill) legacy rows where it
+        was never stored. Returns True when the job row was modified.
+        """
+        cron = job.cron_expression
+        if job.next_run is not None or not cron:
+            return False
+        cache_key = (cron, job.day_or is not False)
+        if cache_key not in next_run_cache:
+            next_run_cache[cache_key] = self._compute_next_run(cron, tz, now, cache_key[1])
+        computed = next_run_cache[cache_key]
+        if computed is None:
+            return False
+        job_model.next_run = computed
+        job.next_run = computed  # backfill so future reads are cheap
+        return True
 
     def _compute_next_run(
         self,

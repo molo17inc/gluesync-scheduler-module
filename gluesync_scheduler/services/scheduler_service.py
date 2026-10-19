@@ -25,6 +25,7 @@ import logging
 import os
 import sys
 from typing import Optional
+import pytz
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.combining import OrTrigger
@@ -55,13 +56,84 @@ def _day_or_applies(job: ScheduledJob) -> bool:
 
 def _build_trigger(use_or, minute, hour, day, month, day_of_week, tz):
     """Build the APScheduler trigger: a CronTrigger (AND) or two OR-ed CronTriggers on the day fields."""
-    common = dict(minute=minute, hour=hour, month=month, timezone=tz)
+    common = {'minute': minute, 'hour': hour, 'month': month, 'timezone': tz}
     if not use_or:
         return CronTrigger(day=day, day_of_week=day_of_week, **common)
     return OrTrigger([
         CronTrigger(day=day, day_of_week=_WILDCARD, **common),
         CronTrigger(day=_WILDCARD, day_of_week=day_of_week, **common),
     ])
+
+
+# Standard cron weekday numbers (0=Sunday) to day names, for validation/logging
+_CRON_DAY_NAMES = {
+    "0": "sunday", "1": "monday", "2": "tuesday", "3": "wednesday",
+    "4": "thursday", "5": "friday", "6": "saturday",
+}
+
+# Standard cron weekday numbers (0=Sunday) to the names APScheduler expects,
+# because APScheduler has inconsistent handling of numeric weekdays
+_CRON_DAY_TO_APSCHEDULER = {
+    "0": "sun", "1": "mon", "2": "tue", "3": "wed",
+    "4": "thu", "5": "fri", "6": "sat",
+}
+
+# Python weekday() (0=Monday) to the APScheduler day abbreviation
+_PYTHON_WEEKDAY_TO_APSCHEDULER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def _job_timezone_name(job: ScheduledJob) -> str:
+    """The job's timezone, falling back to the global timezone setting."""
+    return getattr(job, 'timezone_name', None) or get_env_timezone('UTC')
+
+
+def _log_run_days(day_of_week: str) -> None:
+    """Log the actual days of week a job will run on (for validation)."""
+    if day_of_week == _WILDCARD:
+        logger.info("Job will run every day")
+        return
+    day_names = []
+    for part in day_of_week.split(','):
+        if "-" in part:
+            start, end = part.split("-")
+            day_names.extend(
+                _CRON_DAY_NAMES[str(d)] for d in range(int(start), int(end) + 1) if str(d) in _CRON_DAY_NAMES
+            )
+        elif part in _CRON_DAY_NAMES:
+            day_names.append(_CRON_DAY_NAMES[part])
+    logger.info(f"Job will run on these days: {day_names}")
+
+
+def _to_apscheduler_day_of_week(day_of_week: str) -> str:
+    """Convert standard cron day numbers to APScheduler day names (ranges/unknown parts pass through)."""
+    if day_of_week == _WILDCARD:
+        return _WILDCARD
+    return ','.join(_CRON_DAY_TO_APSCHEDULER.get(part, part) for part in day_of_week.split(','))
+
+
+def _log_next_run(next_run: datetime, cron_dow: str, use_or: bool, tz) -> None:
+    """Log the calculated next run and warn when its weekday does not match the schedule."""
+    if next_run.tzinfo != tz:
+        next_run = next_run.astimezone(tz)
+
+    weekday_name = next_run.strftime("%A").lower()
+    # Convert to cron weekday where 0 is Sunday, 6 is Saturday
+    cron_weekday = (next_run.weekday() + 1) % 7
+    logger.info(f"Next scheduled run will be: {next_run.strftime('%Y-%m-%d %H:%M:%S %z')} which is a {weekday_name}")
+    logger.info(f"Weekday validation - Cron format: {cron_dow}, Actual date weekday: {cron_weekday}")
+
+    actual_day = _PYTHON_WEEKDAY_TO_APSCHEDULER[next_run.weekday()]
+    if not use_or and cron_dow != _WILDCARD and actual_day not in cron_dow.split(','):
+        logger.warning(f"WARNING: Next run date {next_run.strftime('%Y-%m-%d')} is a {weekday_name} ({actual_day}), but job is configured to run on weekdays: {cron_dow}. This may indicate a timezone issue or that the next valid run time is in a future week.")
+
+
+def _validate_next_run(trigger, job_id: str, cron_expression: str, cron_dow: str, use_or: bool, tz) -> None:
+    """Compute the trigger's next fire time (for validation) and log it."""
+    next_run = trigger.get_next_fire_time(None, datetime.now(tz))
+    if next_run:
+        _log_next_run(next_run, cron_dow, use_or, tz)
+    else:
+        logger.warning(f"Could not determine next run time for job {job_id} with cron expression {cron_expression}")
 
 
 class SchedulerService:
@@ -135,106 +207,19 @@ class SchedulerService:
             job_id = f"job_{job.id}"
 
             # Get the job's timezone or fall back to the global timezone setting
-            job_timezone = job.timezone_name if hasattr(job, 'timezone_name') and job.timezone_name else get_env_timezone('UTC')
+            job_timezone = _job_timezone_name(job)
             logger.info(f"Using timezone {job_timezone} for job {job_id}")
             
-            # Map from day numbers (0-6) to day names for validation/logging
-            day_map = {
-                "0": "sunday", "1": "monday", "2": "tuesday", "3": "wednesday",
-                "4": "thursday", "5": "friday", "6": "saturday"
-            }
-            
-            # Log the actual days of week this job will run on (for validation)
-            if day_of_week != "*":
-                day_names = []
-                for part in day_of_week.split(','):
-                    if "-" in part:
-                        start, end = part.split("-")
-                        for d in range(int(start), int(end) + 1):
-                            if str(d) in day_map:
-                                day_names.append(day_map[str(d)])
-                    elif part in day_map:
-                        day_names.append(day_map[part])
-                logger.info(f"Job will run on these days: {day_names}")
-                # Convert from standard cron days (where 0=Sunday) to APScheduler day names
-                # because APScheduler has inconsistent handling of numeric weekdays
-                cron_day_to_name = {
-                    "0": "sun", "1": "mon", "2": "tue", "3": "wed", 
-                    "4": "thu", "5": "fri", "6": "sat"
-                }
-                
-                # Convert each day number to its name
-                dow_parts = day_of_week.split(',')
-                dow_names = []
-                for part in dow_parts:
-                    if part in cron_day_to_name:
-                        dow_names.append(cron_day_to_name[part])
-                    else:
-                        # Handle ranges or unknown parts by passing them through
-                        dow_names.append(part)
-                
-                # Use APScheduler's expected day names
-                cron_dow = ','.join(dow_names)  # e.g., "wed" instead of "3"
-            else:
-                logger.info("Job will run every day")
-                cron_dow = "*"
-            
-            # Calculate the next run time based on the trigger
-            from datetime import datetime
-            import pytz
-            
-            # Get the next run time from the trigger (for validation)
-            tz = pytz.timezone(job_timezone)
-            now = datetime.now(tz)  # Get current time in job's timezone
+            _log_run_days(day_of_week)
+            cron_dow = _to_apscheduler_day_of_week(day_of_week)
             
             # Create the trigger with explicit timezone
+            tz = pytz.timezone(job_timezone)
             use_or = _day_or_applies(job)
             trigger = _build_trigger(use_or, minute, hour, day, month, cron_dow, tz)
             
-            # Get next run time and ensure it's in the correct timezone
-            next_run = trigger.get_next_fire_time(None, now)
-            
-            if next_run:
-                # Ensure next_run is in the job's timezone
-                if next_run.tzinfo != tz:
-                    next_run = next_run.astimezone(tz)
-                    
-                # Log the calculated next run time and day for validation
-                weekday_name = next_run.strftime("%A").lower()
-                weekday_number = next_run.weekday() # 0 is Monday, 6 is Sunday
-                # Convert to cron weekday where 0 is Sunday, 6 is Saturday
-                cron_weekday = (weekday_number + 1) % 7
-                logger.info(f"Next scheduled run will be: {next_run.strftime('%Y-%m-%d %H:%M:%S %z')} which is a {weekday_name}")
-                logger.info(f"Weekday validation - Cron format: {cron_dow}, Actual date weekday: {cron_weekday}")
-                
-                # Verify if the scheduled date actually matches the expected day of week
-                expected_days = cron_dow.split(',')
-                # Convert the Python weekday to the same format we're using with APScheduler (day names)
-                python_weekday = next_run.weekday()  # 0=Monday, 1=Tuesday, ..., 6=Sunday
-                
-                # Map Python's weekday to day abbreviation
-                python_to_apscheduler = {
-                    0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"
-                }
-                actual_day = python_to_apscheduler[python_weekday]
-                if not use_or and cron_dow != '*' and actual_day not in expected_days:
-                    logger.warning(f"WARNING: Next run date {next_run.strftime('%Y-%m-%d')} is a {weekday_name} ({actual_day}), but job is configured to run on weekdays: {cron_dow}. This may indicate a timezone issue or that the next valid run time is in a future week.")
-            else:
-                logger.warning(f"Could not determine next run time for job {job_id} with cron expression {job.cron_expression}")
-            
-            # Add the job to the scheduler with proper next run time calculation
-            # We want it to run on schedule but not immediately
-            self.scheduler.add_job(
-                self._execute_job,
-                trigger=trigger,
-                id=job_id,
-                replace_existing=True,
-                args=[job.id, job.name],
-                misfire_grace_time=3600,   # Allow misfires up to an hour
-                coalesce=True,             # Only run once if multiple executions are missed
-                max_instances=1            # Avoid overlapping executions of the same job
-                # Let the trigger naturally determine the next run time
-            )
+            _validate_next_run(trigger, job_id, job.cron_expression, cron_dow, use_or, tz)
+            self._add_job_to_scheduler(job, job_id, trigger)
             
             logger.info(f"Created scheduled job: {job_id} with expression: {job.cron_expression}")
             return job_id
@@ -242,6 +227,19 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"Error creating scheduled job: {str(e)}")
             raise RuntimeError(f"Error creating scheduled job: {str(e)}")
+
+    def _add_job_to_scheduler(self, job: ScheduledJob, job_id: str, trigger) -> None:
+        """Add the job to the scheduler; the trigger naturally determines the next run time."""
+        self.scheduler.add_job(
+            self._execute_job,
+            trigger=trigger,
+            id=job_id,
+            replace_existing=True,
+            args=[job.id, job.name],
+            misfire_grace_time=3600,   # Allow misfires up to an hour
+            coalesce=True,             # Only run once if multiple executions are missed
+            max_instances=1            # Avoid overlapping executions of the same job
+        )
     
     def update_job(self, job: ScheduledJob) -> str:
         """
