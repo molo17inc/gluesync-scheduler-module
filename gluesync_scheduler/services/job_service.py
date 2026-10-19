@@ -396,20 +396,7 @@ class JobService:
         # Apply pagination
         jobs = query.offset(skip).limit(limit).all()
 
-        # Batch-load chained events for all jobs in a single query (avoids N+1)
-        job_ids = [job.id for job in jobs]
-        if job_ids:
-            all_events = (
-                self.db.query(ChainedJobEvent)
-                .filter(ChainedJobEvent.parent_job_id.in_(job_ids))
-                .order_by(ChainedJobEvent.parent_job_id, ChainedJobEvent.position)
-                .all()
-            )
-            events_by_job: Dict[int, list] = {}
-            for row in all_events:
-                events_by_job.setdefault(row.parent_job_id, []).append(row)
-        else:
-            events_by_job = {}
+        events_by_job = self._load_chained_events_by_job(jobs)
 
         # Resolve the configured timezone once per request (avoids per-job lookups)
         tz_name = self._get_configured_timezone()
@@ -421,7 +408,7 @@ class JobService:
 
         # Request-scoped caches keyed by cron expression (many jobs share expressions)
         schedule_days_cache: Dict[str, List[str]] = {}
-        next_run_cache: Dict[str, Optional[datetime]] = {}
+        next_run_cache: Dict[Tuple[str, bool], Optional[datetime]] = {}
 
         # Convert to Pydantic models with timezone handling
         job_responses = []
@@ -435,16 +422,8 @@ class JobService:
                 schedule_days_cache[cron] = self._extract_days_from_cron(cron)
             job_model.schedule_days = schedule_days_cache[cron]
 
-            # next_run: prefer the persisted DB value; only compute (and backfill)
-            # legacy rows where it was never stored.
-            if job.next_run is None and cron:
-                if cron not in next_run_cache:
-                    next_run_cache[cron] = self._compute_next_run(cron, tz, now)
-                computed = next_run_cache[cron]
-                if computed is not None:
-                    job_model.next_run = computed
-                    job.next_run = computed  # backfill so future reads are cheap
-                    backfilled = True
+            if self._backfill_next_run(job, job_model, tz, now, next_run_cache):
+                backfilled = True
 
             job_model.chained_events = _rows_to_chained_responses(events_by_job.get(job.id, []))
             job_responses.append(job_model)
@@ -459,15 +438,57 @@ class JobService:
 
         return job_responses, total
 
+    def _load_chained_events_by_job(self, jobs: List[ScheduledJob]) -> Dict[int, list]:
+        """Batch-load chained events for all jobs in a single query (avoids N+1)."""
+        job_ids = [job.id for job in jobs]
+        if not job_ids:
+            return {}
+        all_events = (
+            self.db.query(ChainedJobEvent)
+            .filter(ChainedJobEvent.parent_job_id.in_(job_ids))
+            .order_by(ChainedJobEvent.parent_job_id, ChainedJobEvent.position)
+            .all()
+        )
+        events_by_job: Dict[int, list] = {}
+        for row in all_events:
+            events_by_job.setdefault(row.parent_job_id, []).append(row)
+        return events_by_job
+
+    def _backfill_next_run(
+        self,
+        job: ScheduledJob,
+        job_model: Job,
+        tz: "pytz.BaseTzInfo",
+        now: datetime,
+        next_run_cache: Dict[Tuple[str, bool], Optional[datetime]],
+    ) -> bool:
+        """
+        Prefer the persisted DB next_run; only compute (and backfill) legacy rows where it
+        was never stored. Returns True when the job row was modified.
+        """
+        cron = job.cron_expression
+        if job.next_run is not None or not cron:
+            return False
+        cache_key = (cron, job.day_or is not False)
+        if cache_key not in next_run_cache:
+            next_run_cache[cache_key] = self._compute_next_run(cron, tz, now, cache_key[1])
+        computed = next_run_cache[cache_key]
+        if computed is None:
+            return False
+        job_model.next_run = computed
+        job.next_run = computed  # backfill so future reads are cheap
+        return True
+
     def _compute_next_run(
         self,
         cron_expression: str,
         tz: "pytz.BaseTzInfo",
         now: datetime,
+        day_or: bool = True,
     ) -> Optional[datetime]:
         """Compute the next run datetime for a cron expression in the given timezone."""
         try:
-            cron_iter = croniter(cron_expression, now)
+            cron_iter = croniter(cron_expression, now, day_or=day_or)
             nxt = cron_iter.get_next(datetime)
             if nxt.tzinfo is None:
                 nxt = tz.localize(nxt)
@@ -536,7 +557,7 @@ class JobService:
                 detail=f"Failed to convert schedule to cron expression: {str(e)}"
             )
 
-    def _calculate_next_run_times(self, cron_expression: str):
+    def _calculate_next_run_times(self, cron_expression: str, day_or: bool = True):
         """Return (next_run_time_str, next_run_dt) or (None, None) on failure."""
         if not cron_expression:
             return None, None
@@ -545,7 +566,7 @@ class JobService:
             tz = pytz.timezone(current_timezone)
             logger.info(f"Using timezone for calculation: {current_timezone}")
             now = datetime.now(tz)
-            cron_iter = croniter(cron_expression, now)
+            cron_iter = croniter(cron_expression, now, day_or=day_or)
             next_run_datetime = cron_iter.get_next(datetime)
             if next_run_datetime.tzinfo is None:
                 next_run_datetime = tz.localize(next_run_datetime)
@@ -598,7 +619,7 @@ class JobService:
         """
         try:
             self._ensure_cron_expression_from_schedule(job_data)
-            next_run_time, next_run_dt = self._calculate_next_run_times(job_data.cron_expression)
+            next_run_time, next_run_dt = self._calculate_next_run_times(job_data.cron_expression, job_data.day_or)
             is_cron_expression = bool(job_data.cron_expression and not job_data.schedule)
 
             self._validate_group_task_type(job_data.task_type, job_data.group_ids)
@@ -635,6 +656,7 @@ class JobService:
                 next_run=next_run_dt,
                 timezone_name=self._get_configured_timezone(),
                 is_cron_expression=is_cron_expression,
+                day_or=job_data.day_or,
                 **ai_agent_run_orm_kwargs(job_data),
                 **entity_validation_orm_kwargs(job_data),
                 **visualize_refresh_orm_kwargs(job_data),
@@ -686,6 +708,8 @@ class JobService:
         _store_optional_json(update_data, "visualize_parameters")
         if "snapshot_write_method" in update_data and update_data["snapshot_write_method"] is None:
             update_data["snapshot_write_method"] = 'UPSERT'
+        if update_data.get("day_or", True) is None:
+            del update_data["day_or"]
 
     def _validate_group_ids_for_update(self, final_task_type, final_group_ids) -> None:
         if final_task_type not in _GROUP_TASK_TYPES:
@@ -795,7 +819,7 @@ class JobService:
         if "cron_expression" in update_data:
             update_data["is_cron_expression"] = True
             return True
-        return "cron_expression" in update_data
+        return "day_or" in update_data
 
     def _log_schedule_original_days(self, value) -> None:
         if isinstance(value, dict):
@@ -848,7 +872,7 @@ class JobService:
             logger.info(f"Using timezone for calculation: {current_timezone}")
             now = datetime.now(tz)
             self._log_cron_actual_days(db_job.cron_expression)
-            cron_iter = croniter(db_job.cron_expression, now)
+            cron_iter = croniter(db_job.cron_expression, now, day_or=db_job.day_or is not False)
             next_run_datetime = cron_iter.get_next(datetime)
             if next_run_datetime.tzinfo is None:
                 next_run_datetime = tz.localize(next_run_datetime)

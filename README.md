@@ -664,6 +664,21 @@ To schedule jobs for specific days of the week, you can use comma-separated valu
 - `30 18 * * 1-5` - Run at 6:30 PM on weekdays (Monday through Friday)
 - `0 12 * * 0,6` - Run at 12:00 PM on weekends (Saturday and Sunday)
 
+#### Day-of-month and day-of-week (`day_or`)
+
+When both the day-of-month and the day-of-week fields are restricted (neither is `*`), standard cron fires the job when **either** field matches. Chronos does the same by default (`"day_or": true`): `0 16 21 8 0` runs on August 21st **and** on every Sunday in August.
+
+Set `"day_or": false` to require **both** fields to match (AND). For example, to run on the first Saturday of every month at 9:00 (a Saturday that falls on days 1-7):
+
+```json
+{
+  "cron_expression": "0 9 1-7 * 6",
+  "day_or": false
+}
+```
+
+`day_or` has no effect when either field is `*`. It can be changed on an existing job with a job update. Jobs that existed before this version are migrated to `day_or: false`, so they keep firing exactly as they did before; only jobs created afterwards default to `true`.
+
 #### Weekend Scheduling
 
 To schedule a job to run only on weekends, you can use either of these approaches:
