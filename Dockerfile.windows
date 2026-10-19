@@ -8,6 +8,10 @@ ARG WINDOWS_TAG=ltsc2022
 # ------------------
 FROM nexus.hq.molo17.com/molo17-local/python:3.13.13-win-servercore-${WINDOWS_TAG} AS builder
 
+# Optional token for the private GitLab PyPI index (pass with
+# --build-arg GITLAB_TOKEN=...); empty means anonymous access.
+ARG GITLAB_TOKEN=""
+
 # Switch to Windows shell
 SHELL ["cmd", "/S", "/C"]
 
