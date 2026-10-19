@@ -160,41 +160,46 @@
 
     # Save tarball and upload to FTP before pushing images
     - |
-      $tarDir = Join-Path $env:CI_PROJECT_DIR "docker-images-windows"
-      $null = New-Item -ItemType Directory -Path $tarDir -Force
-      $baseName = "{0}-{1}-{2}" -f $env:APP_NAME, $script:ReleaseSuffix, $env:WINDOWS_TAG
-      $rawTarName = "${baseName}.tar"
-      $compressedTarName = "${rawTarName}.gz"
-      $rawTarPath = Join-Path $tarDir $rawTarName
-      $tarPath = Join-Path $tarDir $compressedTarName
+      # Beta tags ship as Docker images only: no FTP archive (offline tarballs are GA/alpha only).
+      if ($env:CI_COMMIT_TAG -match '^beta-') {
+          Write-Host "Beta tag: skipping FTP tarball export/upload (Docker Hub + Nexus only)"
+      } else {
+          $tarDir = Join-Path $env:CI_PROJECT_DIR "docker-images-windows"
+          $null = New-Item -ItemType Directory -Path $tarDir -Force
+          $baseName = "{0}-{1}-{2}" -f $env:APP_NAME, $script:ReleaseSuffix, $env:WINDOWS_TAG
+          $rawTarName = "${baseName}.tar"
+          $compressedTarName = "${rawTarName}.gz"
+          $rawTarPath = Join-Path $tarDir $rawTarName
+          $tarPath = Join-Path $tarDir $compressedTarName
 
-      Write-Host "Saving image $VERSION_TAG_WINDOWS to $rawTarPath"
-      docker save "$VERSION_TAG_WINDOWS" -o $rawTarPath
-      if ($LASTEXITCODE -ne 0) { throw "❌ Docker save failed" }
+          Write-Host "Saving image $VERSION_TAG_WINDOWS to $rawTarPath"
+          docker save "$VERSION_TAG_WINDOWS" -o $rawTarPath
+          if ($LASTEXITCODE -ne 0) { throw "❌ Docker save failed" }
 
-      Write-Host "Compressing saved image to $tarPath"
-      $inputStream = $null
-      $outputStream = $null
-      $gzipStream = $null
-      try {
-          $inputStream = [System.IO.File]::OpenRead($rawTarPath)
-          $outputStream = [System.IO.File]::Create($tarPath)
-          $gzipStream = New-Object System.IO.Compression.GzipStream($outputStream, [System.IO.Compression.CompressionLevel]::Optimal)
-          $inputStream.CopyTo($gzipStream)
+          Write-Host "Compressing saved image to $tarPath"
+          $inputStream = $null
+          $outputStream = $null
+          $gzipStream = $null
+          try {
+              $inputStream = [System.IO.File]::OpenRead($rawTarPath)
+              $outputStream = [System.IO.File]::Create($tarPath)
+              $gzipStream = New-Object System.IO.Compression.GzipStream($outputStream, [System.IO.Compression.CompressionLevel]::Optimal)
+              $inputStream.CopyTo($gzipStream)
+          }
+          finally {
+              if ($gzipStream) { $gzipStream.Dispose() }
+              if ($outputStream) { $outputStream.Dispose() }
+              if ($inputStream) { $inputStream.Dispose() }
+          }
+
+          Remove-Item -Path $rawTarPath -Force -ErrorAction SilentlyContinue
+
+          $ftpUri = "ftp://$env:FTP_SITE$script:FTP_RELEASE_DIR/$compressedTarName"
+          Write-Host "Uploading $compressedTarName to $ftpUri"
+          Upload-FtpFile -LocalPath $tarPath -RemoteUri $ftpUri -Username $env:FTP_USER -Password $env:FTP_PASSWORD
+
+          Remove-Item -Path $tarPath -Force -ErrorAction SilentlyContinue
       }
-      finally {
-          if ($gzipStream) { $gzipStream.Dispose() }
-          if ($outputStream) { $outputStream.Dispose() }
-          if ($inputStream) { $inputStream.Dispose() }
-      }
-
-      Remove-Item -Path $rawTarPath -Force -ErrorAction SilentlyContinue
-
-      $ftpUri = "ftp://$env:FTP_SITE$script:FTP_RELEASE_DIR/$compressedTarName"
-      Write-Host "Uploading $compressedTarName to $ftpUri"
-      Upload-FtpFile -LocalPath $tarPath -RemoteUri $ftpUri -Username $env:FTP_USER -Password $env:FTP_PASSWORD
-
-      Remove-Item -Path $tarPath -Force -ErrorAction SilentlyContinue
 
     # Push Windows Docker image
     - docker push "$VERSION_TAG_WINDOWS"
