@@ -132,12 +132,6 @@ deploy-linux:
         --severity HIGH,CRITICAL \
         --ignore-unfixed \
         --no-progress \
-        --skip-files /app/debug-container/gluesync-docker-windows-2019/proxy/gluesync-key.pem \
-        --skip-files /app/debug-container/gluesync-docker-windows-2019/shared/gluesync-key.pem \
-        --skip-files /app/debug-container/gluesync-docker-windows/proxy/gluesync-key.pem \
-        --skip-files /app/debug-container/gluesync-docker-windows/shared/gluesync-key.pem \
-        --skip-files /app/debug-container/gluesync-docker/shared/gluesync-key.pem \
-        --skip-files /app/debug-container/gluesync-podman/shared/gluesync-key.pem \
         "$CANDIDATE_TAG"
 
         echo "Promoting candidate image to release tags"
@@ -165,12 +159,6 @@ deploy-linux:
           --severity HIGH,CRITICAL \
           --ignore-unfixed \
           --no-progress \
-          --skip-files /app/debug-container/gluesync-docker-windows-2019/proxy/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows-2019/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows/proxy/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-podman/shared/gluesync-key.pem \
           "$CANDIDATE_TAG"
 
         echo "Promoting candidate image to beta tags"
@@ -188,12 +176,6 @@ deploy-linux:
           --severity HIGH,CRITICAL \
           --ignore-unfixed \
           --no-progress \
-          --skip-files /app/debug-container/gluesync-docker-windows-2019/proxy/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows-2019/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows/proxy/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-podman/shared/gluesync-key.pem \
           "$CANDIDATE_TAG"
 
         docker tag "$CANDIDATE_TAG" "$VERSION_TAG"
