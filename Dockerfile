@@ -44,6 +44,11 @@ COPY ./README.md ./
 COPY ./gluesync_scheduler ./gluesync_scheduler
 RUN pip install .
 
+# Drop pip from the runtime venv: nothing installs packages at runtime, and pip
+# vendors a setuptools 70.3.0 SBOM (pip/_vendor/bom.cdx.json) that scanners
+# report as CVE-2025-47273 even though the installed setuptools is current.
+RUN /opt/venv/bin/python -m pip uninstall -y pip
+
 # Final stage
 # Same Chainguard/Wolfi Python image: keeps a POSIX shell so entrypoint.sh and
 # the migration script still run, while dropping the Debian OS packages (perl,

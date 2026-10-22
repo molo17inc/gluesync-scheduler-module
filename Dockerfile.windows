@@ -86,7 +86,7 @@ RUN pyinstaller `
 # ------------------
 # Stage 2: Runtime (Nano Server)
 # ------------------
-FROM nexus.hq.molo17.com/molo17-local/pwsh:7.6.2-win-nanoserver-${WINDOWS_TAG}
+FROM nexus.hq.molo17.com/molo17-local/pwsh:7.6.7-win-nanoserver-${WINDOWS_TAG}
 
 USER ContainerAdministrator
 
