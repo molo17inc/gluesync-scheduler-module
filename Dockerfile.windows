@@ -8,6 +8,9 @@ ARG WINDOWS_TAG=ltsc2022
 # ------------------
 FROM nexus.hq.molo17.com/molo17-local/python:3.13.13-win-servercore-${WINDOWS_TAG} AS builder
 
+# Redeclare so the build arg is visible inside this stage (ARGs declared before FROM are not)
+ARG WINDOWS_TAG
+
 # Switch to Windows shell
 SHELL ["cmd", "/S", "/C"]
 
@@ -86,7 +89,7 @@ RUN pyinstaller `
 # ------------------
 # Stage 2: Runtime (Nano Server)
 # ------------------
-FROM nexus.hq.molo17.com/molo17-local/pwsh:7.6.2-win-nanoserver-${WINDOWS_TAG}
+FROM nexus.hq.molo17.com/molo17-local/pwsh:7.6.8-win-nanoserver-${WINDOWS_TAG}
 
 USER ContainerAdministrator
 
