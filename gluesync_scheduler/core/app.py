@@ -594,9 +594,13 @@ class JSONEncoder(json.JSONEncoder):
             return obj.isoformat()
         return super().default(obj)
 
-# Override FastAPI's default JSON encoder
+# Override FastAPI's default JSON encoder.
+# Keep a reference to the original: the lambda must not look it up through
+# fastapi.encoders at call time, because by then that attribute is the lambda itself
+# and every call (e.g. OpenAPI generation) would recurse forever.
+_original_jsonable_encoder = fastapi.encoders.jsonable_encoder
 fastapi.encoders.jsonable_encoder = lambda obj, *args, **kwargs: json.loads(
-    json.dumps(fastapi.encoders.jsonable_encoder(obj, *args, **kwargs), cls=JSONEncoder)
+    json.dumps(_original_jsonable_encoder(obj, *args, **kwargs), cls=JSONEncoder)
 )
 
 # Root endpoint that redirects to API documentation
