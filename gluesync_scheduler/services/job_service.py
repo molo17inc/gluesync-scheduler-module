@@ -53,6 +53,7 @@ from gluesync_scheduler.models.visualize_refresh import (
     visualize_internal_payload,
     visualize_refresh_orm_kwargs,
 )
+from gluesync_scheduler.models.corehub_backup import corehub_backup_internal_payload
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
@@ -216,6 +217,8 @@ def _task_type_to_action(task_type) -> Optional[str]:
         return "brain-reindex"
     if task_type == TaskType.VISUALIZE_REFRESH:
         return "visualize-refresh"
+    if task_type == TaskType.CORE_HUB_BACKUP:
+        return "corehub-backup"
     return None
 
 
@@ -557,12 +560,12 @@ class JobService:
                 detail=f"Failed to convert schedule to cron expression: {str(e)}"
             )
 
-    def _calculate_next_run_times(self, cron_expression: str, day_or: bool = True):
+    def _calculate_next_run_times(self, cron_expression: str, day_or: bool = True, timezone_name: Optional[str] = None):
         """Return (next_run_time_str, next_run_dt) or (None, None) on failure."""
         if not cron_expression:
             return None, None
         try:
-            current_timezone = self._get_configured_timezone()
+            current_timezone = timezone_name or self._get_configured_timezone()
             tz = pytz.timezone(current_timezone)
             logger.info(f"Using timezone for calculation: {current_timezone}")
             now = datetime.now(tz)
@@ -619,7 +622,10 @@ class JobService:
         """
         try:
             self._ensure_cron_expression_from_schedule(job_data)
-            next_run_time, next_run_dt = self._calculate_next_run_times(job_data.cron_expression, job_data.day_or)
+            job_timezone = job_data.timezone_name or self._get_configured_timezone()
+            next_run_time, next_run_dt = self._calculate_next_run_times(
+                job_data.cron_expression, job_data.day_or, job_timezone,
+            )
             is_cron_expression = bool(job_data.cron_expression and not job_data.schedule)
 
             self._validate_group_task_type(job_data.task_type, job_data.group_ids)
@@ -654,7 +660,7 @@ class JobService:
                 command="pending",
                 start_time=next_run_time,
                 next_run=next_run_dt,
-                timezone_name=self._get_configured_timezone(),
+                timezone_name=job_timezone,
                 is_cron_expression=is_cron_expression,
                 day_or=job_data.day_or,
                 **ai_agent_run_orm_kwargs(job_data),
@@ -863,11 +869,13 @@ class JobService:
                 actual_days.extend(self._expand_cron_dow_part(part))
         logger.info(f"Actual days job will run based on cron: {actual_days}")
 
-    def _recalculate_job_next_run(self, db_job: ScheduledJob, job_id: int) -> None:
+    def _recalculate_job_next_run(self, db_job: ScheduledJob, job_id: int, timezone_name: Optional[str] = None) -> None:
         if not db_job.cron_expression:
+            if timezone_name:
+                db_job.timezone_name = timezone_name
             return
         try:
-            current_timezone = self._get_configured_timezone()
+            current_timezone = timezone_name or self._get_configured_timezone()
             tz = pytz.timezone(current_timezone)
             logger.info(f"Using timezone for calculation: {current_timezone}")
             now = datetime.now(tz)
@@ -996,11 +1004,19 @@ class JobService:
                 for ce in job_data.chained_events:
                     require_visualize_refresh_fields(ce.task_type, ce.viz_id)
 
+            timezone_given = "timezone_name" in update_data
+            # Explicit null resets the job to the global timezone setting.
+            new_timezone = update_data.pop("timezone_name", None) or None
+            if timezone_given and new_timezone is None:
+                new_timezone = self._get_configured_timezone()
+
             cron_updated = self._apply_schedule_to_update_data(update_data)
             self._apply_update_fields_to_job(db_job, update_data)
 
-            if cron_updated:
-                self._recalculate_job_next_run(db_job, job_id)
+            if cron_updated or timezone_given:
+                # Without an explicit timezone_name a schedule change adopts the
+                # global timezone setting (behaviour before per-job timezones).
+                self._recalculate_job_next_run(db_job, job_id, new_timezone)
 
             self.db.commit()
             self.db.refresh(db_job)
@@ -1086,12 +1102,14 @@ class JobService:
                 detail=f"Error updating job status: {str(e)}"
             )
 
-    def run_job(self, job_id: int) -> dict:
+    def run_job(self, job_id: int, manual: bool = False) -> dict:
         """
         Run a job immediately
         
         Args:
             job_id: The ID of the job to run
+            manual: True when the run comes from ``POST /api/jobs/{id}/run``
+                rather than the schedule (reported to Core Hub by corehub_backup)
             
         Returns:
             A dictionary with execution results
@@ -1140,7 +1158,7 @@ class JobService:
             logger.info(f"Running job {job_id}: {job.name}")
             
             # Execute the job logic
-            success, message, details = self._execute_job_logic(job)
+            success, message, details = self._execute_job_logic(job, manual=manual, fired_at=now)
             
             # Update job status based on execution result
             if success:
@@ -1240,7 +1258,7 @@ class JobService:
         logger.info(f"Using internal API URL: {base_url} (SSL: {ssl_enabled})")
         return base_url, protocol, ssl_enabled
 
-    def _build_execute_payload(self, job, entity_ids: list, group_ids: list) -> dict:
+    def _build_execute_payload(self, job, entity_ids: list, group_ids: list, manual: bool = False, fired_at=None) -> dict:
         json_data = {}
         if job.task_type == TaskType.QUERY_STUDIO:
             json_data = query_studio_http_payload(job)
@@ -1250,6 +1268,8 @@ class JobService:
             json_data = entity_validation_http_payload(job, entity_ids)
         if job.task_type == TaskType.VISUALIZE_REFRESH:
             json_data = visualize_internal_payload(job)
+        if job.task_type == TaskType.CORE_HUB_BACKUP:
+            json_data = corehub_backup_internal_payload(job, manual=manual, fired_at=fired_at)
 
         if job.task_type not in (
             TaskType.QUERY_STUDIO,
@@ -1257,6 +1277,7 @@ class JobService:
             TaskType.ENTITY_VALIDATE,
             TaskType.BRAIN_REINDEX,
             TaskType.VISUALIZE_REFRESH,
+            TaskType.CORE_HUB_BACKUP,
         ) and entity_ids:
             json_data["entity_ids"] = entity_ids
 
@@ -1286,7 +1307,9 @@ class JobService:
             logger.info(f"Using certificate files for HTTPS request: {cert_file} and {key_file}")
         return verify, cert
 
-    def _interpret_execute_response(self, response) -> tuple:
+    def _interpret_execute_response(self, response, task_type=None) -> tuple:
+        if task_type == TaskType.CORE_HUB_BACKUP:
+            return self._interpret_corehub_backup_response(response)
         if response.status_code in [200, 201, 202]:
             success_msg = f"Job executed successfully with status code {response.status_code}"
             logger.info(success_msg)
@@ -1314,6 +1337,30 @@ class JobService:
         }
         return False, error_msg, result
 
+    def _interpret_corehub_backup_response(self, response) -> tuple:
+        """The run message is Core Hub's reason on success, its status + body excerpt on failure."""
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            body = {}
+        if response.status_code in [200, 201, 202]:
+            data = body.get("data") if isinstance(body.get("data"), dict) else {}
+            message = str(body.get("message") or "started")
+            logger.info(f"Core Hub backup run recorded as successful: {message}")
+            details = {
+                "status": "success",
+                "code": str(response.status_code),
+                "started": data.get("started"),
+                "reason": data.get("reason"),
+                "next_allowed_at": data.get("next_allowed_at"),
+            }
+            return True, message, details
+        message = _response_detail(response) or f"Core Hub backup failed with status {response.status_code}"
+        logger.error(f"Core Hub backup run failed: {message}")
+        return False, message, {"status_code": response.status_code, "success": False}
+
     def _parse_job_entity_and_group_ids(self, job) -> tuple:
         entity_ids = []
         if job.entity_ids:
@@ -1335,7 +1382,7 @@ class JobService:
             logger.info("No group_ids found in job - job.group_ids is None or empty")
         return entity_ids, group_ids
 
-    def _execute_job_logic(self, job) -> tuple:
+    def _execute_job_logic(self, job, manual: bool = False, fired_at=None) -> tuple:
         """
         Execute the job logic and return results
         
@@ -1358,7 +1405,7 @@ class JobService:
                 return self._execute_group_operation(job, group_ids, action)
 
             endpoint = f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/{action}"
-            json_data = self._build_execute_payload(job, entity_ids, group_ids)
+            json_data = self._build_execute_payload(job, entity_ids, group_ids, manual=manual, fired_at=fired_at)
 
             logger.info(f"Endpoint: {method} {endpoint}")
             log_payload = json_data
@@ -1401,7 +1448,7 @@ class JobService:
                 logger.error(f"HTTP request failed: {str(e)}")
                 return False, f"HTTP request failed: {str(e)}", {}
 
-            return self._interpret_execute_response(response)
+            return self._interpret_execute_response(response, job.task_type)
 
         except Exception as e:
             error_msg = f"Error executing job: {str(e)}"

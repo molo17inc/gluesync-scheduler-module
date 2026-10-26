@@ -594,9 +594,12 @@ class JSONEncoder(json.JSONEncoder):
             return obj.isoformat()
         return super().default(obj)
 
-# Override FastAPI's default JSON encoder
+# Override FastAPI's default JSON encoder. Keep a reference to the original:
+# calling ``fastapi.encoders.jsonable_encoder`` from the override recursed until
+# RecursionError, so every 422 validation answer became a 500.
+_fastapi_jsonable_encoder = fastapi.encoders.jsonable_encoder
 fastapi.encoders.jsonable_encoder = lambda obj, *args, **kwargs: json.loads(
-    json.dumps(fastapi.encoders.jsonable_encoder(obj, *args, **kwargs), cls=JSONEncoder)
+    json.dumps(_fastapi_jsonable_encoder(obj, *args, **kwargs), cls=JSONEncoder)
 )
 
 # Root endpoint that redirects to API documentation

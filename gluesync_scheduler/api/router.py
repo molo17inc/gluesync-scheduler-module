@@ -455,7 +455,7 @@ def run_job(
     - **500**: Server error during job execution
     """
     job_service = JobService(db)
-    result = job_service.run_job(job_id)
+    result = job_service.run_job(job_id, manual=True)
     return JSONResponse(content=result)
 
 @router.get("/{job_id}/chain-status", responses={
