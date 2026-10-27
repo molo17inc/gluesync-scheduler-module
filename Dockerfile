@@ -81,8 +81,14 @@ WORKDIR /app
 # Minimal runtime OS packages (Wolfi, continuously patched). Only the Python
 # interpreter is installed system-wide (no system pip/setuptools/msgpack), so the
 # old latest-dev setuptools/msgpack CVE workaround is no longer needed; the venv
-# copied below carries an up-to-date pip/setuptools from the builder.
-RUN apk add --no-cache python-${PYTHON_VERSION} bash openssl procps tzdata
+# copied below has no pip at all (removed in the builder).
+# The base is pinned by digest, so its preinstalled packages (ca-certificates,
+# brotli, glibc, ...) age with the digest, and apko locks their exact versions in
+# /etc/apk/world. Dropping those locks lets apk upgrade pull the Wolfi fixes on
+# every build without moving the Python minor, which python-${PYTHON_VERSION} fixes.
+RUN sed -i 's/=.*//' /etc/apk/world \
+    && apk upgrade --no-cache \
+    && apk add --no-cache python-${PYTHON_VERSION} bash openssl procps tzdata
 
 # Bring in the prebuilt virtual environment from the builder stage
 COPY --from=builder /opt/venv /opt/venv
