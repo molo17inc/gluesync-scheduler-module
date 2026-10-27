@@ -66,3 +66,11 @@ debug-container/**/data
 debug-container/**/logs
 !debug-container/**/logs/**/
 !debug-container/**/logs/**/.gitkeep
+
+# Chronos sandbox (sandbox/README.md)
+sandbox/node_modules
+sandbox/reports
+sandbox/run
+sandbox/image
+sandbox/fakes/vendor/*
+!sandbox/fakes/vendor/.gitkeep

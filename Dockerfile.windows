@@ -8,8 +8,18 @@ ARG WINDOWS_TAG=ltsc2022
 # ------------------
 FROM nexus.hq.molo17.com/molo17-local/python:3.13.13-win-servercore-${WINDOWS_TAG} AS builder
 
+# Redeclare so the build arg is visible inside this stage (ARGs declared before FROM are not)
+ARG WINDOWS_TAG
+
+# Optional token for the private GitLab PyPI index (pass with
+# --build-arg GITLAB_TOKEN=...); empty means anonymous access.
+ARG GITLAB_TOKEN=""
+
 # Switch to Windows shell
 SHELL ["cmd", "/S", "/C"]
+
+# Route every pip call (pip/setuptools/wheel upgrade, pyinstaller) through Nexus instead of pypi.org
+ENV PIP_INDEX_URL=https://nexus.hq.molo17.com/repository/pypi-all/simple
 
 # Make sure temp dir exists
 RUN if not exist C:\temp mkdir C:\temp
@@ -26,14 +36,16 @@ RUN if not exist C:\opt\gluesync\data mkdir C:\opt\gluesync\data && `
 COPY requirements.txt .
 
 # Verify Python installation, upgrade pip, install Python dependencies and install PyInstaller
-RUN if /I "%WINDOWS_TAG%"=="ltsc2019" ( `
+# The whole if/else is parenthesized: otherwise cmd attaches the "&& pip install ..." chain to the else branch only,
+# and on ltsc2019 nothing gets installed.
+RUN (if /I "%WINDOWS_TAG%"=="ltsc2019" ( `
   call "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" `
   ) else ( `
   echo Skipping vcvars64 on %WINDOWS_TAG% `
-  ) && `
+  )) && `
   python -m pip install --upgrade pip setuptools wheel && `
   python -m pip install --no-cache-dir -r requirements.txt `
-  --extra-index-url "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple" && `
+  --index-url "https://nexus.hq.molo17.com/repository/pypi-all/simple" && `
   python -m pip install --no-cache-dir pyinstaller
 
 # Set environment variables
@@ -86,7 +98,7 @@ RUN pyinstaller `
 # ------------------
 # Stage 2: Runtime (Nano Server)
 # ------------------
-FROM nexus.hq.molo17.com/molo17-local/pwsh:7.6.2-win-nanoserver-${WINDOWS_TAG}
+FROM nexus.hq.molo17.com/molo17-local/pwsh:7.6.8-win-nanoserver-${WINDOWS_TAG}
 
 USER ContainerAdministrator
 
@@ -122,10 +134,19 @@ COPY --from=builder C:\app\dist\GluesyncScheduler.exe .
 # Copy migrations directory for runtime migration execution
 COPY --from=builder C:\app\migrations ./migrations
 
+# Health probe (the runtime image has no Python, so it is a pwsh script)
+COPY --from=builder C:\app\healthcheck.ps1 .
+
 # If runtime static data is needed:
 # COPY --from=builder C:\app\data C:\app\data
 
 EXPOSE 1717
+
+# Liveness probe: GET /health on the local server, http or https depending on SSL_ENABLED
+# (see healthcheck.ps1). The longer start period covers the PyInstaller one-file unpack
+# and the database migrations run at startup.
+HEALTHCHECK --interval=30s --timeout=15s --start-period=180s --retries=3 `
+  CMD ["pwsh", "-NoProfile", "-NonInteractive", "-File", "C:\\app\\healthcheck.ps1", "-TimeoutSec", "10"]
 
 # Run only the exe
 ENTRYPOINT ["C:\\app\\GluesyncScheduler.exe"]
