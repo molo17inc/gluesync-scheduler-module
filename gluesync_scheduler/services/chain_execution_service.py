@@ -55,6 +55,7 @@ from gluesync_scheduler.models.entity_validation import (
     validation_http_timeout_seconds,
 )
 from gluesync_scheduler.models.visualize_refresh import visualize_internal_payload
+from gluesync_scheduler.models.corehub_backup import chain_event_payload as corehub_backup_chain_payload
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +229,8 @@ def _task_type_to_webhook_events(task_type: TaskType) -> list:
         # The brain-reindex route blocks until CoreHub reports READY or FAILED.
         TaskType.BRAIN_REINDEX: [],
         TaskType.VISUALIZE_REFRESH: [],
+        # The corehub-backup route returns once Core Hub has answered.
+        TaskType.CORE_HUB_BACKUP: [],
     }
     return mapping.get(task_type, ["ENTITY_SNAPSHOT_COMPLETED", "ENTITY_CDC_STARTED", "ENTITY_CDC_STOPPED"])
 
@@ -1280,6 +1283,7 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
         TaskType.ENTITY_VALIDATE: "validate",
         TaskType.BRAIN_REINDEX: "brain-reindex",
         TaskType.VISUALIZE_REFRESH: "visualize-refresh",
+        TaskType.CORE_HUB_BACKUP: "corehub-backup",
     }
     return mapping.get(task_type)
 
@@ -1295,6 +1299,8 @@ def _event_payload(event: ExecutableEvent) -> dict:
         return entity_validation_http_payload(event, _parse_json_list(event.entity_ids))
     if event.task_type == TaskType.VISUALIZE_REFRESH:
         return visualize_internal_payload(event)
+    if event.task_type == TaskType.CORE_HUB_BACKUP:
+        return corehub_backup_chain_payload(event)
     payload: dict = {}
     entity_ids = _parse_json_list(event.entity_ids)
     group_ids = _parse_json_list(event.group_ids)

@@ -50,6 +50,7 @@ The project follows [Semantic Versioning](https://semver.org/) (SemVer) for vers
   - Run a Query Studio SQL query (`query_studio`) on schedule, platform event, or webhook
   - Validate entities with the CoreHub Validator (`entity_validate`), optionally reconciling the target
   - Rebuild the Enterprise brain schema graph (`brain_reindex`)
+  - Back up Core Hub to Gluesync Connect (`corehub_backup`)
   - More task types can be easily added
 - **Job Management**: View, create, update, disable/enable, and delete scheduled jobs
 - **Containerized Deployment**: Docker support for easy deployment
@@ -67,7 +68,7 @@ The module uses APScheduler for reliable in-memory job scheduling, which is part
 - **In-Memory Scheduler**: Jobs are stored and executed in memory, eliminating the need for system crontab access
 - **Persistent Storage**: Job definitions are stored in the database for persistence across restarts
 - **Automatic Recovery**: On application startup, all enabled jobs are automatically loaded from the database into the scheduler
-- **Timezone Support**: All jobs respect the configured timezone setting
+- **Timezone Support**: Each job runs in its own IANA timezone (`timezone_name`); jobs created without one use the configured `timezone` setting
 - **Detailed Logging**: Each job execution is logged with timestamps and results
 
 This architecture ensures that jobs continue to run reliably even in containerized environments where traditional cron services may not be available or may lose state between container restarts.
@@ -488,7 +489,50 @@ A rebuild that is already `CREATING` is waited on instead of started twice. A `R
 
 Tuning: `SCHEDULER_BRAIN_REINDEX_TIMEOUT_SECONDS` (default `3600`) and `SCHEDULER_BRAIN_REINDEX_POLL_SECONDS` (default `2`). The caller needs the same permission CoreHub requires to publish the brain (`requireBrainPublisher`).
 
+## Core Hub backup (`corehub_backup`)
+
+Core Hub keeps its backup schedule in Chronos: one `corehub_backup` job per Core Hub, created and edited by Core Hub itself (Core Hub > Settings > Backup). The task is global: `pipeline_id` is optional.
+
+```json
+POST /api/jobs/
+
+{
+  "name": "Gluesync backup to Connect",
+  "description": "Created by Core Hub: change the time in Core Hub > Settings > Backup.",
+  "task_type": "corehub_backup",
+  "pipeline_id": "",
+  "is_cron_expression": true,
+  "cron_expression": "30 2 * * *",
+  "timezone_name": "Europe/Rome",
+  "enabled": true
+}
+```
+
+When the job fires, Chronos calls Core Hub with the chronos module JWT (re-authenticating once on 401):
+
+```http
+POST {corehub}/backup/scheduled-run
+Authorization: Bearer <chronos module JWT>
+X-Chronos-Job-Id: 12
+
+{"jobId": 12, "firedAt": "2026-10-26T02:30:00Z", "manual": false}
+```
+
+`manual` is `true` when the run comes from `POST /api/jobs/{id}/run` ("Backup now"). Outcome:
+
+- `200` is a successful run, whether or not Core Hub started the backup. The answer's `reason` (`started`, `too_soon`, `already_running`, `disabled`, `not_ready`) is the run message, also returned as `message` by `POST /api/jobs/{id}/run`.
+- `5xx` and network errors are retried 3 times (backoff factor 1); if they keep failing the run fails.
+- Any `4xx` fails the run: `last_error_message` is `Core Hub answered HTTP <status>: <body excerpt>`. The job stays enabled, so an older Core Hub without the route picks the schedule up once it is updated.
+
 ## Scheduling Options
+
+### Job timezone (`timezone_name`)
+
+`POST /api/jobs/` and `PUT /api/jobs/{id}` accept an optional `timezone_name`, an IANA name such as `Europe/Rome`. The cron expression is evaluated in that timezone and the job response returns it. An unknown name is rejected with `422`.
+
+- Create without `timezone_name`: the job uses the global `timezone` setting.
+- Update with `timezone_name`: the job moves to that timezone. `null` resets it to the global `timezone` setting.
+- Update without `timezone_name`: the timezone is kept, except that a new `cron_expression`, `schedule` or `day_or` adopts the global `timezone` setting (as before per-job timezones). Send `timezone_name` together with a new time to keep a specific timezone.
 
 ### User-Friendly Schedule Format
 

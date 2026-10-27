@@ -1248,6 +1248,86 @@ async def execute_visualize_refresh(
         )
 
 
+def _parse_corehub_backup_body(body: Optional[dict]) -> dict:
+    from gluesync_scheduler.models.corehub_backup import FIRED_AT, JOB_ID, MANUAL
+
+    body = body or {}
+    job_id = body.get(JOB_ID, body.get("jobId"))
+    if job_id == "":
+        job_id = None
+    if job_id is not None:
+        try:
+            job_id = int(job_id)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="corehub_backup job_id must be an integer",
+            )
+    fired_at = body.get(FIRED_AT, body.get("firedAt")) or None
+    manual = bool(body.get(MANUAL, False))
+    return {JOB_ID: job_id, FIRED_AT: fired_at, MANUAL: manual}
+
+
+@router.post(
+    "/{pipeline_id}/corehub-backup",
+    response_model=OperationResponse,
+    summary="Ask Core Hub to back up to Gluesync Connect",
+)
+async def execute_corehub_backup(
+    request: Request,
+    pipeline_id: str = Path(..., description="Unused placeholder; backups are not pipeline-scoped"),
+    body: dict = Body(default=None),
+):
+    """POST Core Hub ``/backup/scheduled-run`` as the chronos module.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers (cron, chains, trigger flows).
+
+    200 from Core Hub is success whether or not it started the backup; the
+    reason (``started``, ``too_soon``, ...) is the message. 4xx answers 400
+    and 5xx/network (already retried) answers 502, with the Core Hub status
+    and a body excerpt as ``detail``. The schedule is never disabled here.
+    """
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    parsed = _parse_corehub_backup_body(body)
+    logger.info(
+        "Received Core Hub backup job_id=%s manual=%s fired_at=%s",
+        parsed["job_id"], parsed["manual"], parsed["fired_at"],
+    )
+    try:
+        pipeline_manager = PipelineManager()
+        result = await pipeline_manager.execute_corehub_backup(
+            parsed["job_id"], parsed["fired_at"], parsed["manual"],
+        )
+        if not result.get("success"):
+            message = result.get("message") or "Core Hub backup failed"
+            _mark_job_failed(cron_job_identifier, message)
+            http_status = status.HTTP_400_BAD_REQUEST
+            if result.get("retryable"):
+                http_status = status.HTTP_502_BAD_GATEWAY
+            raise HTTPException(status_code=http_status, detail=message)
+        _mark_job_succeeded(cron_job_identifier)
+        return {
+            "success": True,
+            "message": result.get("message") or "started",
+            "data": {
+                "job_id": parsed["job_id"],
+                "manual": parsed["manual"],
+                "started": result.get("started"),
+                "reason": result.get("reason"),
+                "next_allowed_at": result.get("next_allowed_at"),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error executing Core Hub backup")
+        _mark_job_failed(cron_job_identifier, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error executing Core Hub backup: {str(e)}",
+        )
+
+
 def _parse_entity_validation_body(body: Optional[dict]) -> dict:
     from gluesync_scheduler.models.entity_validation import VALIDATION_RECONCILE
 

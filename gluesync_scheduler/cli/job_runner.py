@@ -215,6 +215,9 @@ def _endpoint_for_job(base_url: str, job: ScheduledJob) -> Optional[str]:
     if job.task_type == TaskType.VISUALIZE_REFRESH:
         from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
         return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/visualize-refresh"
+    if job.task_type == TaskType.CORE_HUB_BACKUP:
+        from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
+        return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/corehub-backup"
     logger.error(f"Unknown task type: {job.task_type}")
     return None
 
@@ -260,6 +263,10 @@ def _payload_for_job(job: ScheduledJob, entity_ids: list, group_ids: list) -> tu
     if job.task_type == TaskType.VISUALIZE_REFRESH:
         from gluesync_scheduler.models.visualize_refresh import visualize_internal_payload
         json_data = visualize_internal_payload(job)
+    if job.task_type == TaskType.CORE_HUB_BACKUP:
+        from gluesync_scheduler.models.corehub_backup import corehub_backup_internal_payload
+        json_data = corehub_backup_internal_payload(job)
+        request_timeout = 120
 
     if job.task_type not in (
         TaskType.QUERY_STUDIO,
@@ -267,6 +274,7 @@ def _payload_for_job(job: ScheduledJob, entity_ids: list, group_ids: list) -> tu
         TaskType.ENTITY_VALIDATE,
         TaskType.BRAIN_REINDEX,
         TaskType.VISUALIZE_REFRESH,
+        TaskType.CORE_HUB_BACKUP,
     ) and entity_ids:
         json_data["entity_ids"] = entity_ids
 

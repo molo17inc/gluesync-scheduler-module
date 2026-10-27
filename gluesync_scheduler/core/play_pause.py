@@ -368,7 +368,7 @@ class CoreHubClient:
         logger.error("Token retrieval result: FAILED (no token available)")
         return None, False  # Return tuple: (token, from_sdk)
     
-    def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None, timeout=None, raw: bool = False):
+    def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None, timeout=None, raw: bool = False, headers: Optional[Dict[str, str]] = None):
         """
         Make an HTTP request to the CoreHub API.
 
@@ -379,6 +379,7 @@ class CoreHubClient:
             params: URL parameters as dictionary
             timeout: Optional request timeout in seconds
             raw: When True, return the Hub JSON payload as-is on HTTP 2xx
+            headers: Optional extra request headers (kept on the 401 retry)
 
         Returns:
             Response data as dictionary or None if request failed
@@ -386,11 +387,13 @@ class CoreHubClient:
         prepared = self._prepare_request(path, method, body, params)
         if prepared is None:
             return None
-        url, headers, verify = prepared
+        url, request_headers, verify = prepared
+        if headers:
+            request_headers = {**headers, **request_headers}
         ctx = {
             "method": method,
             "url": url,
-            "headers": headers,
+            "headers": request_headers,
             "body": body,
             "params": params,
             "verify": verify,
@@ -399,7 +402,7 @@ class CoreHubClient:
         }
 
         try:
-            response = self._do_request(method, url, headers, body, params, verify, timeout=timeout)
+            response = self._do_request(method, url, request_headers, body, params, verify, timeout=timeout)
             if response is None:
                 return None
             return self._interpret_response(response, ctx)
@@ -1481,6 +1484,21 @@ class CoreHubClient:
 
         return post_visualize_refresh(_post, viz_id, parameters, schedule_id)
 
+    def execute_corehub_backup(self, job_id, fired_at=None, manual: bool = False) -> dict:
+        """POST /backup/scheduled-run with the module JWT. See corehub_backup.py."""
+        from gluesync_scheduler.models.corehub_backup import (
+            CORE_HUB_BACKUP_TIMEOUT_SECONDS,
+            post_corehub_backup,
+        )
+
+        def _post(path, body, headers):
+            return self.fetch_core_hub(
+                path, method="POST", body=body, raw=True, headers=headers,
+                timeout=CORE_HUB_BACKUP_TIMEOUT_SECONDS,
+            )
+
+        return post_corehub_backup(_post, job_id, fired_at, manual)
+
     # ------------------------------------------------------------------
     # Enterprise brain reindex
     # ------------------------------------------------------------------
@@ -2181,6 +2199,14 @@ class PipelineManager:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, self.client.execute_visualize_refresh, viz_id, parameters, schedule_id,
+        )
+
+    async def execute_corehub_backup(self, job_id, fired_at=None, manual: bool = False) -> dict:
+        """POST a scheduled Core Hub backup run; see CoreHubClient."""
+        logger.info("Core Hub backup requested job_id=%s manual=%s", job_id, manual)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.execute_corehub_backup, job_id, fired_at, manual,
         )
 
     async def execute_brain_reindex(self) -> tuple:

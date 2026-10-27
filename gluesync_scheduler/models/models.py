@@ -51,6 +51,7 @@ class TaskType(enum.Enum):
     ENTITY_VALIDATE = "entity_validate"
     BRAIN_REINDEX = "brain_reindex"
     VISUALIZE_REFRESH = "visualize_refresh"
+    CORE_HUB_BACKUP = "corehub_backup"
 
 
 QUERY_STUDIO_SQL_PREVIEW_LEN = 200

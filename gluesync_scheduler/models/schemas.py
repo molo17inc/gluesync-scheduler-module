@@ -25,6 +25,7 @@ from typing import List, Optional, Dict, Any, Union
 from datetime import datetime, timezone, timedelta
 import pytz
 import json
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import os
 from enum import Enum
 from croniter import croniter
@@ -145,7 +146,7 @@ class AiAgentRunValidatorMixin:
             object.__setattr__(self, "pipeline_id", getattr(self, "pipeline_id", None) or "")
             object.__setattr__(self, "allow_ai_run_loop", bool(getattr(self, "allow_ai_run_loop", False)))
             object.__setattr__(self, "payload_allow_list", getattr(self, "payload_allow_list", None) or [])
-        elif self.task_type in (TaskType.BRAIN_REINDEX, TaskType.VISUALIZE_REFRESH):
+        elif self.task_type in (TaskType.BRAIN_REINDEX, TaskType.VISUALIZE_REFRESH, TaskType.CORE_HUB_BACKUP):
             object.__setattr__(self, "pipeline_id", getattr(self, "pipeline_id", None) or "")
         elif not (getattr(self, "pipeline_id", None) or "").strip():
             if getattr(self, "pipeline_id", None) is not None:
@@ -231,7 +232,7 @@ class ChainedEventBase(
 ):
     """Fields shared by create and response schemas for chained events"""
     task_type: TaskType = Field(..., description="Type of task to perform")
-    pipeline_id: str = Field("", description="Pipeline ID to operate on. Optional for ai_agent_run, brain_reindex, and visualize_refresh.")
+    pipeline_id: str = Field("", description="Pipeline ID to operate on. Optional for ai_agent_run, brain_reindex, visualize_refresh, and corehub_backup.")
     entity_ids: Optional[List[str]] = Field(None, description="Entity IDs (required for entity operations)")
     group_ids: Optional[List[str]] = Field(None, description="Group IDs (required for group operations)")
     with_snapshot: bool = Field(False, description="Whether to include a snapshot")
@@ -318,10 +319,10 @@ class JobBase(
     """Base model for job data with common fields"""
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
-    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent\n- ai_agent_run: Execute a published AI agent with a templated prompt\n- entity_validate: Compare source and target rows of specific entities with the Validator, optionally reconciling the target (validation_reconcile)\n- brain_reindex: Rebuild the Enterprise brain schema graph across every SQL-capable agent\n- visualize_refresh: POST a scheduled Visualize refresh to Core Hub as the chronos module")
+    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent\n- ai_agent_run: Execute a published AI agent with a templated prompt\n- entity_validate: Compare source and target rows of specific entities with the Validator, optionally reconciling the target (validation_reconcile)\n- brain_reindex: Rebuild the Enterprise brain schema graph across every SQL-capable agent\n- visualize_refresh: POST a scheduled Visualize refresh to Core Hub as the chronos module\n- corehub_backup: Ask Core Hub to back up to Gluesync Connect (POST /backup/scheduled-run as the chronos module)")
     schedule: Optional[ScheduleConfig] = Field(None, description="User-friendly schedule configuration")
     cron_expression: Optional[str] = Field(None, description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight). Not required if schedule is provided.", example="0 0 * * *")
-    pipeline_id: str = Field("", description="ID of the pipeline to operate on. Optional for ai_agent_run, brain_reindex, and visualize_refresh.", example="pipeline-123")
+    pipeline_id: str = Field("", description="ID of the pipeline to operate on. Optional for ai_agent_run, brain_reindex, visualize_refresh, and corehub_backup.", example="pipeline-123")
     entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on (required for entity operations)", example=["entity-456", "entity-789"])
     group_ids: Optional[List[str]] = Field(None, description="List of group IDs to operate on (required for group operations)", example=["group-123", "group-456"])
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
@@ -342,8 +343,37 @@ class JobBase(
                 raise ValueError("Either schedule or cron_expression must be provided")
         return v
 
+def validate_timezone_name(value):
+    """IANA timezone name, or None. Blank counts as absent; unknown names raise (422)."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("timezone_name must be an IANA timezone name such as 'Europe/Rome'")
+    name = value.strip()
+    if not name:
+        return None
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        raise ValueError(f"Unknown timezone_name '{name}': use an IANA name such as 'Europe/Rome'")
+    return name
+
+
+_TIMEZONE_NAME_DESCRIPTION = (
+    "IANA timezone the cron expression is evaluated in (e.g. 'Europe/Rome'). "
+    "Absent: the global 'timezone' setting. Unknown names are rejected with 422."
+)
+
+
 class JobCreate(JobBase):
     """Model for creating a new job (inherits all fields from JobBase)"""
+    timezone_name: Optional[str] = Field(None, description=_TIMEZONE_NAME_DESCRIPTION, example="Europe/Rome")
+
+    @field_validator("timezone_name", mode="before")
+    @classmethod
+    def _validate_timezone_name(cls, v):
+        return validate_timezone_name(v)
+
     model_config = ConfigDict(
         json_schema_extra = {
             "example": {
@@ -390,7 +420,21 @@ class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
     is_cron_expression: Optional[bool] = Field(None, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     day_or: Optional[bool] = Field(None, description=f"Updated: {_DAY_OR_DESCRIPTION}")
+    timezone_name: Optional[str] = Field(
+        None,
+        description=(
+            "Updated IANA timezone of the schedule (e.g. 'Europe/Rome'). Absent: unchanged, except that a "
+            "new cron expression or schedule adopts the global 'timezone' setting as before. "
+            "Unknown names are rejected with 422."
+        ),
+        example="Europe/Rome",
+    )
     chained_events: Optional[List[ChainedEventCreate]] = Field(None, description="Replace all chained events with this list (pass empty list to clear)")
+
+    @field_validator("timezone_name", mode="before")
+    @classmethod
+    def _validate_timezone_name(cls, v):
+        return validate_timezone_name(v)
 
     @field_validator("visualize_parameters", mode="before")
     @classmethod
