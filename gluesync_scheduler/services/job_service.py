@@ -938,6 +938,15 @@ class JobService:
         from gluesync_scheduler.services.chain_execution_service import chain_execution_service
         chain_execution_service.sync_register_webhooks_for_events(new_events, db_job.task_type)
 
+    def _pop_update_timezone(self, update_data: dict):
+        """Take timezone_name out of the update: (given, timezone to use, or None).
+
+        An explicit null resets the job to the global timezone setting.
+        """
+        if "timezone_name" not in update_data:
+            return False, None
+        return True, update_data.pop("timezone_name") or self._get_configured_timezone()
+
     def update_job(self, job_id: int, job_data: JobUpdate) -> Job:
         """
         Update an existing job
@@ -1004,11 +1013,7 @@ class JobService:
                 for ce in job_data.chained_events:
                     require_visualize_refresh_fields(ce.task_type, ce.viz_id)
 
-            timezone_given = "timezone_name" in update_data
-            # Explicit null resets the job to the global timezone setting.
-            new_timezone = update_data.pop("timezone_name", None) or None
-            if timezone_given and new_timezone is None:
-                new_timezone = self._get_configured_timezone()
+            timezone_given, new_timezone = self._pop_update_timezone(update_data)
 
             cron_updated = self._apply_schedule_to_update_data(update_data)
             self._apply_update_fields_to_job(db_job, update_data)
@@ -1158,7 +1163,7 @@ class JobService:
             logger.info(f"Running job {job_id}: {job.name}")
             
             # Execute the job logic
-            success, message, details = self._execute_job_logic(job, manual=manual, fired_at=now)
+            success, message, _ = self._execute_job_logic(job, manual=manual, fired_at=now)
             
             # Update job status based on execution result
             if success:

@@ -150,6 +150,37 @@ def _outcome(success: bool, message: str, code, retryable: bool, started=None, r
     }
 
 
+def _started_outcome(result) -> Dict[str, Any]:
+    body = result if isinstance(result, dict) else {}
+    started = body.get("started")
+    reason = body.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        reason = REASON_STARTED if started is not False else "not_started"
+    return _outcome(
+        True,
+        reason.strip(),
+        200,
+        False,
+        started=started if isinstance(started, bool) else None,
+        reason=reason.strip(),
+        next_allowed_at=body.get("nextAllowedAt"),
+    )
+
+
+def _error_outcome(result) -> Dict[str, Any]:
+    code = _status_code_of(result)
+    if code is not None and 400 <= code < 500:
+        text, retryable = f"Core Hub answered HTTP {code}", False
+    elif result.get("error") == "exception":
+        text, retryable = "Core Hub unreachable", True
+    else:
+        text, retryable = f"Core Hub answered HTTP {code or 'error'}", True
+    excerpt = _excerpt(result.get("message"))
+    if excerpt:
+        text = f"{text}: {excerpt}"
+    return _outcome(False, text, code, retryable)
+
+
 def classify_hub_result(result) -> Dict[str, Any]:
     """Map a ``fetch_core_hub(..., raw=True)`` result to success / failure / retryable.
 
@@ -159,38 +190,9 @@ def classify_hub_result(result) -> Dict[str, Any]:
     """
     if result is None:
         return _outcome(False, "Core Hub did not answer", None, True)
-
     if not _is_error(result):
-        body = result if isinstance(result, dict) else {}
-        started = body.get("started")
-        reason = body.get("reason")
-        if not isinstance(reason, str) or not reason.strip():
-            reason = REASON_STARTED if started is not False else "not_started"
-        return _outcome(
-            True,
-            reason.strip(),
-            200,
-            False,
-            started=started if isinstance(started, bool) else None,
-            reason=reason.strip(),
-            next_allowed_at=body.get("nextAllowedAt"),
-        )
-
-    code = _status_code_of(result)
-    excerpt = _excerpt(result.get("message"))
-    if code is not None and 400 <= code < 500:
-        text = f"Core Hub answered HTTP {code}"
-        if excerpt:
-            text = f"{text}: {excerpt}"
-        return _outcome(False, text, code, False)
-
-    if result.get("error") == "exception":
-        text = "Core Hub unreachable"
-    else:
-        text = f"Core Hub answered HTTP {code or 'error'}"
-    if excerpt:
-        text = f"{text}: {excerpt}"
-    return _outcome(False, text, code, True)
+        return _started_outcome(result)
+    return _error_outcome(result)
 
 
 def post_corehub_backup(
