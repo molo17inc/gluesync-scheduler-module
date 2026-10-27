@@ -18,6 +18,9 @@ ARG GITLAB_TOKEN=""
 # Switch to Windows shell
 SHELL ["cmd", "/S", "/C"]
 
+# Route every pip call (pip/setuptools/wheel upgrade, pyinstaller) through Nexus instead of pypi.org
+ENV PIP_INDEX_URL=https://nexus.hq.molo17.com/repository/pypi-all/simple
+
 # Make sure temp dir exists
 RUN if not exist C:\temp mkdir C:\temp
 
