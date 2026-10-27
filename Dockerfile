@@ -72,7 +72,7 @@ RUN /opt/venv/bin/python -m pip uninstall -y pip
 # Same pinned Wolfi base and Python minor as the builder: keeps a POSIX shell so
 # entrypoint.sh and the migration script still run, while dropping the Debian OS
 # packages (perl, curl, ncurses, sqlite, libssh2, ...) that carried unfixable CVEs.
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS runtime
 ARG PYTHON_VERSION
 
 USER root

@@ -84,15 +84,18 @@
           $ftpRequest.UsePassive = $true
           $ftpRequest.KeepAlive = $false
 
-          $fileContent = [System.IO.File]::ReadAllBytes($LocalPath)
-          $ftpRequest.ContentLength = $fileContent.Length
+          $fileLength = (Get-Item -LiteralPath $LocalPath).Length
+          $ftpRequest.ContentLength = $fileLength
 
+          $fileStream = $null
           $requestStream = $null
           $response = $null
 
           try {
+              # Stream the file instead of ReadAllBytes: the tarball is several GB
+              $fileStream = New-Object System.IO.FileStream($LocalPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 4194304)
               $requestStream = $ftpRequest.GetRequestStream()
-              $requestStream.Write($fileContent, 0, $fileContent.Length)
+              $fileStream.CopyTo($requestStream, 4194304)
               $requestStream.Flush()
               $requestStream.Dispose()
               $requestStream = $null
@@ -113,6 +116,7 @@
               throw "FTP upload failed: $_"
           }
           finally {
+              if ($fileStream) { $fileStream.Dispose() }
               if ($requestStream) { $requestStream.Dispose() }
               if ($response) { $response.Dispose() }
           }
@@ -172,31 +176,39 @@
           $rawTarPath = Join-Path $tarDir $rawTarName
           $tarPath = Join-Path $tarDir $compressedTarName
 
+          # Timings below show where the GA/alpha-only tarball step spends its time
+          $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
           Write-Host "Saving image $VERSION_TAG_WINDOWS to $rawTarPath"
           docker save "$VERSION_TAG_WINDOWS" -o $rawTarPath
           if ($LASTEXITCODE -ne 0) { throw "❌ Docker save failed" }
+          Write-Host ("docker save took {0:N1}s, raw tar {1:N0} MB" -f $stopwatch.Elapsed.TotalSeconds, ((Get-Item $rawTarPath).Length / 1MB))
 
+          # Fastest level and 4 MB buffers: Optimal on one thread dominated the GA-only step
           Write-Host "Compressing saved image to $tarPath"
+          $stopwatch.Restart()
           $inputStream = $null
           $outputStream = $null
           $gzipStream = $null
           try {
-              $inputStream = [System.IO.File]::OpenRead($rawTarPath)
-              $outputStream = [System.IO.File]::Create($tarPath)
-              $gzipStream = New-Object System.IO.Compression.GzipStream($outputStream, [System.IO.Compression.CompressionLevel]::Optimal)
-              $inputStream.CopyTo($gzipStream)
+              $inputStream = New-Object System.IO.FileStream($rawTarPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 4194304)
+              $outputStream = New-Object System.IO.FileStream($tarPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None, 4194304)
+              $gzipStream = New-Object System.IO.Compression.GzipStream($outputStream, [System.IO.Compression.CompressionLevel]::Fastest)
+              $inputStream.CopyTo($gzipStream, 4194304)
           }
           finally {
               if ($gzipStream) { $gzipStream.Dispose() }
               if ($outputStream) { $outputStream.Dispose() }
               if ($inputStream) { $inputStream.Dispose() }
           }
+          Write-Host ("Compression took {0:N1}s, tar.gz {1:N0} MB" -f $stopwatch.Elapsed.TotalSeconds, ((Get-Item $tarPath).Length / 1MB))
 
           Remove-Item -Path $rawTarPath -Force -ErrorAction SilentlyContinue
 
           $ftpUri = "ftp://$env:FTP_SITE$script:FTP_RELEASE_DIR/$compressedTarName"
           Write-Host "Uploading $compressedTarName to $ftpUri"
+          $stopwatch.Restart()
           Upload-FtpFile -LocalPath $tarPath -RemoteUri $ftpUri -Username $env:FTP_USER -Password $env:FTP_PASSWORD
+          Write-Host ("FTP upload took {0:N1}s" -f $stopwatch.Elapsed.TotalSeconds)
 
           Remove-Item -Path $tarPath -Force -ErrorAction SilentlyContinue
       }
