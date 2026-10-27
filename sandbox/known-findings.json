@@ -44,14 +44,6 @@
     "croniter-next-run-off-by-dst": {
       "scenarios": ["dst-fallback-freeze"],
       "note": "Job next_run is computed wrongly (two hours late) for a job created inside the fall-back transition window (croniter on a pytz-aware now)."
-    },
-    "GSSD-1457-missed-runs-lost-on-restart": {
-      "scenarios": ["restart-catchup", "dst-fallback-customer"],
-      "note": "Runs missed while Chronos was down are never recovered: jobs are re-created from now at startup, so misfire_grace_time never applies."
-    },
-    "next-run-left-in-past-after-restart": {
-      "scenarios": ["restart-catchup"],
-      "note": "After a restart the API keeps showing the past fire time as next_run for a job whose run was missed."
     }
   }
 }

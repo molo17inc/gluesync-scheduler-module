@@ -49,7 +49,7 @@ from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
 from gluesync_scheduler.core.health import router as health_router
 from gluesync_scheduler.core.path_resolver import resolve_gluesync_file
 from gluesync_scheduler.services.job_service import JobService
-from gluesync_scheduler.services.scheduler_service import scheduler_service
+from gluesync_scheduler.services.scheduler_service import scheduler_service, plan_missed_runs
 from gluesync_scheduler.models.models import ScheduledJob
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -424,6 +424,11 @@ def _schedule_job(db, job):
 
         # Update the command field to store the scheduler job ID
         job.command = f"Scheduled job ID: {job_id}"
+
+        # The persisted next_run may be a fire time that passed while Chronos was down
+        scheduled = scheduler_service.scheduler.get_job(job_id)
+        if scheduled is not None and scheduled.next_run_time:
+            job.next_run = scheduled.next_run_time
         db.commit()
     except Exception as job_error:
         logger.exception(f"Failed to load job '{job.name}' (ID: {job.id}) into scheduler: {job_error}")
@@ -434,33 +439,53 @@ def _load_enabled_jobs(db, engine):
     inspector = inspect(engine)
     if 'scheduled_jobs' not in inspector.get_table_names():
         logger.warning("scheduled_jobs table does not exist yet. No jobs to load.")
-        return
+        return []
 
     enabled_jobs = db.query(ScheduledJob).filter(ScheduledJob.enabled == True).all()
     if not enabled_jobs:
         logger.info("No enabled jobs found to load into scheduler")
-        return
+        return []
 
     logger.info(f"Found {len(enabled_jobs)} enabled job(s) to load into scheduler")
+    # Work out the missed runs first: scheduling refreshes next_run, the evidence of a missed fire
+    missed_runs = plan_missed_runs(enabled_jobs)
     for job in enabled_jobs:
         _schedule_job(db, job)
     logger.info("Successfully loaded existing jobs into scheduler")
+    return missed_runs
 
 
 def _load_existing_jobs():
-    """Load existing jobs into the scheduler"""
+    """Load existing jobs into the scheduler; returns the runs missed while Chronos was down"""
     try:
         logger.info("Loading existing jobs into scheduler...")
         from gluesync_scheduler.db.database import engine, SessionLocal
 
         db = SessionLocal()
         try:
-            _load_enabled_jobs(db, engine)
+            return _load_enabled_jobs(db, engine)
         finally:
             db.close()
     except Exception as e:
         logger.exception(f"Error loading jobs into scheduler: {e}")
         logger.warning("The scheduler will continue, but existing jobs may not be loaded")
+    return []
+
+
+# Strong reference: the event loop only keeps weak references to tasks
+_catchup_task = None
+
+
+def _start_catchup(missed_runs):
+    """Replay the runs missed while Chronos was down in the background, without delaying startup"""
+    global _catchup_task
+    if not missed_runs:
+        return
+    try:
+        logger.info(f"Replaying {len(missed_runs)} run(s) missed while Chronos was down")
+        _catchup_task = asyncio.create_task(scheduler_service.run_missed(missed_runs))
+    except Exception as e:
+        logger.exception(f"Failed to start the replay of missed runs: {e}")
 
 
 def _log_configuration(db_url: str):
@@ -497,11 +522,12 @@ async def startup_event():
     _init_default_settings()
     await _init_sdk_client()
     _start_health_check()
-    _load_existing_jobs()
+    missed_runs = _load_existing_jobs()
     _log_configuration(db_url)
 
     logger.info("Gluesync Scheduler Module started successfully")
 
+    _start_catchup(missed_runs)
     await _cleanup_stale_webhooks()
 
 @app.on_event("shutdown")
