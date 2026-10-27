@@ -48,7 +48,8 @@ def test_health_ok_when_scheduler_running_and_corehub_connected(client):
     body = response.json()
     assert body["status"] == "ok"
     assert body["version"] == __version__
-    assert isinstance(body["uptime_seconds"], int) and body["uptime_seconds"] >= 0
+    assert isinstance(body["uptime_seconds"], int)
+    assert body["uptime_seconds"] >= 0
     assert body["scheduler"] == {"running": True, "jobs": 3}
     assert body["corehub"] == {"connected": True}
 
