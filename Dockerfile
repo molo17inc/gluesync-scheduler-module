@@ -10,6 +10,7 @@ WORKDIR /build
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL="https://nexus.hq.molo17.com/repository/pypi-all/simple" \
     PATH="/opt/venv/bin:$PATH"
 
 # Native build toolchain for compiling any sdists (Wolfi/glibc package names)
@@ -31,7 +32,7 @@ RUN python -m venv /opt/venv && \
 COPY ./requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install \
-    --extra-index-url "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple" \
+    --index-url "https://nexus.hq.molo17.com/repository/pypi-all/simple" \
     --prefer-binary \
     --only-binary=cryptography,pyjks,websockets \
     -r requirements.txt
