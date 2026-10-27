@@ -76,3 +76,6 @@ temp/
 
 # Local debug stacks (compose files, certificates, keys, binaries): never part of the image
 debug-container/
+
+# Chronos sandbox
+sandbox/

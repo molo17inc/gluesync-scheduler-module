@@ -19,6 +19,8 @@
 stages:
   - test
   - build-sonar
+  - sandbox-build
+  - sandbox
   - deploy
 
 default:
@@ -406,3 +408,66 @@ build-sonar:
     - if: $CI_COMMIT_BRANCH == 'master'
     - if: $CI_COMMIT_BRANCH == 'main'
     - if: $CI_COMMIT_BRANCH == 'develop'
+
+# The Chronos sandbox (sandbox/README.md): the real Chronos against a fake Core Hub with a controlled
+# clock, every function plus the DST nights of GSSD-1457, split over 4 shards. It finds real defects,
+# so a run is green when it finds nothing beyond sandbox/known-findings.json (and every entry there
+# still occurs): the rule is in sandbox/lib/gate.mjs. Each job runs its OWN dockerd (privileged,
+# docker:dind image), so concurrent pipelines never share a daemon and the sandbox's bind-mount paths
+# under $CI_PROJECT_DIR exist for the daemon that mounts them. Everything happens in
+# ci/sandbox-job.sh, which is also how to reproduce a job locally.
+# Docker Hub is never contacted: the job image (ci/sandbox-ci.Dockerfile, hosted in Nexus) has Node 24
+# and the fake's npm dependency, and SANDBOX_IMAGE_MIRROR makes the sandbox pull its base images from
+# Nexus. Building the Chronos image downloads what its Dockerfiles always do (Chainguard base, PyPI,
+# package repositories).
+
+# Builds the Chronos image once per pipeline (repository Dockerfile plus the sandbox overlay) and hands
+# it to the shards, which `docker load` it instead of building it four times. Starts at once, next to
+# the unit tests.
+sandbox_image:
+  stage: sandbox-build
+  image:
+    name: nexus.hq.molo17.com/molo17-local/chronos-sandbox-ci:1
+    # The script starts dockerd itself through the image's entrypoint script.
+    entrypoint: ['']
+  needs: []
+  interruptible: true
+  timeout: 40m
+  variables:
+    DOCKER_HOST: unix:///var/run/docker.sock
+  script:
+    - sh ci/sandbox-job.sh build
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - sandbox/image/
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# The scenarios, `parallel: 4`: shard i of 4 runs the scenario list defined in ci/sandbox-job.sh.
+sandbox:
+  stage: sandbox
+  image:
+    name: nexus.hq.molo17.com/molo17-local/chronos-sandbox-ci:1
+    entrypoint: ['']
+  needs:
+    - job: sandbox_image
+      artifacts: true
+  interruptible: true
+  timeout: 60m
+  parallel: 4
+  variables:
+    DOCKER_HOST: unix:///var/run/docker.sock
+    SANDBOX_IMAGE_MIRROR: nexus.hq.molo17.com/molo17-local
+  script:
+    # parallel: 4 sets CI_NODE_INDEX (1-based) and CI_NODE_TOTAL; the script reads them.
+    - sh ci/sandbox-job.sh
+  artifacts:
+    when: always
+    expire_in: 2 weeks
+    paths:
+      - sandbox/reports/
+    reports:
+      junit: sandbox/reports/*/junit.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"

@@ -131,10 +131,19 @@ COPY --from=builder C:\app\dist\GluesyncScheduler.exe .
 # Copy migrations directory for runtime migration execution
 COPY --from=builder C:\app\migrations ./migrations
 
+# Health probe (the runtime image has no Python, so it is a pwsh script)
+COPY --from=builder C:\app\healthcheck.ps1 .
+
 # If runtime static data is needed:
 # COPY --from=builder C:\app\data C:\app\data
 
 EXPOSE 1717
+
+# Liveness probe: GET /health on the local server, http or https depending on SSL_ENABLED
+# (see healthcheck.ps1). The longer start period covers the PyInstaller one-file unpack
+# and the database migrations run at startup.
+HEALTHCHECK --interval=30s --timeout=15s --start-period=180s --retries=3 `
+  CMD ["pwsh", "-NoProfile", "-NonInteractive", "-File", "C:\\app\\healthcheck.ps1", "-TimeoutSec", "10"]
 
 # Run only the exe
 ENTRYPOINT ["C:\\app\\GluesyncScheduler.exe"]

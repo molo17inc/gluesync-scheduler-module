@@ -138,6 +138,7 @@ COPY --from=builder /build/VERSION /app/
 # Copy application source
 COPY ./setup.py .
 COPY ./entrypoint.sh .
+COPY ./healthcheck.py .
 COPY ./README.md .
 COPY ./gluesync_scheduler ./gluesync_scheduler
 COPY ./migrations ./migrations
@@ -150,6 +151,13 @@ RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_mi
 
 # Expose the port the app runs on
 EXPOSE 1717
+
+# Liveness probe: GET /health on the local server (scheme, host and port follow the
+# same env vars the server starts with, see healthcheck.py). Docker has no default
+# probe, so it lives in the image and every kit (compose, Swarm, Portainer) inherits
+# it. The start period covers the database migrations run at startup.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD ["python3", "/app/healthcheck.py", "--timeout", "8"]
 
 # Set entrypoint to ensure cron service starts
 ENTRYPOINT ["/app/entrypoint.sh"]
