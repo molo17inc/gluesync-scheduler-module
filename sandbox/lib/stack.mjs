@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { env } from './env.mjs';
+import { env, requiredImages } from './env.mjs';
 import { docker, mustDocker, nowIso, request, say, waitFor } from './util.mjs';
 
 const CHRONOS_PORT = 1717;
@@ -72,8 +72,40 @@ const prepareShared = async () => {
 
 const imageExists = async ref => (await docker(['image', 'inspect', ref])).code === 0;
 
-const buildImages = async ({ rebuild = false } = {}) => {
+// With SANDBOX_IMAGE_MIRROR set, pulls every requiredImages entry from the mirror and tags it with
+// its canonical name (see env.mjs); an image that is already present is left alone.
+const seedImages = async () => {
+  if (!env.imageMirror) return;
+  for (const name of requiredImages) {
+    if (await imageExists(name)) continue;
+    const source = `${env.imageMirror}/${name}`;
+    say(`pulling ${source} (SANDBOX_IMAGE_MIRROR)`);
+    await mustDocker(['pull', '-q', source], { timeoutMs: 600000 });
+    await mustDocker(['tag', source, name]);
+  }
+};
+
+// The fake Core Hub needs the `ws` package. Where the npm registry is not reachable (CI) it comes from
+// the CI image (SANDBOX_DEPS_DIR, default /opt/sandbox-deps, see ci/sandbox-ci.Dockerfile) and is staged
+// into the build context; without it the Dockerfile runs `npm install`.
+const stageFakeDeps = () => {
+  const vendor = path.join(env.sandboxDir, 'fakes', 'vendor');
+  fs.rmSync(path.join(vendor, 'node_modules'), { recursive: true, force: true });
+  const ws = path.join(process.env.SANDBOX_DEPS_DIR || '/opt/sandbox-deps', 'node_modules', 'ws');
+  if (!fs.existsSync(ws)) return;
+  fs.mkdirSync(path.join(vendor, 'node_modules'), { recursive: true });
+  fs.cpSync(ws, path.join(vendor, 'node_modules', 'ws'), { recursive: true });
+};
+
+const buildFake = async () => {
+  stageFakeDeps();
   await mustDocker(['build', '-q', '-t', env.fakeImage, path.join(env.sandboxDir, 'fakes')], { timeoutMs: 600000 });
+};
+
+// The Chronos image under test plus the overlay (libfaketime, py-spy). The overlay tag is what the
+// containers run; when it exists it is reused, which is how CI hands the image built once per
+// pipeline to every shard (`docker load`, see ci/sandbox-job.sh).
+const buildChronos = async ({ rebuild = false } = {}) => {
   const tag = env.chronosImageTag();
   if (!rebuild && (await imageExists(tag))) return tag;
 
@@ -270,14 +302,22 @@ export const pySpyDump = async name => {
 
 const networkExists = async () => (await docker(['network', 'inspect', env.network])).code === 0;
 
+// Only the Chronos image (no containers): what the CI job that builds it once per pipeline runs.
+export const build = async ({ rebuild = false } = {}) => {
+  await buildChronos({ rebuild });
+  say(`built ${env.chronosImageTag()}`);
+};
+
 export const up = async ({ rebuild = false } = {}) => {
   fs.mkdirSync(env.runDir, { recursive: true });
+  await seedImages();
   if (env.tls) await prepareShared();
   else {
     fs.mkdirSync(env.sharedDir, { recursive: true });
     fs.writeFileSync(shared('gs-license.dat'), env.licenseText);
   }
-  await buildImages({ rebuild });
+  await buildFake();
+  await buildChronos({ rebuild });
   if (!(await networkExists())) await mustDocker(['network', 'create', '--label', env.labelArg, env.network]);
   await startCoreHub();
 

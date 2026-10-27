@@ -52,7 +52,16 @@ export default {
       },
       evidence,
     });
-    ctx.check('API next_run is not left in the past after the restart', !!after.next_run && new Date(after.next_run).getTime() > at(T1), `API next_run ${after.next_run} vs restart ${iso(at(T1))}`, { evidence });
+    ctx.check('API next_run is not left in the past after the restart', !!after.next_run && new Date(after.next_run).getTime() > at(T1), `API next_run ${after.next_run} vs restart ${iso(at(T1))}`, {
+      finding: {
+        id: 'next-run-left-in-past-after-restart',
+        title: 'After a restart the API keeps showing a past next_run for a job whose run was missed',
+        severity: 'defect',
+        detail: 'The job row keeps the fire time that passed while Chronos was down, so the UI shows a next run in the past (and nothing runs it, see GSSD-1457-missed-runs-lost-on-restart).',
+        evidence,
+      },
+      evidence,
+    });
     ctx.save('summary.json', evidence);
   },
 };

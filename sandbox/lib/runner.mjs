@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ScenarioContext } from './context.mjs';
 import { env } from './env.mjs';
+import { evaluate, loadKnown } from './gate.mjs';
 import { writeReport } from './report.mjs';
 import { adoptMain, corehub, instances, up } from './stack.mjs';
 import { docker, nowIso, say, setLogFile } from './util.mjs';
@@ -43,6 +44,8 @@ export const runScenarios = async ({ names, keep, concurrency, patterns }) => {
   const run = {
     startedAt: nowIso(),
     finishedAt: null,
+    // A subset of a matrix cannot say that a known finding is gone (lib/gate.mjs).
+    partial: !!patterns,
     config: {
       project: env.name,
       'Chronos image': env.imageSpec + (env.apscheduler ? ` (apscheduler ${env.apscheduler})` : ''),
@@ -90,7 +93,10 @@ export const runScenarios = async ({ names, keep, concurrency, patterns }) => {
   }
   run.finishedAt = nowIso();
   writeReport(dir, run);
-  const failed = run.scenarios.filter(s => s.error || s.checks.some(c => !c.pass)).length;
-  say(`done: ${run.scenarios.length - failed} pass, ${failed} fail/error. Report: ${path.join(dir, 'report.md')}`);
-  if (failed) process.exitCode = 1;
+  // Exit status: see lib/gate.mjs. Known findings do not fail the run, anything else wrong does.
+  const { scenarios: judged, problems } = evaluate(run, loadKnown());
+  const count = st => judged.filter(s => s.status === st).length;
+  say(`done: ${count('PASS')} pass, ${count('KNOWN')} with known findings only, ${count('FAIL')} fail, ${count('ERROR')} error. Report: ${path.join(dir, 'report.md')}`);
+  problems.forEach(p => say(`  PROBLEM ${p}`));
+  if (problems.length) process.exitCode = 1;
 };

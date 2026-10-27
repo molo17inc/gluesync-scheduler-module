@@ -79,7 +79,14 @@ export default {
     ctx.check('API keeps answering through the fall-back', !result.frozen, result.frozen ? `no HTTP answer after ${romeWall(result.lastOkFake)}` : 'answered until the end of the window', { finding, evidence });
     ctx.check('every-minute job keeps running after 02:59 CEST', lastRun !== null && lastRun >= RESUME_AFTER, `last run ${lastRun ? romeWall(lastRun) : 'none'}`, { finding, evidence });
     const lastPing = lastPingFake(result.pings);
-    ctx.check('Core Hub WebSocket pings continue past 01:00Z', !!lastPing && lastPing >= RESUME_AFTER, `last ping ${lastPing ? romeWall(lastPing) : 'none'}`, { finding, evidence });
+    // Pings stopping while Chronos still answers and runs jobs is not the freeze: it is the Core Hub
+    // connection dropping (a slow host is enough) and not being restored, which corehub-faults covers
+    // (sdk-relogin-on-throwaway-event-loop). Only a frozen process is held against the freeze finding.
+    if (result.frozen || (lastPing && lastPing >= RESUME_AFTER)) {
+      ctx.check('Core Hub WebSocket pings continue past 01:00Z', !!lastPing && lastPing >= RESUME_AFTER, `last ping ${lastPing ? romeWall(lastPing) : 'none'}`, { finding, evidence });
+    } else {
+      ctx.note(`Core Hub WebSocket pings stopped at ${lastPing ? romeWall(lastPing) : 'the start'} although Chronos kept answering and running jobs: not the freeze (see corehub-faults: sdk-relogin-on-throwaway-event-loop)`);
+    }
     if (result.frozen) {
       if (pySpyUnsupported(result.evidence.pySpy)) ctx.note(`py-spy cannot read this image: ${String(result.evidence.pySpy).trim()}`);
       else ctx.check('freeze is the APScheduler next-fire loop', stackMentionsScheduler(result.evidence.pySpy), spyTop(result.evidence.pySpy) || 'no py-spy output');

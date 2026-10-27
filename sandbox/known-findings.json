@@ -1,0 +1,57 @@
+{
+  "_comment": "Findings accepted for now, on the repo build (APScheduler 3.11.3). A failed check whose finding is listed here does not fail the run; a listed finding that a scenario no longer reports does (stale: fixed? remove it). See README, 'Known findings and the exit status'.",
+  "findings": {
+    "create-job-client-errors-answer-500": {
+      "scenarios": ["jobs-crud"],
+      "note": "Invalid create-job requests (group_start without group_ids, no schedule or cron, invalid cron) answer HTTP 500 instead of a 4xx."
+    },
+    "failed-create-leaves-job-row": {
+      "scenarios": ["jobs-crud"],
+      "note": "A job whose scheduling fails is committed anyway and stays in the list as an enabled but never scheduled row."
+    },
+    "trailing-async-chained-event-dropped": {
+      "scenarios": ["chains"],
+      "note": "An async chained event placed after the last awaited step is never executed."
+    },
+    "group-chained-events-act-on-whole-pipeline": {
+      "scenarios": ["chains"],
+      "note": "group_start / group_stop chained events act on the whole pipeline instead of only the entities of the group."
+    },
+    "platform-event-endpoint-unauthenticated": {
+      "scenarios": ["webhooks"],
+      "note": "POST /api/webhooks/platform-event fires any enabled trigger flow for a caller that only sends two static headers."
+    },
+    "internal-pipeline-api-open-to-private-ranges": {
+      "scenarios": ["internal-api"],
+      "note": "The pipeline control API accepts any caller from private ranges (172.*, 192.168.*) without authentication."
+    },
+    "maintenance-406-reason-lost": {
+      "scenarios": ["maintenance"],
+      "note": "The 406 'pipeline is in maintenance' reason of Core Hub is only in the log, not in the job error shown to the user."
+    },
+    "no-retry-on-corehub-5xx": {
+      "scenarios": ["corehub-faults"],
+      "note": "One transient Core Hub 5xx fails a scheduled command for good: the command is not retried."
+    },
+    "sdk-relogin-on-throwaway-event-loop": {
+      "scenarios": ["corehub-faults"],
+      "note": "The 401 recovery reconnects the SDK on a throw-away event loop, so the WebSocket dies right after the retried call."
+    },
+    "slow-corehub-false-failure": {
+      "scenarios": ["corehub-slow"],
+      "note": "A command Core Hub answers after the 120 s internal timeout is reported as failed although Core Hub applied it."
+    },
+    "croniter-next-run-off-by-dst": {
+      "scenarios": ["dst-fallback-freeze"],
+      "note": "Job next_run is computed wrongly (two hours late) for a job created inside the fall-back transition window (croniter on a pytz-aware now)."
+    },
+    "GSSD-1457-missed-runs-lost-on-restart": {
+      "scenarios": ["restart-catchup", "dst-fallback-customer"],
+      "note": "Runs missed while Chronos was down are never recovered: jobs are re-created from now at startup, so misfire_grace_time never applies."
+    },
+    "next-run-left-in-past-after-restart": {
+      "scenarios": ["restart-catchup"],
+      "note": "After a restart the API keeps showing the past fire time as next_run for a job whose run was missed."
+    }
+  }
+}

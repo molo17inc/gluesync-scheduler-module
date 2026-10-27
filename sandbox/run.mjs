@@ -2,18 +2,20 @@
 // Chronos sandbox CLI.
 //
 //   node run.mjs up [--rebuild]                 build images, start the fake Core Hub and a real Chronos
+//   node run.mjs build [--rebuild]              only build the Chronos images (CI builds them once per pipeline)
 //   node run.mjs scenario <name...>             run scenarios and write a report
-//   node run.mjs all                            run every scenario
+//   node run.mjs all                            run every scenario (exit status: see lib/gate.mjs, known-findings.json)
 //   node run.mjs list                           list scenarios
 //   node run.mjs status                         containers and fake Core Hub state
 //   node run.mjs down [--purge]                 remove the sandbox (run/ and images too with --purge)
 //
 // Flags: --image repo|<ref>  --apscheduler <version>  --name <project>  --port-base <n>  --keep  --no-tls
-// Env:   SANDBOX_NAME (default chronos-sandbox), SANDBOX_PORT_BASE (default 5417)
+// Env:   SANDBOX_NAME (default chronos-sandbox), SANDBOX_PORT_BASE (default 5417),
+//        SANDBOX_IMAGE_MIRROR (pull the base images from <registry>/<repo> instead of Docker Hub)
 
 import { configure, env } from './lib/env.mjs';
 import { say } from './lib/util.mjs';
-import { down, status, up } from './lib/stack.mjs';
+import { build, down, status, up } from './lib/stack.mjs';
 
 const [, , command = 'help', ...rest] = process.argv;
 const flag = name => rest.includes(`--${name}`);
@@ -43,6 +45,9 @@ const main = async () => {
   switch (command) {
     case 'up':
       await up({ rebuild: flag('rebuild') });
+      break;
+    case 'build':
+      await build({ rebuild: flag('rebuild') });
       break;
     case 'status':
       await status();

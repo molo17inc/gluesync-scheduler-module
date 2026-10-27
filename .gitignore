@@ -71,3 +71,6 @@ debug-container/**/logs
 sandbox/node_modules
 sandbox/reports
 sandbox/run
+sandbox/image
+sandbox/fakes/vendor/*
+!sandbox/fakes/vendor/.gitkeep

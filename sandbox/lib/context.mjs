@@ -41,7 +41,8 @@ export class ScenarioContext {
   // ---- results
 
   check(id, ok, detail, { evidence, finding } = {}) {
-    const entry = { id, pass: !!ok, detail: detail || '', evidence };
+    // `finding` on a failed check is the id of the defect it demonstrates (lib/gate.mjs reads it).
+    const entry = { id, pass: !!ok, detail: detail || '', evidence, ...(!ok && finding ? { finding: finding.id || id } : {}) };
     this.checks.push(entry);
     say(`  ${ok ? 'PASS' : 'FAIL'} ${id}${detail ? ` - ${String(detail).split('\n')[0].slice(0, 200)}` : ''}`);
     if (!ok && finding) this.finding({ id: finding.id || id, title: finding.title, severity: finding.severity || 'defect', detail: finding.detail || detail, evidence: finding.evidence || evidence });

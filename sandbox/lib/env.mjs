@@ -18,6 +18,28 @@ export const configure = overrides => {
   });
 };
 
+// Every image the sandbox pulls from a registry, by the daemon it runs on: the host's (the CI job's
+// own dockerd, or Docker Desktop), which builds everything and runs every container. By default they
+// come from Docker Hub on first use. With SANDBOX_IMAGE_MIRROR=<registry>/<repo> (CI:
+// nexus.hq.molo17.com/molo17-local) each one is pulled from `<mirror>/<name:tag>` and tagged with its
+// canonical name before anything uses it (seedImages in stack.mjs), so Docker Hub is never contacted:
+// `docker build` finds the canonical name locally and does not look further. The mirror must hold every
+// name below with the same tag. Keep this list complete, it is what the CI job needs offline.
+// (The Chronos image's FROM is cgr.dev/chainguard/python, which is not Docker Hub.)
+export const requiredImages = [
+  // FROM of fakes/Dockerfile.
+  'node:24.16.0-alpine',
+  // The throw-away container that generates the sandbox CA and the PKCS12 keystore (apk add openssl).
+  'alpine:3.20',
+];
+
+// Trailing slashes off, without a regex: `/\/+$/` backtracks quadratically on a long run of them.
+const withoutTrailingSlashes = text => {
+  let end = text.length;
+  while (end > 0 && text[end - 1] === '/') end -= 1;
+  return text.slice(0, end);
+};
+
 const slug = s => s.replace(/[^a-zA-Z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
 
 export const env = {
@@ -40,6 +62,7 @@ export const env = {
   get scheme() {
     return cfg.tls ? 'https' : 'http';
   },
+  imageMirror: withoutTrailingSlashes(process.env.SANDBOX_IMAGE_MIRROR || ''),
   get imageSpec() {
     return cfg.image;
   },

@@ -1,0 +1,4 @@
+# Build context of ci/sandbox-ci.Dockerfile: only the file whose ws version it checks.
+# (The repo .dockerignore excludes sandbox/ to keep it out of the Chronos image.)
+*
+!sandbox/fakes/Dockerfile
