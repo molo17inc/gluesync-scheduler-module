@@ -53,6 +53,10 @@ deploy-windows-nanoserver:
       #   WINDOWS_RUNNER_VERSION: "2025"
   tags:
     - "hq-windows-shell-${WINDOWS_RUNNER_VERSION}"
+  # One Windows image build per host at a time: two tag pipelines (alpha + beta cut
+  # together) building in parallel on the same runner made Windows fail to start
+  # processes (cl.exe 0xC0000142, runner PowerShell crash). Later jobs queue instead.
+  resource_group: "windows-runner-${WINDOWS_RUNNER_VERSION}"
 
 deploy-linux:
   stage: deploy
