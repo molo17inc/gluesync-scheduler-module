@@ -46,6 +46,7 @@ from gluesync_scheduler.api.webhook_router import router as webhook_router
 from gluesync_scheduler.api.trigger_router import router as trigger_router
 from gluesync_scheduler.api.query_studio_router import router as query_studio_router
 from gluesync_scheduler.core.gluesync_sdk_client import gluesync_sdk_client
+from gluesync_scheduler.core.health import router as health_router
 from gluesync_scheduler.core.path_resolver import resolve_gluesync_file
 from gluesync_scheduler.services.job_service import JobService
 from gluesync_scheduler.services.scheduler_service import scheduler_service
@@ -552,6 +553,10 @@ app.include_router(pipeline_router, prefix="/api")
 app.include_router(webhook_router, prefix="/api")
 app.include_router(trigger_router, prefix="/api")
 app.include_router(query_studio_router, prefix="/api")
+
+# Liveness probe for the container HEALTHCHECK: root level on purpose, so the
+# proxy routes that publish /api/ do not expose it.
+app.include_router(health_router)
 
 
 # Collection routes are declared with a trailing slash, and FastAPI answers the

@@ -1,0 +1,12 @@
+{
+  "name": "chronos-sandbox",
+  "private": true,
+  "type": "module",
+  "description": "Runs the real Chronos against a fake Core Hub with a controllable wall clock, to exercise every function and reproduce DST failures",
+  "scripts": {
+    "up": "node run.mjs up",
+    "all": "node run.mjs all",
+    "status": "node run.mjs status",
+    "down": "node run.mjs down"
+  }
+}

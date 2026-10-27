@@ -19,6 +19,8 @@
 stages:
   - test
   - build-sonar
+  - sandbox-build
+  - sandbox
   - deploy
 
 default:
@@ -28,10 +30,14 @@ default:
 variables:
   DOCKER_TLS_CERTDIR: ""
   PYTEST_ADDOPTS: "--color=yes"
-  PIP_EXTRA_INDEX_URL: "https://oauth2:${GITLAB_TOKEN}@gitlab.com/api/v4/projects/68232363/packages/pypi/simple"
+  PIP_INDEX_URL: "https://nexus.hq.molo17.com/repository/pypi-all/simple"
   SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
   GIT_DEPTH: "0"
   SONAR_PROJECT_KEY: "molo17-public_gluesync_gluesync-scheduler-module_4ca71c42-0404-415f-80de-4f577703721b"
+  # buildx registry cache for the Dockerfile builder stage (toolchain + pip deps).
+  # The runtime stage is always rebuilt (--no-cache-filter runtime) so apk upgrade
+  # keeps pulling the latest OS patches. Nexus needs image-manifest cache mode.
+  BUILDCACHE_REF: "nexus.hq.molo17.com/molo17-local/gluesync-chronos-buildcache:main"
 
 include:
   - local: "ci/windows-deploy-template.yml"
@@ -49,6 +55,10 @@ deploy-windows-nanoserver:
       #   WINDOWS_RUNNER_VERSION: "2025"
   tags:
     - "hq-windows-shell-${WINDOWS_RUNNER_VERSION}"
+  # One Windows image build per host at a time: two tag pipelines (alpha + beta cut
+  # together) building in parallel on the same runner made Windows fail to start
+  # processes (cl.exe 0xC0000142, runner PowerShell crash). Later jobs queue instead.
+  resource_group: "windows-runner-${WINDOWS_RUNNER_VERSION}"
 
 deploy-linux:
   stage: deploy
@@ -122,7 +132,9 @@ deploy-linux:
         
         # Build and push multi-platform candidate image
         docker buildx build --platform linux/amd64,linux/arm64 \
-          --no-cache \
+          --no-cache-filter runtime \
+          --cache-from "type=registry,ref=${BUILDCACHE_REF}" \
+          --cache-to "type=registry,ref=${BUILDCACHE_REF},mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true" \
           --tag "$CANDIDATE_TAG" \
           --push .
 
@@ -132,12 +144,6 @@ deploy-linux:
         --severity HIGH,CRITICAL \
         --ignore-unfixed \
         --no-progress \
-        --skip-files /app/debug-container/gluesync-docker-windows-2019/proxy/gluesync-key.pem \
-        --skip-files /app/debug-container/gluesync-docker-windows-2019/shared/gluesync-key.pem \
-        --skip-files /app/debug-container/gluesync-docker-windows/proxy/gluesync-key.pem \
-        --skip-files /app/debug-container/gluesync-docker-windows/shared/gluesync-key.pem \
-        --skip-files /app/debug-container/gluesync-docker/shared/gluesync-key.pem \
-        --skip-files /app/debug-container/gluesync-podman/shared/gluesync-key.pem \
         "$CANDIDATE_TAG"
 
         echo "Promoting candidate image to release tags"
@@ -155,7 +161,9 @@ deploy-linux:
         
         # Build and push multi-platform candidate image
         docker buildx build --platform linux/amd64,linux/arm64 \
-          --no-cache \
+          --no-cache-filter runtime \
+          --cache-from "type=registry,ref=${BUILDCACHE_REF}" \
+          --cache-to "type=registry,ref=${BUILDCACHE_REF},mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true" \
           --tag "$CANDIDATE_TAG" \
           --push .
 
@@ -165,12 +173,6 @@ deploy-linux:
           --severity HIGH,CRITICAL \
           --ignore-unfixed \
           --no-progress \
-          --skip-files /app/debug-container/gluesync-docker-windows-2019/proxy/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows-2019/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows/proxy/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-podman/shared/gluesync-key.pem \
           "$CANDIDATE_TAG"
 
         echo "Promoting candidate image to beta tags"
@@ -180,7 +182,16 @@ deploy-linux:
         docker buildx imagetools create --tag "${NEXUS_NAME}:beta" --tag "${NEXUS_NAME}:${TAGPART}" "$CANDIDATE_TAG"
       elif [[ $CI_COMMIT_TAG == tag-* ]]; then
         echo "Building amd64-only alpha image..."
-        docker build --no-cache -t "$CANDIDATE_TAG" .
+        # buildx with the docker-container builder (needed for the registry cache); --load
+        # puts the image in the local daemon for the Trivy scan and the pushes below.
+        # Import only: an amd64-only export would overwrite the multi-arch cache of releases.
+        docker buildx create --name multiarch-builder --use
+        docker buildx inspect --bootstrap
+        docker buildx build --platform linux/amd64 \
+          --no-cache-filter runtime \
+          --cache-from "type=registry,ref=${BUILDCACHE_REF}" \
+          --tag "$CANDIDATE_TAG" \
+          --load .
 
         echo "Running Trivy scan on candidate image $CANDIDATE_TAG"
         trivy image \
@@ -188,12 +199,6 @@ deploy-linux:
           --severity HIGH,CRITICAL \
           --ignore-unfixed \
           --no-progress \
-          --skip-files /app/debug-container/gluesync-docker-windows-2019/proxy/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows-2019/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows/proxy/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker-windows/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-docker/shared/gluesync-key.pem \
-          --skip-files /app/debug-container/gluesync-podman/shared/gluesync-key.pem \
           "$CANDIDATE_TAG"
 
         docker tag "$CANDIDATE_TAG" "$VERSION_TAG"
@@ -368,6 +373,7 @@ test:
     - pip install pytest pytest-cov pytest-asyncio
     - grep -vE "^(gluesync-sdk|pyjks)" requirements.txt > /tmp/requirements-ci.txt
     - pip install -r /tmp/requirements-ci.txt
+    - pip download --no-deps -d /tmp/sdk-check "$(grep -E '^gluesync-sdk' requirements.txt)"
     - mkdir -p logs
     - python -m pytest tests/ -v --ignore=tests/test_api.py --ignore=tests/test_corehub_integration.py --ignore=tests/test_cron_jobs.py --ignore=tests/test_client_resilience_pytest.py --ignore=tests/test_chained_events.py --ignore=tests/security/test_auth_dependencies.py --ignore=tests/security/test_corehub_introspect.py --cov=. --cov-report=xml:coverage.xml --cov-report=term --junitxml=test-results.xml
   artifacts:
@@ -406,3 +412,66 @@ build-sonar:
     - if: $CI_COMMIT_BRANCH == 'master'
     - if: $CI_COMMIT_BRANCH == 'main'
     - if: $CI_COMMIT_BRANCH == 'develop'
+
+# The Chronos sandbox (sandbox/README.md): the real Chronos against a fake Core Hub with a controlled
+# clock, every function plus the DST nights of GSSD-1457, split over 4 shards. It finds real defects,
+# so a run is green when it finds nothing beyond sandbox/known-findings.json (and every entry there
+# still occurs): the rule is in sandbox/lib/gate.mjs. Each job runs its OWN dockerd (privileged,
+# docker:dind image), so concurrent pipelines never share a daemon and the sandbox's bind-mount paths
+# under $CI_PROJECT_DIR exist for the daemon that mounts them. Everything happens in
+# ci/sandbox-job.sh, which is also how to reproduce a job locally.
+# Docker Hub is never contacted: the job image (ci/sandbox-ci.Dockerfile, hosted in Nexus) has Node 24
+# and the fake's npm dependency, and SANDBOX_IMAGE_MIRROR makes the sandbox pull its base images from
+# Nexus. Building the Chronos image downloads what its Dockerfiles always do (Chainguard base, PyPI,
+# package repositories).
+
+# Builds the Chronos image once per pipeline (repository Dockerfile plus the sandbox overlay) and hands
+# it to the shards, which `docker load` it instead of building it four times. Starts at once, next to
+# the unit tests.
+sandbox_image:
+  stage: sandbox-build
+  image:
+    name: nexus.hq.molo17.com/molo17-local/chronos-sandbox-ci:1
+    # The script starts dockerd itself through the image's entrypoint script.
+    entrypoint: ['']
+  needs: []
+  interruptible: true
+  timeout: 40m
+  variables:
+    DOCKER_HOST: unix:///var/run/docker.sock
+  script:
+    - sh ci/sandbox-job.sh build
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - sandbox/image/
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# The scenarios, `parallel: 4`: shard i of 4 runs the scenario list defined in ci/sandbox-job.sh.
+sandbox:
+  stage: sandbox
+  image:
+    name: nexus.hq.molo17.com/molo17-local/chronos-sandbox-ci:1
+    entrypoint: ['']
+  needs:
+    - job: sandbox_image
+      artifacts: true
+  interruptible: true
+  timeout: 60m
+  parallel: 4
+  variables:
+    DOCKER_HOST: unix:///var/run/docker.sock
+    SANDBOX_IMAGE_MIRROR: nexus.hq.molo17.com/molo17-local
+  script:
+    # parallel: 4 sets CI_NODE_INDEX (1-based) and CI_NODE_TOTAL; the script reads them.
+    - sh ci/sandbox-job.sh
+  artifacts:
+    when: always
+    expire_in: 2 weeks
+    paths:
+      - sandbox/reports/
+    reports:
+      junit: sandbox/reports/*/junit.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
