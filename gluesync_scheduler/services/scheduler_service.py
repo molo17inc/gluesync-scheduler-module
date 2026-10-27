@@ -21,10 +21,11 @@
  * Copyright (C) 2025 MOLO17. All rights reserved.
 """
 
+import asyncio
 import logging
 import os
 import sys
-from typing import Optional
+from typing import Iterable, List, NamedTuple, Optional
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -41,6 +42,13 @@ from gluesync_scheduler.core.timezone_utils import get_env_timezone
 logger = logging.getLogger(__name__)
 
 _WILDCARD = "*"
+
+# How late a fire time may still run: APScheduler's misfire grace, and the window in which
+# a run missed while Chronos was down is replayed at startup
+MISFIRE_GRACE_SECONDS = 3600
+
+# Upper bound on fire times stepped through when looking for a job's latest missed fire
+_MAX_CATCHUP_SCAN = 5000
 
 
 def _day_or_applies(job: ScheduledJob) -> bool:
@@ -136,6 +144,97 @@ def _validate_next_run(trigger, job_id: str, cron_expression: str, cron_dow: str
         logger.warning(f"Could not determine next run time for job {job_id} with cron expression {cron_expression}")
 
 
+def _trigger_for_job(job: ScheduledJob):
+    """Build the job's trigger; returns (trigger, apscheduler day_of_week, day-OR flag, timezone)."""
+    cron_parts = job.cron_expression.split()
+    if len(cron_parts) != 5:
+        raise ValueError(f"Invalid cron expression: {job.cron_expression}")
+    minute, hour, day, month, day_of_week = cron_parts
+    cron_dow = _to_apscheduler_day_of_week(day_of_week)
+    tz = ZoneInfo(_job_timezone_name(job))
+    use_or = _day_or_applies(job)
+    return _build_trigger(use_or, minute, hour, day, month, cron_dow, tz), cron_dow, use_or, tz
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Aware datetime for a DB value: naive datetimes (SQLite) are UTC."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _scan_fires(trigger, start: datetime, now: datetime) -> Optional[datetime]:
+    """Latest fire time of the trigger in [start, now] (None if there is none), stepping through them."""
+    latest = None
+    previous = start - timedelta(microseconds=1)
+    for _ in range(_MAX_CATCHUP_SCAN):
+        fire = trigger.get_next_fire_time(previous, now)
+        if fire is None or fire > now:
+            break
+        latest = previous = fire
+    return latest
+
+
+def latest_missed_fire(trigger, next_run: Optional[datetime], last_run: Optional[datetime],
+                       now: datetime) -> Optional[datetime]:
+    """
+    The latest fire time of the trigger that was due (next_run <= now) and never ran (after last_run).
+
+    The persisted next_run is the evidence that a fire was due; several missed fires coalesce
+    into the latest one. Returns None when nothing was missed.
+    """
+    next_run, last_run, now = _as_utc(next_run), _as_utc(last_run), _as_utc(now)
+    if next_run is None or next_run > now:
+        return None
+
+    # Only fires within the grace window can be replayed: when next_run is older, start there
+    # (cheap for jobs that fire every minute); the full scan is just for reporting an old miss
+    recent_start = now - timedelta(seconds=MISFIRE_GRACE_SECONDS)
+    missed = None
+    if next_run < recent_start:
+        missed = _scan_fires(trigger, recent_start, now)
+    if missed is None:
+        missed = _scan_fires(trigger, next_run, now)
+
+    if missed is None or (last_run is not None and missed <= last_run):
+        return None
+    return missed
+
+
+class MissedRun(NamedTuple):
+    """A scheduled fire time that passed while Chronos was down and is to be replayed."""
+    fire_time: datetime
+    job_id: int
+    job_name: str
+
+
+def plan_missed_runs(jobs: Iterable[ScheduledJob], now: Optional[datetime] = None) -> List[MissedRun]:
+    """
+    The runs to replay at startup: for each job its latest missed fire time when it is within
+    MISFIRE_GRACE_SECONDS, ordered by fire time across jobs. Older misses are only logged.
+    """
+    now = _as_utc(now) if now is not None else datetime.now(timezone.utc)
+    plan: List[MissedRun] = []
+    for job in jobs:
+        try:
+            trigger = _trigger_for_job(job)[0]
+            missed = latest_missed_fire(trigger, job.next_run, job.last_run, now)
+            if missed is None:
+                continue
+            age = (now - missed).total_seconds()
+            if age > MISFIRE_GRACE_SECONDS:
+                logger.warning(
+                    f"Skipping missed run of job {job.id} '{job.name}' due at {missed.isoformat()}: "
+                    f"{int(age)}s ago, beyond the {MISFIRE_GRACE_SECONDS}s catch-up window")
+                continue
+            logger.info(f"Job {job.id} '{job.name}' missed its run due at {missed.isoformat()}: will be replayed")
+            plan.append(MissedRun(missed, job.id, job.name))
+        except Exception as e:
+            logger.exception(f"Could not work out the missed run of job {job.id} '{job.name}': {e}")
+    plan.sort(key=lambda run: run.fire_time)
+    return plan
+
+
 class SchedulerService:
     """Service for managing scheduled jobs using APScheduler"""
     
@@ -166,7 +265,7 @@ class SchedulerService:
                 job_defaults={
                     'coalesce': True,
                     'max_instances': 1,
-                    'misfire_grace_time': 3600,
+                    'misfire_grace_time': MISFIRE_GRACE_SECONDS,
                 },
                 timezone=get_env_timezone('UTC')
             )
@@ -206,17 +305,9 @@ class SchedulerService:
             # Create the job in the scheduler
             job_id = f"job_{job.id}"
 
-            # Get the job's timezone or fall back to the global timezone setting
-            job_timezone = _job_timezone_name(job)
-            logger.info(f"Using timezone {job_timezone} for job {job_id}")
-            
             _log_run_days(day_of_week)
-            cron_dow = _to_apscheduler_day_of_week(day_of_week)
-            
-            # Create the trigger with explicit timezone
-            tz = ZoneInfo(job_timezone)
-            use_or = _day_or_applies(job)
-            trigger = _build_trigger(use_or, minute, hour, day, month, cron_dow, tz)
+            trigger, cron_dow, use_or, tz = _trigger_for_job(job)
+            logger.info(f"Using timezone {tz.key} for job {job_id}")
             
             _validate_next_run(trigger, job_id, job.cron_expression, cron_dow, use_or, tz)
             self._add_job_to_scheduler(job, job_id, trigger)
@@ -236,7 +327,7 @@ class SchedulerService:
             id=job_id,
             replace_existing=True,
             args=[job.id, job.name],
-            misfire_grace_time=3600,   # Allow misfires up to an hour
+            misfire_grace_time=MISFIRE_GRACE_SECONDS,   # Allow misfires up to an hour
             coalesce=True,             # Only run once if multiple executions are missed
             max_instances=1            # Avoid overlapping executions of the same job
         )
@@ -295,6 +386,17 @@ class SchedulerService:
             logger.error(f"Error removing scheduled job: {str(e)}")
             raise RuntimeError(f"Error removing scheduled job: {str(e)}")
     
+    async def run_missed(self, plan: List[MissedRun]) -> None:
+        """Replay the missed runs one after the other, oldest first; a failing run does not stop the rest."""
+        loop = asyncio.get_running_loop()
+        for run in plan:
+            try:
+                logger.info(f"Replaying run of job {run.job_id} '{run.job_name}' missed at {run.fire_time.isoformat()}")
+                # _execute_job is blocking (APScheduler runs it in a thread), keep the loop free
+                await loop.run_in_executor(None, self._execute_job, run.job_id, run.job_name)
+            except Exception as e:
+                logger.exception(f"Replay of missed run of job {run.job_id} '{run.job_name}' failed: {e}")
+
     def _execute_job(self, job_id: int, job_name: str) -> None:
         """
         Execute a job
