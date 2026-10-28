@@ -58,11 +58,15 @@ FROM ${BASE_IMAGE} AS runtime
 WORKDIR /app
 
 # Debian security fixes on every build (the runtime stage is never cached in CI),
-# plus the tools entrypoint.sh and the migrations use.
+# plus the tools entrypoint.sh and the migrations use. The base image's own pip
+# goes too: nothing installs packages at runtime, and its vendored msgpack,
+# urllib3 and setuptools SBOM are what Trivy reported (the venv has no pip).
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends openssl procps tzdata \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip uninstall -y pip \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.*
 
 # Bring in the prebuilt virtual environment from the builder stage
 COPY --from=builder /opt/venv /opt/venv
