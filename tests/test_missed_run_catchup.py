@@ -23,8 +23,8 @@
 GSSD-1457 acceptance tests: catch-up of runs missed while Chronos was down.
 
 At startup the latest fire time that passed since the job's persisted next_run
-is replayed once when it is at most MISFIRE_GRACE_SECONDS old, oldest first
-across jobs. The conftest stub of the scheduler module stays in sys.modules; the
+is replayed once when it is at most MISFIRE_GRACE_SECONDS old (a pipeline_exit_maintenance
+job whatever its age), oldest first across jobs. The conftest stub of the scheduler module stays in sys.modules; the
 real module is loaded from its file under a private name.
 """
 
@@ -39,6 +39,8 @@ from types import SimpleNamespace
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from gluesync_scheduler.models.models import TaskType
 
 SERVICE_FILE = os.path.join(
     os.path.dirname(__file__), "..", "gluesync_scheduler", "services", "scheduler_service.py"
@@ -74,10 +76,11 @@ def module(tmp_path_factory):
             os.environ["CRON_LOG_DIR"] = previous_log_dir
 
 
-def make_job(job_id=1, cron="30 12 * * *", tz="UTC", next_run=None, last_run=None, name=None, day_or=True):
+def make_job(job_id=1, cron="30 12 * * *", tz="UTC", next_run=None, last_run=None, name=None, day_or=True,
+             task_type=None):
     return SimpleNamespace(
         id=job_id, name=name or f"job-{job_id}", cron_expression=cron, timezone_name=tz,
-        day_or=day_or, next_run=next_run, last_run=last_run,
+        day_or=day_or, next_run=next_run, last_run=last_run, task_type=task_type,
     )
 
 
@@ -227,6 +230,84 @@ def test_plan_survives_a_broken_job(module, caplog):
         plan = module.plan_missed_runs([broken, bad_tz, good], datetime(2026, 6, 10, 12, 40, tzinfo=UTC))
     assert [r.job_id for r in plan] == [3]
     assert "job 1" in caplog.text and "job 2" in caplog.text
+
+
+def test_job_in_a_timezone_east_of_utc_missed_ten_minutes_ago_is_replayed(module):
+    # next_run is stored as UTC (naive in SQLite): 03:10 CET on the fall-back day is 02:10 UTC.
+    # Read as local wall time it would look 1 h later, "not yet due", and the miss would be skipped.
+    job = make_job(cron="10 3 * * 0", tz="Europe/Rome", next_run=datetime(2026, 10, 25, 2, 10))
+    now = datetime(2026, 10, 25, 2, 20, tzinfo=UTC)
+    assert latest(module, job, now) == datetime(2026, 10, 25, 2, 10, tzinfo=UTC)
+    assert [(r.job_id, r.fire_time) for r in module.plan_missed_runs([job], now)] == [
+        (1, datetime(2026, 10, 25, 2, 10, tzinfo=UTC))
+    ]
+    summer = make_job(cron="30 14 * * *", tz="Europe/Rome", next_run=datetime(2026, 6, 10, 12, 30))
+    assert len(module.plan_missed_runs([summer], datetime(2026, 6, 10, 12, 40, tzinfo=UTC))) == 1
+
+
+# ---------------------------------------------------------------------------
+# maintenance exit: replayed whatever its age
+# ---------------------------------------------------------------------------
+
+EXIT = TaskType.PIPELINE_EXIT_MAINTENANCE
+
+
+def test_exit_maintenance_missed_three_hours_ago_is_replayed_and_others_are_skipped(module, caplog):
+    # the customer case: 03:10 CET exit missed, Chronos restarted at 06:03 CET (05:03 UTC)
+    now = datetime(2026, 10, 25, 5, 3, tzinfo=UTC)
+    fire = datetime(2026, 10, 25, 2, 10, tzinfo=UTC)
+    stored = datetime(2026, 10, 25, 2, 10)
+    exit_job = make_job(1, "10 3 * * 0", "Europe/Rome", next_run=stored, name="exit", task_type=EXIT)
+    start_job = make_job(2, "10 3 * * 0", "Europe/Rome", next_run=stored, name="start",
+                         task_type=TaskType.PIPELINE_START)
+    untyped = make_job(3, "10 3 * * 0", "Europe/Rome", next_run=stored, name="untyped")
+    with caplog.at_level("INFO"):
+        plan = module.plan_missed_runs([start_job, exit_job, untyped], now)
+    assert [(r.job_id, r.fire_time) for r in plan] == [(1, fire)]
+    assert "job 2 'start'" in caplog.text
+    assert "beyond the 3600s catch-up window" in caplog.text
+    assert "Job 1 'exit'" in caplog.text
+    assert "catch-up window is waived" in caplog.text
+
+
+@pytest.mark.parametrize("downtime", [timedelta(hours=3), timedelta(days=3)], ids=["3h", "3d"])
+def test_weekly_exit_maintenance_missed_long_ago_is_found_and_replayed(module, downtime):
+    # weekly job: no fire in the last hour, so the scan has to start from the persisted next_run
+    fire = datetime(2026, 10, 25, 2, 10, tzinfo=UTC)
+    job = make_job(1, "10 3 * * 0", "Europe/Rome", next_run=fire.replace(tzinfo=None), task_type=EXIT)
+    now = fire + downtime
+    assert latest(module, job, now) == fire
+    assert [(r.job_id, r.fire_time) for r in module.plan_missed_runs([job], now)] == [(1, fire)]
+
+
+def test_exit_maintenance_missed_for_weeks_replays_only_the_latest_fire(module):
+    job = make_job(1, "10 3 * * 0", "Europe/Rome", next_run=datetime(2026, 10, 4, 1, 10), task_type=EXIT)
+    now = datetime(2026, 10, 28, 8, 0, tzinfo=UTC)
+    assert [r.fire_time for r in module.plan_missed_runs([job], now)] == [datetime(2026, 10, 25, 2, 10, tzinfo=UTC)]
+
+
+def test_exit_maintenance_that_already_ran_is_not_replayed(module):
+    fire = datetime(2026, 10, 25, 2, 10, tzinfo=UTC)
+    job = make_job(1, "10 3 * * 0", "Europe/Rome", next_run=fire.replace(tzinfo=None), task_type=EXIT,
+                   last_run=fire + timedelta(seconds=1))
+    assert module.plan_missed_runs([job], fire + timedelta(hours=3)) == []
+
+
+def test_exit_maintenance_with_a_future_next_run_is_not_replayed(module):
+    job = make_job(1, "10 3 * * 0", "Europe/Rome", next_run=datetime(2026, 11, 1, 2, 10), task_type=EXIT)
+    assert module.plan_missed_runs([job], datetime(2026, 10, 25, 5, 3, tzinfo=UTC)) == []
+
+
+def test_waived_exit_replay_is_still_ordered_by_fire_time_with_the_others(module):
+    now = datetime(2026, 10, 25, 5, 3, tzinfo=UTC)
+    exit_job = make_job(1, "10 2 * * *", "UTC", next_run=datetime(2026, 10, 25, 2, 10), name="exit", task_type=EXIT)
+    recent = make_job(2, "20 4 * * *", "UTC", next_run=datetime(2026, 10, 25, 4, 20), name="enter",
+                      task_type=TaskType.PIPELINE_ENTER_MAINTENANCE)
+    old_enter = make_job(3, "50 1 * * *", "UTC", next_run=datetime(2026, 10, 25, 1, 50), name="old enter",
+                         task_type=TaskType.PIPELINE_ENTER_MAINTENANCE)
+    plan = module.plan_missed_runs([recent, old_enter, exit_job], now)
+    # oldest fire first; the 3 h old enter is beyond the window, the 3 h old exit is not
+    assert [r.job_name for r in plan] == ["exit", "enter"]
 
 
 # ---------------------------------------------------------------------------

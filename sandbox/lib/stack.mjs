@@ -129,6 +129,28 @@ const buildChronos = async ({ rebuild = false } = {}) => {
   return tag;
 };
 
+// A published Chronos image (a bare tag such as `0.3.1`) plus the overlay, for scenarios that start
+// an older release and then upgrade it (upgrade-from-ga). Returns the overlay tag; an existing one is
+// reused. With SANDBOX_IMAGE_MIRROR set the base is pulled from `<mirror>/gluesync-chronos:<tag>`
+// and tagged with its Docker Hub name, so Docker Hub is never contacted (CI pushes Chronos images to
+// nexus.hq.molo17.com/molo17-local/gluesync-chronos).
+export const ensureChronosOverlay = async version => {
+  const slugged = version.replace(/[^a-zA-Z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
+  const tag = `chronos-sandbox/chronos:ga-${slugged}`;
+  if (await imageExists(tag)) return tag;
+
+  const base = `molo17/gluesync-chronos:${version}`;
+  if (!(await imageExists(base))) {
+    const source = env.imageMirror ? `${env.imageMirror}/gluesync-chronos:${version}` : base;
+    say(`pulling ${source}`);
+    await mustDocker(['pull', '-q', source], { timeoutMs: 900000 });
+    if (source !== base) await mustDocker(['tag', source, base]);
+  }
+  say(`building Chronos sandbox overlay ${tag} on ${base} (libfaketime, py-spy)`);
+  await mustDocker(['build', '-q', '-t', tag, '--build-arg', `BASE_IMAGE=${base}`, '--build-arg', 'APSCHEDULER=', path.join(env.sandboxDir, 'chronos')], { timeoutMs: 900000 });
+  return tag;
+};
+
 // ---------------------------------------------------------------- containers
 
 const containerRunning = async name => {

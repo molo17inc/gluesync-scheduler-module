@@ -36,7 +36,7 @@ from apscheduler.jobstores.memory import MemoryJobStore
 from croniter import croniter
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.models.models import ScheduledJob
+from gluesync_scheduler.models.models import ScheduledJob, TaskType
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
 logger = logging.getLogger(__name__)
@@ -187,8 +187,9 @@ def latest_missed_fire(trigger, next_run: Optional[datetime], last_run: Optional
     if next_run is None or next_run > now:
         return None
 
-    # Only fires within the grace window can be replayed: when next_run is older, start there
-    # (cheap for jobs that fire every minute); the full scan is just for reporting an old miss
+    # Only fires within the grace window are replayed, except for maintenance exit (see
+    # plan_missed_runs): when next_run is older, start there (cheap for jobs that fire every
+    # minute) and fall back to the full scan for the old miss
     recent_start = now - timedelta(seconds=MISFIRE_GRACE_SECONDS)
     missed = None
     if next_run < recent_start:
@@ -211,7 +212,8 @@ class MissedRun(NamedTuple):
 def plan_missed_runs(jobs: Iterable[ScheduledJob], now: Optional[datetime] = None) -> List[MissedRun]:
     """
     The runs to replay at startup: for each job its latest missed fire time when it is within
-    MISFIRE_GRACE_SECONDS, ordered by fire time across jobs. Older misses are only logged.
+    MISFIRE_GRACE_SECONDS, ordered by fire time across jobs. Older misses are only logged,
+    except for pipeline_exit_maintenance jobs, which are replayed whatever the age.
     """
     now = _as_utc(now) if now is not None else datetime.now(timezone.utc)
     plan: List[MissedRun] = []
@@ -223,10 +225,16 @@ def plan_missed_runs(jobs: Iterable[ScheduledJob], now: Optional[datetime] = Non
                 continue
             age = (now - missed).total_seconds()
             if age > MISFIRE_GRACE_SECONDS:
+                # A skipped exit leaves the pipeline in maintenance indefinitely, while running
+                # it late only restores the normal state
+                if getattr(job, 'task_type', None) != TaskType.PIPELINE_EXIT_MAINTENANCE:
+                    logger.warning(
+                        f"Skipping missed run of job {job.id} '{job.name}' due at {missed.isoformat()}: "
+                        f"{int(age)}s ago, beyond the {MISFIRE_GRACE_SECONDS}s catch-up window")
+                    continue
                 logger.warning(
-                    f"Skipping missed run of job {job.id} '{job.name}' due at {missed.isoformat()}: "
-                    f"{int(age)}s ago, beyond the {MISFIRE_GRACE_SECONDS}s catch-up window")
-                continue
+                    f"Job {job.id} '{job.name}' (exit maintenance) missed its run due at {missed.isoformat()}, "
+                    f"{int(age)}s ago: the {MISFIRE_GRACE_SECONDS}s catch-up window is waived")
             logger.info(f"Job {job.id} '{job.name}' missed its run due at {missed.isoformat()}: will be replayed")
             plan.append(MissedRun(missed, job.id, job.name))
         except Exception as e:

@@ -34,6 +34,7 @@ MIGRATIONS = [
     ("migrate_add_entity_validation_fields", "add_entity_validation_fields"),
     ("migrate_add_visualize_refresh_fields", "add_visualize_refresh_fields"),
     ("migrate_add_day_or", "add_day_or_column"),
+    ("migrate_next_run_to_utc", "convert_next_run_to_utc"),
 ]
 
 
