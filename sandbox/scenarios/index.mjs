@@ -16,6 +16,7 @@ import restartCatchup from './restart-catchup.mjs';
 import settings from './settings.mjs';
 import taskTypes from './task-types.mjs';
 import triggers from './triggers.mjs';
+import upgradeFromGa from './upgrade-from-ga.mjs';
 import webhooks from './webhooks.mjs';
 
 // Function coverage first (fast, main instance), then resilience, then the DST and
@@ -40,4 +41,5 @@ export const scenarios = [
   dstFallbackPatterns,
   dstSpringforward,
   restartCatchup,
+  upgradeFromGa,
 ];

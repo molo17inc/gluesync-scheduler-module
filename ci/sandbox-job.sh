@@ -15,7 +15,9 @@
 # Nothing is downloaded from Docker Hub: with SANDBOX_IMAGE_MIRROR set the sandbox pulls its base images
 # (sandbox/lib/env.mjs, requiredImages) from that registry. The Chronos image build itself downloads
 # what the repository's Dockerfile and sandbox/chronos/Dockerfile always do (Chainguard base, PyPI, the
-# Alpine/Wolfi package repositories) and nothing else. A missing tool is an error, never an install.
+# Alpine/Wolfi package repositories) and nothing else. upgrade-from-ga also pulls the published GA
+# Chronos image from <mirror>/gluesync-chronos and asks the backoffice which version that is
+# (api.backoffice.molo17.com; SANDBOX_UPGRADE_FROM=<tag> skips the lookup). A missing tool is an error, never an install.
 #
 #   CI_NODE_INDEX / CI_NODE_TOTAL   the shard (default 1/1: every shard's scenarios, one after the other)
 #   SANDBOX_IMAGE_MIRROR            registry/repo holding the sandbox's base images (sandbox/lib/env.mjs)
@@ -40,8 +42,8 @@ IMAGE_ARCHIVE="$ROOT/sandbox/image/chronos-sandbox-image.tar.gz"
 # is killed with a message; the job's own timeout is 60 minutes.
 SHARD_1="jobs-crud task-types chains triggers webhooks internal-api settings query-studio ai-agent core-hub-tasks maintenance corehub-faults"
 SHARD_1_BUDGET=1500   # ~3 min measured, the rest is room for a slow runner
-SHARD_2="corehub-outage corehub-slow restart-catchup"
-SHARD_2_BUDGET=1500   # ~6 min
+SHARD_2="corehub-outage corehub-slow restart-catchup upgrade-from-ga"
+SHARD_2_BUDGET=1500   # ~10 min (upgrade-from-ga: ~3 min, plus pulling and overlaying the GA image)
 SHARD_3="dst-fallback-freeze dst-fallback-customer dst-springforward"
 SHARD_3_BUDGET=2100   # ~28 min
 SHARD_4="dst-fallback-patterns"
