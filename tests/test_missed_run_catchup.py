@@ -264,8 +264,10 @@ def test_exit_maintenance_missed_three_hours_ago_is_replayed_and_others_are_skip
     with caplog.at_level("INFO"):
         plan = module.plan_missed_runs([start_job, exit_job, untyped], now)
     assert [(r.job_id, r.fire_time) for r in plan] == [(1, fire)]
-    assert "job 2 'start'" in caplog.text and "beyond the 3600s catch-up window" in caplog.text
-    assert "Job 1 'exit'" in caplog.text and "catch-up window is waived" in caplog.text
+    assert "job 2 'start'" in caplog.text
+    assert "beyond the 3600s catch-up window" in caplog.text
+    assert "Job 1 'exit'" in caplog.text
+    assert "catch-up window is waived" in caplog.text
 
 
 @pytest.mark.parametrize("downtime", [timedelta(hours=3), timedelta(days=3)], ids=["3h", "3d"])
