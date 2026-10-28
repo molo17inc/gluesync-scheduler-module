@@ -23,12 +23,13 @@
 
 import enum
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Enum, Text, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Enum, Text, Boolean, ForeignKey
 from sqlalchemy.sql.expression import text, true
 from sqlalchemy.sql.sqltypes import TIMESTAMP
 
 from gluesync_scheduler.config.settings import settings
 from gluesync_scheduler.db.database import Base
+from gluesync_scheduler.models.utc_datetime import UTCDateTime
 
 
 class TaskType(enum.Enum):
@@ -161,11 +162,11 @@ class ScheduledJob(Base):
     cron_job_identifier = Column(String, nullable=False, unique=True)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
-    last_run = Column(DateTime(timezone=True), nullable=True)
-    next_run = Column(DateTime(timezone=True), nullable=True)
-    last_successful_run = Column(DateTime(timezone=True), nullable=True)
+    last_run = Column(UTCDateTime, nullable=True)
+    next_run = Column(UTCDateTime, nullable=True)
+    last_successful_run = Column(UTCDateTime, nullable=True)
     last_error_message = Column(Text, nullable=True)
-    last_run_error_time = Column(DateTime(timezone=True), nullable=True)
+    last_run_error_time = Column(UTCDateTime, nullable=True)
     start_time = Column(String, nullable=True)
     timezone_name = Column(String, nullable=True)
     is_cron_expression = Column(Boolean, default=False, nullable=False)

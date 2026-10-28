@@ -25,10 +25,12 @@ export default {
       return;
     }
 
+    // Mark before the restart: the replay runs right at startup, before the instance is reported ready.
+    // The first incarnation never reaches the 12:30 fire time, so it makes no call that could be counted.
+    const since = await corehub.mark();
     inst = await ctx.restartInstance(inst, { clockUtc: T1, graceSec: 5 });
     api = ctx.api(inst);
     ctx.note(`second start ready at ${utc(fakeNow(inst))}`);
-    const since = await corehub.mark();
     await sleep(60000);
     const runs = commandTimes(await ctx.calls(since, { tag: inst.tag }), 'auto-catchup', 'sync/stop');
     const after = (await api.getJob(job.id)).json;

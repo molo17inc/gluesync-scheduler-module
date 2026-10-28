@@ -40,10 +40,6 @@
     "slow-corehub-false-failure": {
       "scenarios": ["corehub-slow"],
       "note": "A command Core Hub answers after the 120 s internal timeout is reported as failed although Core Hub applied it."
-    },
-    "croniter-next-run-off-by-dst": {
-      "scenarios": ["dst-fallback-freeze"],
-      "note": "Job next_run is computed wrongly (two hours late) for a job created inside the fall-back transition window (croniter on a pytz-aware now)."
     }
   }
 }

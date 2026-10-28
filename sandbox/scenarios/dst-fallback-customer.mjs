@@ -86,10 +86,12 @@ export default {
     ctx.check('phase B: nothing is logged at the moment of the freeze', !/error|exception|traceback/i.test(lastLines(logsB, 20)), lastLines(logsB, 6));
 
     // ---- phase C: the customer's restart at 06:03 CET
+    // Mark before the restart: the replay runs right at startup, before the instance is reported ready.
+    // Phases A and B make no maintenance/exit call (the exit jobs fire at 02:10Z), so none is counted from before.
+    const sinceC = await corehub.mark();
     inst = await ctx.restartInstance(inst, { clockUtc: PHASE_C, graceSec: 5 });
     api = ctx.api(inst);
     ctx.note(`phase C ready at ${utc(fakeNow(inst))} (${romeWall(fakeNow(inst))})`);
-    const sinceC = await corehub.mark();
     await sleep(75000);
     const exits = await ctx.calls(sinceC, { tag: inst.tag, only: /maintenance\/exit/ });
     const stateC = await corehub.state();
