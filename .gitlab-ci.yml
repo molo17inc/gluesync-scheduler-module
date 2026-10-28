@@ -60,9 +60,18 @@ deploy-windows-nanoserver:
   # processes (cl.exe 0xC0000142, runner PowerShell crash). Later jobs queue instead.
   resource_group: "windows-runner-${WINDOWS_RUNNER_VERSION}"
 
+# Two Linux images per tag: the default Wolfi image (Dockerfile) and the Debian one (Dockerfile.debian,
+# tags with the "-debian" suffix) for CPUs without x86-64-v2, where the Wolfi glibc refuses to start.
+# Core Hub publishes the same pair. Each variant keeps its own buildx cache: the builder stages differ.
 deploy-linux:
   stage: deploy
   image: docker:latest
+  parallel:
+    matrix:
+      - DOCKER_FILE: "Dockerfile"
+        IMAGE_TAG_SUFFIX: ""
+      - DOCKER_FILE: "Dockerfile.debian"
+        IMAGE_TAG_SUFFIX: "-debian"
   services:
     - name: docker:dind
       variables:
@@ -89,8 +98,9 @@ deploy-linux:
       # Extract version part from tag
       TAGPART=$(echo "$CI_COMMIT_TAG" | grep -oE '[0-9]+\.[0-9]+\.[0-9](.*)')
       DEFAULT_NAME="${DOCKER_REGISTRY}/${APP_NAME}"
-      VERSION_TAG="${DEFAULT_NAME}:${TAGPART}"
-      CANDIDATE_TAG="${DEFAULT_NAME}:${TAGPART}-candidate-${CI_PIPELINE_ID}"
+      VERSION_TAG="${DEFAULT_NAME}:${TAGPART}${IMAGE_TAG_SUFFIX}"
+      CANDIDATE_TAG="${DEFAULT_NAME}:${TAGPART}${IMAGE_TAG_SUFFIX}-candidate-${CI_PIPELINE_ID}"
+      VARIANT_BUILDCACHE_REF="${BUILDCACHE_REF}${IMAGE_TAG_SUFFIX}"
 
       # Determine release type based on tag prefix
       if [[ "$CI_COMMIT_TAG" == release-* ]]; then
@@ -107,7 +117,7 @@ deploy-linux:
       LOWER_RELEASE_DIR=$(echo "$RELEASE_TYPE" | tr '[:upper:]' '[:lower:]')
       FTP_RELEASE_DIR="/releases/${LOWER_RELEASE_DIR}/linux"
 
-      export TAGPART DEFAULT_NAME VERSION_TAG CANDIDATE_TAG RELEASE_TYPE FTP_RELEASE_DIR LOWER_RELEASE_DIR
+      export TAGPART DEFAULT_NAME VERSION_TAG CANDIDATE_TAG VARIANT_BUILDCACHE_REF RELEASE_TYPE FTP_RELEASE_DIR LOWER_RELEASE_DIR
 
       # Create VERSION file
       echo "${TAGPART}" > VERSION
@@ -131,10 +141,10 @@ deploy-linux:
         docker buildx inspect --bootstrap
         
         # Build and push multi-platform candidate image
-        docker buildx build --platform linux/amd64,linux/arm64 \
+        docker buildx build --platform linux/amd64,linux/arm64 -f "$DOCKER_FILE" \
           --no-cache-filter runtime \
-          --cache-from "type=registry,ref=${BUILDCACHE_REF}" \
-          --cache-to "type=registry,ref=${BUILDCACHE_REF},mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true" \
+          --cache-from "type=registry,ref=${VARIANT_BUILDCACHE_REF}" \
+          --cache-to "type=registry,ref=${VARIANT_BUILDCACHE_REF},mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true" \
           --tag "$CANDIDATE_TAG" \
           --push .
 
@@ -147,10 +157,10 @@ deploy-linux:
         "$CANDIDATE_TAG"
 
         echo "Promoting candidate image to release tags"
-        docker buildx imagetools create --tag "$DEFAULT_NAME:latest" --tag "$VERSION_TAG" "$CANDIDATE_TAG"
+        docker buildx imagetools create --tag "$DEFAULT_NAME:latest${IMAGE_TAG_SUFFIX}" --tag "$VERSION_TAG" "$CANDIDATE_TAG"
 
         echo "Pushing release tags to Nexus"
-        docker buildx imagetools create --tag "${NEXUS_NAME}:latest" --tag "${NEXUS_NAME}:${TAGPART}" "$CANDIDATE_TAG"
+        docker buildx imagetools create --tag "${NEXUS_NAME}:latest${IMAGE_TAG_SUFFIX}" --tag "${NEXUS_NAME}:${TAGPART}${IMAGE_TAG_SUFFIX}" "$CANDIDATE_TAG"
       elif [[ $CI_COMMIT_TAG == beta-* ]]; then
         echo "Building multi-architecture beta with beta tag..."
         # Install QEMU for multi-architecture builds
@@ -160,10 +170,10 @@ deploy-linux:
         docker buildx inspect --bootstrap
         
         # Build and push multi-platform candidate image
-        docker buildx build --platform linux/amd64,linux/arm64 \
+        docker buildx build --platform linux/amd64,linux/arm64 -f "$DOCKER_FILE" \
           --no-cache-filter runtime \
-          --cache-from "type=registry,ref=${BUILDCACHE_REF}" \
-          --cache-to "type=registry,ref=${BUILDCACHE_REF},mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true" \
+          --cache-from "type=registry,ref=${VARIANT_BUILDCACHE_REF}" \
+          --cache-to "type=registry,ref=${VARIANT_BUILDCACHE_REF},mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true" \
           --tag "$CANDIDATE_TAG" \
           --push .
 
@@ -176,10 +186,10 @@ deploy-linux:
           "$CANDIDATE_TAG"
 
         echo "Promoting candidate image to beta tags"
-        docker buildx imagetools create --tag "$DEFAULT_NAME:beta" --tag "$VERSION_TAG" "$CANDIDATE_TAG"
+        docker buildx imagetools create --tag "$DEFAULT_NAME:beta${IMAGE_TAG_SUFFIX}" --tag "$VERSION_TAG" "$CANDIDATE_TAG"
 
         echo "Pushing beta tags to Nexus"
-        docker buildx imagetools create --tag "${NEXUS_NAME}:beta" --tag "${NEXUS_NAME}:${TAGPART}" "$CANDIDATE_TAG"
+        docker buildx imagetools create --tag "${NEXUS_NAME}:beta${IMAGE_TAG_SUFFIX}" --tag "${NEXUS_NAME}:${TAGPART}${IMAGE_TAG_SUFFIX}" "$CANDIDATE_TAG"
       elif [[ $CI_COMMIT_TAG == tag-* ]]; then
         echo "Building amd64-only alpha image..."
         # buildx with the docker-container builder (needed for the registry cache); --load
@@ -187,9 +197,9 @@ deploy-linux:
         # Import only: an amd64-only export would overwrite the multi-arch cache of releases.
         docker buildx create --name multiarch-builder --use
         docker buildx inspect --bootstrap
-        docker buildx build --platform linux/amd64 \
+        docker buildx build --platform linux/amd64 -f "$DOCKER_FILE" \
           --no-cache-filter runtime \
-          --cache-from "type=registry,ref=${BUILDCACHE_REF}" \
+          --cache-from "type=registry,ref=${VARIANT_BUILDCACHE_REF}" \
           --tag "$CANDIDATE_TAG" \
           --load .
 
@@ -205,8 +215,8 @@ deploy-linux:
         docker push "$VERSION_TAG"
 
         echo "Pushing alpha tag to Nexus"
-        docker tag "$CANDIDATE_TAG" "${NEXUS_NAME}:${TAGPART}"
-        docker push "${NEXUS_NAME}:${TAGPART}"
+        docker tag "$CANDIDATE_TAG" "${NEXUS_NAME}:${TAGPART}${IMAGE_TAG_SUFFIX}"
+        docker push "${NEXUS_NAME}:${TAGPART}${IMAGE_TAG_SUFFIX}"
       else
         echo "Unknown tag format: $CI_COMMIT_TAG"
         exit 1
@@ -223,7 +233,7 @@ deploy-linux:
 
       TAR_DIR="docker-images-linux"
       mkdir -p "$TAR_DIR"
-      FILE_BASENAME="${APP_NAME}-${LOWER_RELEASE_DIR}"
+      FILE_BASENAME="${APP_NAME}${IMAGE_TAG_SUFFIX}-${LOWER_RELEASE_DIR}"
 
       ARCHITECTURES="amd64"
       if [[ $CI_COMMIT_TAG == release-* || $CI_COMMIT_TAG == beta-* ]]; then

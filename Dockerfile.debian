@@ -1,0 +1,129 @@
+# Debian variant of the Chronos image, published with the "-debian" tag suffix
+# (molo17/gluesync-chronos:<version>-debian, latest-debian, beta-debian).
+# The default image is built on Wolfi, whose glibc and Python are compiled for
+# x86-64-v2: on older or virtual CPUs without SSE4.2/POPCNT (QEMU's default
+# qemu64 model, some hypervisor CPU profiles) it stops at once with
+# "Fatal glibc error: CPU does not support x86-64-v2". Debian builds amd64 for
+# the baseline x86-64 ISA, so this image runs on those CPUs. Core Hub ships the
+# same split (Dockerfile.debian, "-debian" tags).
+# Everything else (venv layout, environment, entrypoint, healthcheck) matches
+# Dockerfile; keep the two in step.
+# To update: bump the digest (docker buildx imagetools inspect python:3.13-slim-trixie)
+# together with PYTHON_VERSION in Dockerfile, so both variants run the same Python.
+ARG BASE_IMAGE=python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
+
+# Build stage
+FROM ${BASE_IMAGE} AS builder
+
+WORKDIR /build
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL="https://nexus.hq.molo17.com/repository/pypi-all/simple" \
+    PATH="/opt/venv/bin:$PATH"
+
+# Native toolchain for the few sdist-only deps (twofish via pyjks).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libffi-dev libssl-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Isolated virtual environment that is copied verbatim into the final stage
+RUN python3 -m venv /opt/venv && \
+    python -m pip install --upgrade pip wheel setuptools
+
+# Install application dependencies into the venv
+COPY ./requirements.txt ./requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
+    --index-url "https://nexus.hq.molo17.com/repository/pypi-all/simple" \
+    --prefer-binary \
+    --only-binary=cryptography,pyjks,websockets,pydantic-core \
+    -r requirements.txt
+
+# Build and install the application package into the venv
+COPY ./setup.py ./
+COPY ./pyproject.toml ./
+COPY ./VERSION ./
+COPY ./README.md ./
+COPY ./gluesync_scheduler ./gluesync_scheduler
+RUN pip install .
+
+# Drop pip from the runtime venv, as in Dockerfile.
+RUN /opt/venv/bin/python -m pip uninstall -y pip
+
+# Final stage
+FROM ${BASE_IMAGE} AS runtime
+
+WORKDIR /app
+
+# Debian security fixes on every build (the runtime stage is never cached in CI),
+# plus the tools entrypoint.sh and the migrations use. The base image's own pip
+# goes too: nothing installs packages at runtime, and its vendored msgpack,
+# urllib3 and setuptools SBOM are what Trivy reported (the venv has no pip).
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends openssl procps tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip uninstall -y pip \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.*
+
+# Bring in the prebuilt virtual environment from the builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Create Gluesync default directories and app data directory
+RUN mkdir -p /opt/gluesync/data && \
+    mkdir -p /opt/gluesync/shared && \
+    mkdir -p /app/data && \
+    mkdir -p /app/logs && \
+    chmod -R 755 /opt/gluesync && \
+    chmod -R 750 /app/data && \
+    chmod -R 750 /app/logs
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    GLUESYNC_LICENSE_FILE=/opt/gluesync/shared/gs-license.dat \
+    GLUESYNC_SECURITY_CONFIG=/opt/gluesync/shared/security-config.json \
+    GLUESYNC_HOST= \
+    DB_URL=sqlite:///./data/scheduler.db \
+    ENTITY_START_TIMEOUT=2 \
+    HOST=0.0.0.0 \
+    PORT=1717 \
+    DEBUG=false \
+    LOG_LEVEL=INFO \
+    LOG_DIR=/app/logs \
+    DATA_DIR=/app/data \
+    ALLOWED_ORIGINS=* \
+    CRONTAB_USER=root \
+    SSL_ENABLED=false \
+    SSL_SKIP_VERIFY=true \
+    TIMEZONE=UTC \
+    FIRE_ONCE=false
+
+# Copy VERSION file to the final image
+COPY --from=builder /build/VERSION /app/
+
+# Copy application source
+COPY ./setup.py .
+COPY ./entrypoint.sh .
+COPY ./healthcheck.py .
+COPY ./README.md .
+COPY ./gluesync_scheduler ./gluesync_scheduler
+COPY ./migrations ./migrations
+
+# Copy remaining app code
+COPY . .
+
+# Make scripts executable
+RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh
+
+EXPOSE 1717
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD ["python3", "/app/healthcheck.py", "--timeout", "8"]
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+CMD ["python3", "run_scheduler.py"]
