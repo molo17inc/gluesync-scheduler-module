@@ -18,6 +18,7 @@ MARKER="$DATA_PATH/.chronos-run-as"
 
 say() { echo "chronos: $*"; }
 warn() { echo "chronos: WARNING: $*" >&2; }
+err() { echo "chronos: ERROR: $*" >&2; }
 
 # Only auto-detect timezone if TIMEZONE isn't already set
 if [ -z "$TIMEZONE" ]; then
@@ -183,6 +184,27 @@ $path"
     return 1
 }
 
+# Started without root: nothing can be chowned, so only report a runtime directory the
+# current user cannot write (typically files written by container root of an older
+# image, now owned by a subuid on rootless Podman). The app still starts, so its own
+# error and restart behaviour stays as it was; the message says what to do.
+# Writability is probed with a real file, which also catches read-only mounts.
+report_unwritable_runtime_dirs() {
+    for dir in $(runtime_dirs); do
+        [ -d "$dir" ] || continue
+        probe="$dir/.chronos-write-test"
+        if touch "$probe" 2>/dev/null; then
+            rm -f "$probe" 2>/dev/null || true
+            continue
+        fi
+        set -- $(ls -ldn "$dir" 2>/dev/null)
+        owner="${3:-unknown}"
+        err "$dir is not writable by uid $(id -u) (owned by uid $owner); Chronos will fail to write there."
+        err "Fix: give uid $(id -u) ownership of the host directory mounted at $dir. On rootless Podman run, as the user that owns the volume: podman unshare chown -R 0:0 <host dir> (Gluesync Control does this automatically)."
+    done
+    return 0
+}
+
 write_marker() {
     if [ -f "$MARKER" ] && [ "$(head -n 1 "$MARKER" 2>/dev/null | tr -d '[:space:]')" = "$1" ]; then
         return 0
@@ -207,6 +229,7 @@ if [ "$(id -u)" != "0" ]; then
     if [ -n "${CHRONOS_RUN_AS:-}" ]; then
         say "CHRONOS_RUN_AS=$CHRONOS_RUN_AS ignored: only a root start can change user"
     fi
+    report_unwritable_runtime_dirs
 else
     mkdir -p "$DATA_PATH" "$LOG_PATH" 2>/dev/null || true
     case "${CHRONOS_RUN_AS:-}" in

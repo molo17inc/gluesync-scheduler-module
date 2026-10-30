@@ -45,6 +45,12 @@ echo "chown $*" >> "$STUB_CALLS"
 [ "${STUB_CHOWN_FAIL:-0}" = "1" ] && exit 1
 exit 0
 STUB
+    # touch fails for the directory named in STUB_UNWRITABLE (write probe of a non-root start)
+    cat > "$BIN/touch" <<'STUB'
+#!/bin/sh
+[ -n "${STUB_UNWRITABLE:-}" ] && [ "$(dirname "$1")" = "$STUB_UNWRITABLE" ] && exit 1
+exec /usr/bin/touch "$@"
+STUB
     cat > "$BIN/python3" <<'STUB'
 #!/bin/sh
 echo "python3 $1" >> "$STUB_CALLS"
@@ -86,7 +92,7 @@ run_entrypoint() {
     (
         unset CHRONOS_RUN_AS CRON_LOG_DIR GLUESYNC_LICENSE_FILE GLUESYNC_SECURITY_CONFIG \
               SSL_CERT_FILE SSL_KEY_FILE SSL_P12_PATH STUB_UID STUB_CHOWN_FAIL STUB_WRITABLE \
-              STUB_UNREADABLE
+              STUB_UNREADABLE STUB_UNWRITABLE
         export CHRONOS_APP_DIR="$APP" DATA_DIR="$DATA" LOG_DIR="$LOGS" \
                CHRONOS_SHARED_DIR="$WORK/shared" CHRONOS_LEGACY_DIR="$WORK/legacy" \
                TIMEZONE=UTC DB_URL="sqlite:///$DATA/scheduler.db" STUB_CALLS="$CALLS"
@@ -139,6 +145,33 @@ has "$OUT" "CHRONOS_RUN_AS=gluesync ignored"
 hasnt "$CALLS" "chown"
 hasnt "$CALLS" "su-exec"
 no_marker
+
+new_case "non-root start, writable dirs -> no error, no probe file left behind"
+run_entrypoint STUB_UID=1017
+started
+hasnt "$OUT" "not writable"
+if ls -A "$DATA" "$LOGS" | grep -q chronos-write-test; then bad "probe file left behind"; else ok; fi
+
+new_case "non-root start, unwritable data dir -> error names dir, owner and uid, app still starts"
+run_entrypoint STUB_UID=1017 STUB_UNWRITABLE="$DATA"
+started
+has "$OUT" "ERROR: $DATA is not writable by uid 1017 (owned by uid "
+has "$OUT" "podman unshare chown -R 0:0 <host dir>"
+hasnt "$OUT" "$LOGS is not writable"
+hasnt "$CALLS" "chown"
+no_marker
+
+new_case "non-root start, unwritable LOG_DIR -> reported, data dir not"
+mkdir -p "$WORK/cron"
+run_entrypoint STUB_UID=1017 CRON_LOG_DIR="$WORK/cron" STUB_UNWRITABLE="$LOGS"
+started
+has "$OUT" "ERROR: $LOGS is not writable by uid 1017"
+hasnt "$OUT" "$DATA is not writable"
+new_case "non-root start, unwritable CRON_LOG_DIR"
+mkdir -p "$WORK/cron"
+run_entrypoint STUB_UID=1017 CRON_LOG_DIR="$WORK/cron" STUB_UNWRITABLE="$WORK/cron"
+started
+has "$OUT" "ERROR: $WORK/cron is not writable by uid 1017"
 
 # ---- 2. explicit root ---------------------------------------------------------
 new_case "explicit root on empty data"

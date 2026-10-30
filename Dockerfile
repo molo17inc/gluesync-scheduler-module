@@ -174,7 +174,7 @@ EXPOSE 1717
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD ["python3", "/app/healthcheck.py", "--timeout", "8"]
 
-# The container starts as root (no USER here): entrypoint.sh picks the run-as user,
+# The container starts as root (USER root above): entrypoint.sh picks the run-as user,
 # see CHRONOS_RUN_AS in the README.
 # Set entrypoint to ensure cron service starts
 ENTRYPOINT ["/app/entrypoint.sh"]
