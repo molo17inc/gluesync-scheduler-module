@@ -89,7 +89,15 @@ WORKDIR /app
 # every build without moving the Python minor, which python-${PYTHON_VERSION} fixes.
 RUN sed -i 's/=.*//' /etc/apk/world \
     && apk upgrade --no-cache \
-    && apk add --no-cache python-${PYTHON_VERSION} bash openssl procps tzdata
+    && apk add --no-cache python-${PYTHON_VERSION} bash openssl procps tzdata su-exec
+
+# Runtime user for new installs. The image still starts as root: entrypoint.sh
+# decides whether the app runs as root (existing installs, whose /app/data and
+# /app/logs are root-owned) or drops to this user with su-exec (new installs).
+# UID/GID 1017 is the gluesync user of the Core Hub image, so files in the
+# volumes shared between the two containers have one owner.
+RUN addgroup -g 1017 gluesync \
+    && adduser -D -H -u 1017 -G gluesync -s /sbin/nologin gluesync
 
 # Bring in the prebuilt virtual environment from the builder stage
 COPY --from=builder /opt/venv /opt/venv
@@ -149,6 +157,13 @@ COPY . .
 # Make scripts executable
 RUN chmod +x /app/entrypoint.sh /app/docker-entrypoint.sh /app/migrations/run_migrations.sh
 
+# Application files stay root-owned: readable (and the scripts executable) for the
+# gluesync user, writable by nobody. Only the two runtime directories belong to it,
+# so an empty named volume or a keep-id start can write there out of the box.
+RUN chmod -R a+rX,go-w /app \
+    && chown 1017:1017 /app/data /app/logs \
+    && chmod 750 /app/data /app/logs
+
 # Expose the port the app runs on
 EXPOSE 1717
 
@@ -159,6 +174,8 @@ EXPOSE 1717
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD ["python3", "/app/healthcheck.py", "--timeout", "8"]
 
+# The container starts as root (USER root above): entrypoint.sh picks the run-as user,
+# see CHRONOS_RUN_AS in the README.
 # Set entrypoint to ensure cron service starts
 ENTRYPOINT ["/app/entrypoint.sh"]
 
