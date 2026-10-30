@@ -24,6 +24,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status, Query, Path, Request, Depends, Body
 from pydantic import BaseModel
+import ipaddress
 import logging
 from sqlalchemy.orm import Session
 
@@ -117,6 +118,32 @@ def _parse_query_studio_body(body: Optional[dict]):
         )
     return agent_id, query_sql, saved_query_id, query_read_only
 
+_PRIVATE_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', 'fc00::/7')
+)
+
+
+def is_private_network_host(client_host: Optional[str]) -> bool:
+    """
+    True when the caller is the local machine or sits on a private network
+    (loopback, RFC1918, link-local, IPv6 unique-local), which covers the Docker
+    and Podman bridge networks. IPv4-mapped IPv6 addresses are judged as IPv4.
+    Anything that does not parse as an IP address is rejected.
+    """
+    if not client_host:
+        return False
+    if client_host == 'localhost':
+        return True
+    try:
+        address = ipaddress.ip_address(client_host.split('%', 1)[0])
+    except ValueError:
+        return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return address.is_loopback or address.is_link_local or any(address in network for network in _PRIVATE_NETWORKS)
+
+
 # Security dependency to ensure requests only come from localhost
 async def verify_localhost(request: Request):
     """
@@ -130,18 +157,15 @@ async def verify_localhost(request: Request):
     Raises:
         HTTPException: If the request is not from localhost
     """
-    client_host = request.client.host
-    
-    # Check if the request is coming from localhost
-    if client_host not in ['localhost', '127.0.0.1', '::1']:
-        # Check if we're running in Docker where the request might come from the Docker network
-        if not (client_host.startswith('172.') or client_host.startswith('192.168.')):
-            logger.warning(f"Unauthorized access attempt from {client_host}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="This endpoint can only be accessed from localhost"
-            )
-    
+    client_host = request.client.host if request.client else None
+
+    if not is_private_network_host(client_host):
+        logger.warning(f"Unauthorized access attempt from {client_host}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint can only be accessed from localhost"
+        )
+
     # Extract cron_job_identifier from headers or query parameters if present
     cron_job_identifier = request.headers.get('X-Cron-Job-Identifier')
     if not cron_job_identifier:

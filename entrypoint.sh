@@ -33,12 +33,12 @@ echo "Detected TIMEZONE: $TIMEZONE"
 # Make sure run_job.sh and run_scheduler.py are executable
 if [ -f "/app/run_job.sh" ]; then
     echo "Making run_job.sh executable"
-    chmod +x /app/run_job.sh
+    chmod +x /app/run_job.sh || true
 fi
 
 if [ -f "/app/run_scheduler.py" ]; then
     echo "Making run_scheduler.py executable"
-    chmod +x /app/run_scheduler.py
+    chmod +x /app/run_scheduler.py || true
 fi
 
 # Package is preinstalled from a wheel during image build; skip runtime installation
