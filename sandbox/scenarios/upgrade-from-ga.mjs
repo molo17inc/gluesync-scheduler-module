@@ -35,14 +35,35 @@ const resolveGaVersion = async () => {
   return version;
 };
 
+// First release that writes next_run as UTC and the next_run_stored_utc marker itself (GSSD-1457).
+const FIRST_UTC_RELEASE = [0, 3, 2];
+
+const olderThanFirstUtcRelease = version => {
+  const parts = String(version).replace(/^v/, '').split(/[.-]/).slice(0, 3).map(n => Number.parseInt(n, 10));
+  if (parts.some(Number.isNaN)) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (parts[i] !== FIRST_UTC_RELEASE[i]) return parts[i] < FIRST_UTC_RELEASE[i];
+  }
+  return false;
+};
+
+// The line the build under test must log for the database of `version`: a release from before the fix
+// leaves wall-clock values and no marker, so they are converted; a later one wrote the marker itself.
+const expectedMigrationLine = version =>
+  olderThanFirstUtcRelease(version)
+    ? { re: /Converted next_run to UTC on \d+ existing jobs/, text: 'Converted next_run to UTC on <n> existing jobs' }
+    : { re: /next_run already stored as UTC, skipping/, text: 'next_run already stored as UTC, skipping' };
+
 // The API serialises next_run as an ISO string; one without an offset is UTC, as every reader treats it.
 const instant = s => at(/(Z|[+-]\d\d:?\d\d)$/.test(s) ? s : `${s}Z`);
 
-export default {
-  name: 'upgrade-from-ga',
-  description: 'GSSD-1457 upgrade: a database written by the published GA image is opened by the build under test; next_run converted to UTC, runs missed during the upgrade replayed',
+// One upgrade scenario per source release: `resolveVersion` names the image whose database the build
+// under test opens.
+export const upgradeScenario = ({ name, description, resolveVersion }) => ({
+  name,
+  description,
   async run(ctx) {
-    const version = await resolveGaVersion();
+    const version = await resolveVersion();
     const gaImage = await ensureChronosOverlay(version);
     ctx.note(`upgrading from GA ${version} (${gaImage}) to ${env.imageSpec}`);
 
@@ -79,9 +100,8 @@ export default {
     const runsE = commandTimes(calls, 'auto-upgrade-e', 'maintenance/exit');
     const after = await nextRuns();
     const logs = await containerLogs(inst.name);
-    // A GA that already carries the migration (0.3.2 and later) wrote the marker itself: the build under test
-    // then logs that it skips. Either line means next_run_stored_utc is in place after the upgrade.
-    const migrationLogged = logs.split('\n').find(l => /Converted next_run to UTC on \d+ existing jobs|next_run already stored as UTC, skipping/.test(l));
+    const expected = expectedMigrationLine(version);
+    const migrationLogged = logs.split('\n').find(l => expected.re.test(l));
     const evidence = {
       gaVersion: version,
       gaNextRun: gaNext,
@@ -102,7 +122,13 @@ export default {
     ctx.check('the missed 12:35Z exit-maintenance of E is executed exactly once after the upgrade', runsE.length === 1, `E runs after the upgrade: ${runsE.map(iso).join(', ') || 'none'}`, { finding, evidence });
     ctx.check('C keeps the instant the GA scheduler runs it (2026-06-10T16:00:00Z, not 18:00Z)', iso(instant(after.C)) === '2026-06-10T16:00:00.000Z', `API next_run ${after.C}`, { finding, evidence });
     ctx.check('B is rescheduled for 2026-06-11T12:30:00Z', iso(instant(after.B)) === '2026-06-11T12:30:00.000Z', `API next_run ${after.B}`, { finding, evidence });
-    ctx.check('the next_run migration ran (marker next_run_stored_utc)', !!migrationLogged, migrationLogged || 'neither "Converted next_run to UTC" nor "next_run already stored as UTC" in the container log', { finding, evidence });
+    ctx.check(`the next_run migration ran (marker next_run_stored_utc) as expected after ${version}`, !!migrationLogged, migrationLogged || `no "${expected.text}" line in the container log`, { finding, evidence });
     ctx.save('summary.json', evidence);
   },
-};
+});
+
+export default upgradeScenario({
+  name: 'upgrade-from-ga',
+  description: 'GSSD-1457 upgrade from the published GA image: its database is opened by the build under test; next_run is converted to UTC when the GA predates the fix (else the marker is already there), runs missed during the upgrade replayed',
+  resolveVersion: resolveGaVersion,
+});
