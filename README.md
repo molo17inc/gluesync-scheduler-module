@@ -842,6 +842,18 @@ and waits for the next one.
 | `CHRONOS_HEALTH_CHECK_INTERVAL_SECONDS` | `300`   | Seconds between health check calls (5 minutes by default). |
 | `CHRONOS_HEALTH_CHECK_TIMEOUT_SECONDS`  | `10`    | HTTP timeout for each `GET /authentication/me` call.       |
 
+## Disaster recovery
+
+When Core Hub runs as a disaster-recovery pair (active and standby site), Core Hub on the active site replicates Chronos's SQLite database (`<DATA_DIR>/scheduler.db`) and, on promotion, installs the replicated copy into Chronos's data directory. Chronos therefore keeps its database open only while its own Core Hub is the serving active node. The guard is opt-in: without `GS_DR_CONTROL_URL` Chronos behaves as usual.
+
+| Variable            | Description                                                                                                                       | Default |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `GS_DR_CONTROL_URL` | Base URL (http or https, certificates are not verified) of the Core Hub control port, for example `http://<core-hub-host>:<control-port>`. Chronos polls `GET {GS_DR_CONTROL_URL}/health`. | unset   |
+
+- **Startup gate**: before anything opens, creates or migrates the database (the migrations in `entrypoint.sh`, the server, the job runner), Chronos waits until `/health` reports `"serving": true` (older Core Hubs without that field: `"role": "ACTIVE"`), polling every second. An unreachable Core Hub counts as not serving. A cron-launched `job_runner` does not wait: it exits with code 75 without opening the database.
+- **Heartbeat**: while Chronos holds the database it touches `<DATA_DIR>/.dr-chronos-heartbeat` every second and deletes it on an orderly stop. Core Hub treats the database as held while the file is younger than 5 seconds.
+- **Runtime watch**: when Core Hub is not serving (or unreachable) on two consecutive polls, Chronos removes the heartbeat file and exits immediately with code 75, so that the standby can take over the database. The container restart policy (`unless-stopped`) restarts it and the startup gate holds it until its Core Hub serves again.
+
 ## Testing
 
 The module includes comprehensive tests to ensure functionality and reliability. Tests are organized into three categories:

@@ -28,3 +28,6 @@ services:
       - GLUESYNC_SECURITY_CONFIG=/opt/gluesync/data/security-config.json
       - TIMEZONE=UTC
       - FIRE_ONCE=False
+      # Disaster recovery (Core Hub active/standby pair): open the database only while Core Hub
+      # is the serving active node. Control port URL of the Core Hub that owns this Chronos.
+      # - GS_DR_CONTROL_URL=http://<core-hub-host>:<control-port>

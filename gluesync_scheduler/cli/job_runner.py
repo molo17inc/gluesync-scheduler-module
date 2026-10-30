@@ -36,6 +36,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 # Ensure DATA_DIR is set correctly for Docker environment
 os.environ['DATA_DIR'] = '/app/data'
 
+# Disaster recovery (opt-in via GS_DR_CONTROL_URL): this process opens the database, so it
+# exits right away, without opening it, when Core Hub is not the serving active node.
+# Already active (a no-op) when imported by the Chronos server process.
+from gluesync_scheduler import dr_guard
+dr_guard.activate(wait=False)
+
 from gluesync_scheduler.db.database import get_db, engine, Base
 from gluesync_scheduler.models.models import ScheduledJob, TaskType
 # Removed settings import as it's deprecated

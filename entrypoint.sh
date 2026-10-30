@@ -44,9 +44,16 @@ fi
 # Package is preinstalled from a wheel during image build; skip runtime installation
 echo "Package already installed from prebuilt wheel; skipping installation."
 
+# Disaster recovery (opt-in): with GS_DR_CONTROL_URL set, the database below is only touched
+# while Core Hub is the serving active node. Each python step that opens the database waits
+# for that (gluesync_scheduler.dr_guard) and keeps the heartbeat file fresh while it runs.
+if [ -n "$GS_DR_CONTROL_URL" ]; then
+    echo "Disaster recovery guard enabled (GS_DR_CONTROL_URL=$GS_DR_CONTROL_URL)"
+fi
+
 # Initialize the database if it doesn't exist
 echo "Checking database initialization..."
-DATA_DIR=/app/data DB_URL=sqlite:////${DATA_DIR}/scheduler.db python3 -c "from gluesync_scheduler.db.database import engine; from gluesync_scheduler.models.models import Base; Base.metadata.create_all(bind=engine)" || {
+DATA_DIR=/app/data DB_URL=sqlite:////${DATA_DIR}/scheduler.db python3 -c "from gluesync_scheduler import dr_guard; dr_guard.activate(); from gluesync_scheduler.db.database import engine; from gluesync_scheduler.models.models import Base; Base.metadata.create_all(bind=engine)" || {
     echo "Error initializing database schema"
     exit 1
 }
