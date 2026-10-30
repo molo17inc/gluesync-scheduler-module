@@ -27,6 +27,13 @@ from pathlib import Path
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+from gluesync_scheduler import dr_guard
+
+# Disaster recovery (opt-in via GS_DR_CONTROL_URL): whoever imports this module is about
+# to open the database, so hold here until Core Hub is the serving active node. A no-op
+# when the guard is off, and when the process already passed the gate.
+dr_guard.activate()
+
 def ensure_sqlite_db_path(db_url):
     """Ensure the SQLite database directory exists and return the path."""
     if not db_url.startswith('sqlite:'):
