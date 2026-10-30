@@ -77,9 +77,10 @@ Scenarios that need their own Chronos (clock, time zone, restarts) start contain
 | `dst-fallback-patterns` | matrix: 7 cron patterns x scheduler TZ (Europe/Rome, UTC) x job timezone (Europe/Rome, unset), one container per cell | 20-30 min |
 | `dst-springforward` | 2026-03-29 with `30 2 * * *` and an every-minute job | 6 min |
 | `restart-catchup` | a daily job misses its fire time while Chronos is down | 3 min |
-| `upgrade-from-ga` | GSSD-1457 upgrade: a database written by the published GA image is opened by the build under test; `next_run` converted to UTC, runs missed during the upgrade replayed | 3 min |
+| `upgrade-from-ga` | GSSD-1457 upgrade from the published GA image: `next_run` converted when the GA predates the fix, else the marker is already there; runs missed during the upgrade replayed | 3 min |
+| `upgrade-from-pre-utc` | GSSD-1457 conversion: upgrade from 0.3.1, the last release that stored `next_run` as wall clock; the rows are converted and the missed runs replayed | 3 min |
 
-`upgrade-from-ga` is the upgrade path of GSSD-1457. It starts the published GA image (`SANDBOX_UPGRADE_FROM=<tag>`, else `latestVersionGA` of `https://api.backoffice.molo17.com/agent/chronos/version`; it fails with a message when neither resolves) with libfaketime added (`ensureChronosOverlay` in `lib/stack.mjs`, overlay `chronos-sandbox/chronos:ga-<tag>`; with `SANDBOX_IMAGE_MIRROR` the base comes from `<mirror>/gluesync-chronos:<tag>`), creates a job due at 14:30, one exit-maintenance due at 14:35 and one at 18:00 (Europe/Rome, in June), stops it before 14:25Z and starts the build under test on the same data volume at 14:50 Rome. It checks that both missed runs execute exactly once, that the stored `next_run` values were converted (the 18:00 job is still due at 16:00Z) and that the migration logged. The GA API shows the stored wall clock as if it were UTC (`16:30+02:00` for the 14:30 job), so its `next_run` is not compared. Run with `--image molo17/gluesync-chronos:0.1.67` (pre-fix) the catch-up, `next_run` and migration checks fail.
+`upgrade-from-ga` is the upgrade path of GSSD-1457. It starts the published GA image (`SANDBOX_UPGRADE_FROM=<tag>`, else `latestVersionGA` of `https://api.backoffice.molo17.com/agent/chronos/version`; it fails with a message when neither resolves) with libfaketime added (`ensureChronosOverlay` in `lib/stack.mjs`, overlay `chronos-sandbox/chronos:ga-<tag>`; with `SANDBOX_IMAGE_MIRROR` the base comes from `<mirror>/gluesync-chronos:<tag>`), creates a job due at 14:30, one exit-maintenance due at 14:35 and one at 18:00 (Europe/Rome, in June), stops it before 14:25Z and starts the build under test on the same data volume at 14:50 Rome. It checks that both missed runs execute exactly once, that the stored `next_run` values were converted (the 18:00 job is still due at 16:00Z) and that the migration logged the line expected for that release: `Converted next_run to UTC` when it is older than 0.3.2, `next_run already stored as UTC, skipping` from 0.3.2 on (those releases write the marker themselves). Since every GA from 0.3.2 on skips the conversion, `upgrade-from-pre-utc` runs the same steps from 0.3.1 (`SANDBOX_UPGRADE_FROM_PRE_UTC=<tag>` to change it), so the conversion stays covered. The GA API shows the stored wall clock as if it were UTC (`16:30+02:00` for the 14:30 job), so its `next_run` is not compared. Run with `--image molo17/gluesync-chronos:0.1.67` (pre-fix) the catch-up, `next_run` and migration checks fail.
 
 `jobs-crud` to `corehub-slow` assert against the repo build. Older images differ (0.2.2 lacks `fromScratch=true` on snapshots, GSSD-1346, and the five newest task types), and those differences show up as failed checks.
 
@@ -170,7 +171,7 @@ Two jobs in `.gitlab-ci.yml`, on merge request pipelines only (never manual), on
 | Shard | Scenarios | Real time |
 |---|---|---|
 | 1 | `jobs-crud task-types chains triggers webhooks internal-api settings query-studio ai-agent core-hub-tasks maintenance corehub-faults` | ~15 min |
-| 2 | `corehub-outage corehub-slow restart-catchup upgrade-from-ga` | ~10 min |
+| 2 | `corehub-outage corehub-slow restart-catchup upgrade-from-ga upgrade-from-pre-utc` | ~13 min |
 | 3 | `dst-fallback-freeze dst-fallback-customer dst-springforward` | ~28 min |
 | 4 | `dst-fallback-patterns --concurrency 6` | 30-35 min |
 

@@ -42,8 +42,8 @@ IMAGE_ARCHIVE="$ROOT/sandbox/image/chronos-sandbox-image.tar.gz"
 # is killed with a message; the job's own timeout is 60 minutes.
 SHARD_1="jobs-crud task-types chains triggers webhooks internal-api settings query-studio ai-agent core-hub-tasks maintenance corehub-faults"
 SHARD_1_BUDGET=1500   # ~3 min measured, the rest is room for a slow runner
-SHARD_2="corehub-outage corehub-slow restart-catchup upgrade-from-ga"
-SHARD_2_BUDGET=1500   # ~10 min (upgrade-from-ga: ~3 min, plus pulling and overlaying the GA image)
+SHARD_2="corehub-outage corehub-slow restart-catchup upgrade-from-ga upgrade-from-pre-utc"
+SHARD_2_BUDGET=1500   # ~13 min (upgrade-from-ga and upgrade-from-pre-utc: ~3 min each, plus pulling and overlaying their images)
 SHARD_3="dst-fallback-freeze dst-fallback-customer dst-springforward"
 SHARD_3_BUDGET=2100   # ~28 min
 SHARD_4="dst-fallback-patterns"
