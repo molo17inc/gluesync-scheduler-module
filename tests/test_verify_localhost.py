@@ -53,6 +53,7 @@ def test_private_network_hosts_are_allowed(host):
 @pytest.mark.parametrize("host", DENIED)
 def test_other_hosts_get_403(host):
     assert is_private_network_host(host) is False
+    check = verify_localhost(_request(host))
     with pytest.raises(HTTPException) as error:
-        asyncio.run(verify_localhost(_request(host)))
+        asyncio.run(check)
     assert error.value.status_code == 403

@@ -118,17 +118,12 @@ def _parse_query_studio_body(body: Optional[dict]):
         )
     return agent_id, query_sql, saved_query_id, query_read_only
 
-_PRIVATE_NETWORKS = tuple(
-    ipaddress.ip_network(network)
-    for network in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', 'fc00::/7')
-)
-
-
 def is_private_network_host(client_host: Optional[str]) -> bool:
     """
     True when the caller is the local machine or sits on a private network
-    (loopback, RFC1918, link-local, IPv6 unique-local), which covers the Docker
-    and Podman bridge networks. IPv4-mapped IPv6 addresses are judged as IPv4.
+    (loopback, RFC1918, link-local, IPv6 unique-local and the other
+    non-routable ranges of ipaddress' is_private), which covers the Docker and
+    Podman bridge networks. IPv4-mapped IPv6 addresses are judged as IPv4.
     Anything that does not parse as an IP address is rejected.
     """
     if not client_host:
@@ -141,7 +136,7 @@ def is_private_network_host(client_host: Optional[str]) -> bool:
         return False
     if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
         address = address.ipv4_mapped
-    return address.is_loopback or address.is_link_local or any(address in network for network in _PRIVATE_NETWORKS)
+    return address.is_private
 
 
 # Security dependency to ensure requests only come from localhost
