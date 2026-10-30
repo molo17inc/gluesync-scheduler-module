@@ -79,7 +79,9 @@ export default {
     const runsE = commandTimes(calls, 'auto-upgrade-e', 'maintenance/exit');
     const after = await nextRuns();
     const logs = await containerLogs(inst.name);
-    const migrationLogged = logs.split('\n').find(l => /Converted next_run to UTC on \d+ existing jobs/.test(l));
+    // A GA that already carries the migration (0.3.2 and later) wrote the marker itself: the build under test
+    // then logs that it skips. Either line means next_run_stored_utc is in place after the upgrade.
+    const migrationLogged = logs.split('\n').find(l => /Converted next_run to UTC on \d+ existing jobs|next_run already stored as UTC, skipping/.test(l));
     const evidence = {
       gaVersion: version,
       gaNextRun: gaNext,
@@ -100,7 +102,7 @@ export default {
     ctx.check('the missed 12:35Z exit-maintenance of E is executed exactly once after the upgrade', runsE.length === 1, `E runs after the upgrade: ${runsE.map(iso).join(', ') || 'none'}`, { finding, evidence });
     ctx.check('C keeps the instant the GA scheduler runs it (2026-06-10T16:00:00Z, not 18:00Z)', iso(instant(after.C)) === '2026-06-10T16:00:00.000Z', `API next_run ${after.C}`, { finding, evidence });
     ctx.check('B is rescheduled for 2026-06-11T12:30:00Z', iso(instant(after.B)) === '2026-06-11T12:30:00.000Z', `API next_run ${after.B}`, { finding, evidence });
-    ctx.check('the next_run migration ran (marker next_run_stored_utc)', !!migrationLogged, migrationLogged || 'no "Converted next_run to UTC" line in the container log', { finding, evidence });
+    ctx.check('the next_run migration ran (marker next_run_stored_utc)', !!migrationLogged, migrationLogged || 'neither "Converted next_run to UTC" nor "next_run already stored as UTC" in the container log', { finding, evidence });
     ctx.save('summary.json', evidence);
   },
 };
