@@ -59,8 +59,9 @@ class Setting(Base):
     key = Column(String, nullable=False, unique=True, index=True)
     value = Column(String, nullable=True)
     description = Column(String, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # server_default: the current Setting model inserts without these columns and relies on the database default
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
 
 
 def create_settings_table(engine):
