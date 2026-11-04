@@ -164,8 +164,24 @@ Configure the application using environment variables:
 | `CHRONOS_HEALTH_CHECK_ENABLED`          | Whether the periodic CoreHub connection health check is enabled. See [Connection health check](#connection-health-check).                                                                            | `true`                     |
 | `CHRONOS_HEALTH_CHECK_INTERVAL_SECONDS` | Seconds between CoreHub health check calls (`GET /authentication/me`). See [Connection health check](#connection-health-check).                                                                      | `300`                      |
 | `CHRONOS_HEALTH_CHECK_TIMEOUT_SECONDS`  | HTTP timeout in seconds for each health check call.                                                                                                                                                  | `10`                       |
+| `CHRONOS_RUN_AS`                        | Container user: `root` or `gluesync` (uid/gid 1017). Unset = automatic, see [Container user](#container-user). Not read by the app, only by `entrypoint.sh`. | automatic |
 | `TZ`                                    | Preferred timezone environment variable for job scheduling. If set, it takes precedence over `TIMEZONE`.                                                                                             | `UTC`                      |
 | `TIMEZONE`                              | Deprecated timezone environment variable for job scheduling. Used only as fallback when `TZ` is not set.                                                                                             | `UTC`                      |
+
+### Container user
+
+The image starts as root and `entrypoint.sh` decides who runs Chronos. New installs run as `gluesync` (uid/gid 1017, the same user as the Core Hub image, so the files of volumes shared between the two have one owner). Existing installs keep running as root, because their data directory (the `./data/chronos` bind mount) and logs are root-owned and Chronos could not write to them after a privilege drop.
+
+Decision order:
+
+1. Not started as root (Podman rootless with `userns_mode: keep-id:uid=1017,gid=1017`, Kubernetes `runAsUser`, `docker run --user`): Chronos runs as that user and nothing is chowned.
+2. `CHRONOS_RUN_AS=root` or `CHRONOS_RUN_AS=gluesync`. `gluesync` migrates a root install: it chowns the data and log directories to 1017 and drops privileges. Any other value is ignored with a warning.
+3. The marker file `/app/data/.chronos-run-as` (`root` or `gluesync`), written by an earlier start. For `gluesync`, entries that are not owned by 1017 yet are chowned again at each start.
+4. No marker: a data directory with any content (besides `lost+found`) is an existing install and runs as root; an empty one is a new install and runs as `gluesync`. The decision is written to the marker, so a restart never changes it.
+
+The start never fails because of this. A failed chown or a read-only data volume only logs a warning, and when uid 1017 would not be able to write the data and log directories, or cannot read a file of `/opt/gluesync/shared` (license, security config, certificate; for example a root-owned `0600` key placed before Core Hub's first chown), Chronos runs as root for that start and says so. The marker is kept, so the next start drops to 1017 once the problem is gone. With `CHRONOS_RUN_AS=gluesync` an unreadable shared file is only a warning.
+
+Chronos writes only to `DATA_DIR` (SQLite files), `LOG_DIR`/`CRON_LOG_DIR` (logs) and `/tmp`; everything else in the image is read-only for uid 1017. To go back to root, set `CHRONOS_RUN_AS=root` (the marker is updated).
 
 ### Gluesync SDK Configuration
 
@@ -896,7 +912,7 @@ To run tests in a Docker environment that simulates the CI environment:
 
 The module uses GitLab CI/CD for continuous integration and deployment. The pipeline includes:
 
-- **Test Stage**: Runs all tests with coverage reporting
+- **Test Stage**: Runs the entrypoint run-as tests (`sh tests/entrypoint/test-run-as.sh`, no container needed) and all tests with coverage reporting
 - **Deploy Stage**: Builds and deploys the Docker image (only on tags)
 
 See [CI_SETUP.md](CI_SETUP.md) for details on setting up the GitLab CI/CD variables.
