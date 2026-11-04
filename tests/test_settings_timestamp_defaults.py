@@ -16,7 +16,7 @@ import sys
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -214,7 +214,7 @@ def test_a_failed_rebuild_rolls_back_and_keeps_the_original_table(legacy_engine)
         conn.execute("DROP INDEX ix_settings_id")
         conn.execute("CREATE TABLE ix_settings_id (x INTEGER)")
 
-    with pytest.raises(Exception):
+    with pytest.raises(OperationalError, match="ix_settings_id"):
         add_settings_timestamp_defaults(legacy_engine)
 
     assert _defaults(legacy_engine) == {"created_at": None, "updated_at": None}
@@ -239,5 +239,6 @@ def test_startup_on_the_legacy_schema_allows_creating_a_setting(legacy_engine, m
     assert [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR] == []
     assert _defaults(legacy_engine) == {"created_at": "CURRENT_TIMESTAMP", "updated_at": "CURRENT_TIMESTAMP"}
     created_at, updated_at = _insert_setting(legacy_engine)
-    assert created_at is not None and updated_at is not None
+    assert created_at is not None
+    assert updated_at is not None
     assert _raw(legacy_engine, "SELECT id FROM settings WHERE id IN (1, 7, 9) ORDER BY id") == [(1,), (7,), (9,)]
