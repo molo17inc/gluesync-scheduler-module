@@ -197,3 +197,85 @@ def test_runs_as_a_script_and_exit_code_follows_the_answer(stub_server):
     failed = run(_port(down))
     assert failed.returncode == 1
     assert "HTTP 503" in failed.stderr
+
+
+@pytest.fixture
+def standby_env(monkeypatch, tmp_path):
+    """Nothing listens (a standby Chronos in the DR gate); DATA_DIR is a temp directory."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        free_port = sock.getsockname()[1]
+    monkeypatch.setenv("HOST", "127.0.0.1")
+    monkeypatch.setenv("PORT", str(free_port))
+    monkeypatch.setenv("SSL_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("GS_DR_CONTROL_URL", "https://corehub:1719")
+    return tmp_path / healthcheck.STANDBY_FILE_NAME
+
+
+def _age(marker, seconds):
+    old = time.time() - seconds
+    os.utime(marker, (old, old))
+
+
+def test_standby_waiting_with_a_fresh_marker_exits_0(standby_env, capsys):
+    standby_env.write_text("1")
+
+    assert healthcheck.main(["--timeout", "2"]) == 0
+    assert "standby: waiting for Core Hub to serve" in capsys.readouterr().err
+
+
+def test_standby_marker_just_under_the_limit_exits_0(standby_env):
+    standby_env.write_text("1")
+    _age(standby_env, 10)
+
+    assert healthcheck.main(["--timeout", "2"]) == 0
+
+
+def test_standby_with_a_stale_marker_exits_1(standby_env):
+    standby_env.write_text("1")
+    _age(standby_env, 60)
+
+    assert healthcheck.main(["--timeout", "2"]) == 1
+
+
+def test_standby_without_a_marker_exits_1(standby_env):
+    assert healthcheck.main(["--timeout", "2"]) == 1
+
+
+def test_fresh_marker_without_dr_control_url_exits_1(standby_env, monkeypatch):
+    standby_env.write_text("1")
+    monkeypatch.delenv("GS_DR_CONTROL_URL")
+
+    assert healthcheck.main(["--timeout", "2"]) == 1
+
+
+def test_fresh_marker_with_blank_dr_control_url_exits_1(standby_env, monkeypatch):
+    standby_env.write_text("1")
+    monkeypatch.setenv("GS_DR_CONTROL_URL", "  ")
+
+    assert healthcheck.main(["--timeout", "2"]) == 1
+
+
+def test_data_dir_defaults_to_the_image_data_dir(standby_env, monkeypatch):
+    monkeypatch.delenv("DATA_DIR")
+    seen = []
+
+    def missing(path):
+        seen.append(path)
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(healthcheck.os, "stat", missing)
+
+    assert healthcheck.main(["--timeout", "2"]) == 1
+    assert seen == [os.path.join("/app/data", healthcheck.STANDBY_FILE_NAME)]
+
+
+def test_working_server_does_not_need_the_marker(stub_server, probe_env, monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("GS_DR_CONTROL_URL", "https://corehub:1719")
+    server = stub_server(status=200)
+    probe_env(_port(server), "false")
+
+    assert healthcheck.main(["--timeout", "3"]) == 0
+    assert not (tmp_path / healthcheck.STANDBY_FILE_NAME).exists()

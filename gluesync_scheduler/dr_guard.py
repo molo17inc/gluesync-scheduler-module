@@ -44,6 +44,11 @@ no-op and Chronos behaves exactly as before.
   immediately with exit code 75. The abrupt exit is intended: an uncommitted SQLite
   transaction is rolled back, and the restart policy brings Chronos back into the
   startup gate.
+* Standby marker: while the startup gate is closed ``<DATA_DIR>/.dr-chronos-standby``
+  is touched on every poll and removed once the gate opens (or the guard stops). A
+  standby Chronos has no HTTP server listening yet, so the container healthcheck
+  (``healthcheck.py`` / ``healthcheck.ps1``) treats a fresh marker as "waiting, not
+  broken" instead of letting the orchestrator restart it in a loop.
 
 Needs only ``requests`` (already a Chronos dependency), so the shell entrypoint can use
 it before anything else. The certificate of the control port is verified unless
@@ -66,6 +71,7 @@ logger = logging.getLogger(__name__)
 
 ENV_CONTROL_URL = "GS_DR_CONTROL_URL"
 HEARTBEAT_FILE_NAME = ".dr-chronos-heartbeat"
+STANDBY_FILE_NAME = ".dr-chronos-standby"
 POLL_INTERVAL_SECONDS = 1.0
 HEARTBEAT_INTERVAL_SECONDS = 1.0
 REQUEST_TIMEOUT_SECONDS = 2.0
@@ -93,6 +99,33 @@ def is_enabled() -> bool:
 
 def heartbeat_path() -> str:
     return os.path.join(os.getenv("DATA_DIR", "./data"), HEARTBEAT_FILE_NAME)
+
+
+def standby_path() -> str:
+    """The marker touched while the startup gate is closed (see the module docstring)."""
+    return os.path.join(os.getenv("DATA_DIR", "./data"), STANDBY_FILE_NAME)
+
+
+def _touch_standby() -> None:
+    """Refresh the standby marker; the healthcheck reads its mtime. Never raises."""
+    path = standby_path()
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w") as standby_file:
+            standby_file.write(str(int(time.time() * 1000)))
+    except OSError as e:
+        _say(logging.WARNING, f"Could not write the disaster-recovery standby marker {path}: {e}")
+
+
+def _clear_standby() -> None:
+    """Remove the standby marker (the gate opened or the guard stopped). Never raises."""
+    path = standby_path()
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        _say(logging.WARNING, f"Could not remove the disaster-recovery standby marker {path}: {e}")
 
 
 def _verify_certificate() -> bool:
@@ -148,23 +181,28 @@ def check_core_hub(url: Optional[str] = None) -> CoreHubState:
 def wait_until_serving(poll_interval: float = POLL_INTERVAL_SECONDS, sleep=None) -> Optional[CoreHubState]:
     """Block until Core Hub is the serving active node, polling every second.
 
-    Logs once per state change. Returns the serving state, or None when the guard is
-    not enabled (nothing is waited for).
+    Logs once per state change. While waiting, the standby marker is touched on every
+    poll and it is removed when the gate opens. Returns the serving state, or None when
+    the guard is not enabled (nothing is waited for).
     """
     if not is_enabled():
         return None
     sleep = sleep or time.sleep
     last_role = object()  # role None means unreachable; the reason text may vary between polls
-    while True:
-        state = check_core_hub()
-        if state.serving:
-            _say(logging.INFO, f"Core Hub is the serving active disaster-recovery node ({state.description})")
-            return state
-        if state.role != last_role:
-            _say(logging.INFO, "Waiting for Core Hub to be the serving active disaster-recovery node "
-                               f"({state.description})")
-            last_role = state.role
-        sleep(poll_interval)
+    try:
+        while True:
+            state = check_core_hub()
+            if state.serving:
+                _say(logging.INFO, f"Core Hub is the serving active disaster-recovery node ({state.description})")
+                return state
+            _touch_standby()
+            if state.role != last_role:
+                _say(logging.INFO, "Waiting for Core Hub to be the serving active disaster-recovery node "
+                                   f"({state.description})")
+                last_role = state.role
+            sleep(poll_interval)
+    finally:
+        _clear_standby()
 
 
 class _Heartbeat(threading.Thread):
@@ -276,7 +314,7 @@ def activate(wait: bool = True) -> bool:
 
 
 def deactivate() -> None:
-    """Orderly stop: end the watch and the heartbeat and delete the heartbeat file."""
+    """Orderly stop: end the watch and the heartbeat and delete the heartbeat and standby files."""
     global _heartbeat, _watcher
     with _lock:
         watcher, heartbeat = _watcher, _heartbeat
@@ -285,6 +323,7 @@ def deactivate() -> None:
         watcher.stop()
     if heartbeat is not None:
         heartbeat.stop()
+    _clear_standby()
 
 
 def main() -> int:

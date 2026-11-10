@@ -257,6 +257,65 @@ class TestGate:
         assert dr_guard.main() == 0
 
 
+class TestStandbyMarker:
+    def test_written_on_every_poll_while_waiting_and_removed_when_the_gate_opens(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(dr_guard.ENV_CONTROL_URL, "http://corehub:9999")
+        _scripted(monkeypatch, [UNREACHABLE, STANDBY, STANDBY, SERVING])
+        marker = tmp_path / dr_guard.STANDBY_FILE_NAME
+        seen = []
+
+        assert dr_guard.wait_until_serving(sleep=lambda seconds: seen.append(marker.exists())).serving is True
+        assert seen == [True, True, True]  # present at every wait
+        assert not marker.exists()
+
+    def test_refreshed_on_each_poll(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(dr_guard.ENV_CONTROL_URL, "http://corehub:9999")
+        _scripted(monkeypatch, [STANDBY, STANDBY, SERVING])
+        marker = tmp_path / dr_guard.STANDBY_FILE_NAME
+        mtimes = []
+
+        def sleep(seconds):
+            mtimes.append(marker.stat().st_mtime)
+            os.utime(marker, (1, 1))  # age it: the next poll has to touch it again
+
+        dr_guard.wait_until_serving(sleep=sleep)
+        assert mtimes[0] > 1
+        assert mtimes[1] > 1  # it was rewritten after being aged
+        assert not marker.exists()
+
+    def test_not_written_when_already_serving(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(dr_guard.ENV_CONTROL_URL, "http://corehub:9999")
+        _scripted(monkeypatch, [SERVING])
+        dr_guard.wait_until_serving(sleep=lambda seconds: pytest.fail("must not wait"))
+        assert not (tmp_path / dr_guard.STANDBY_FILE_NAME).exists()
+
+    def test_removed_when_waiting_is_interrupted(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(dr_guard.ENV_CONTROL_URL, "http://corehub:9999")
+        _scripted(monkeypatch, [STANDBY])
+
+        def interrupt(seconds):
+            raise KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt):
+            dr_guard.wait_until_serving(sleep=interrupt)
+        assert not (tmp_path / dr_guard.STANDBY_FILE_NAME).exists()
+
+    def test_not_written_when_the_guard_is_off(self, monkeypatch, tmp_path):
+        _scripted(monkeypatch, [STANDBY])
+        assert dr_guard.wait_until_serving() is None
+        assert not (tmp_path / dr_guard.STANDBY_FILE_NAME).exists()
+
+    def test_deactivate_removes_a_leftover_marker(self, tmp_path):
+        marker = tmp_path / dr_guard.STANDBY_FILE_NAME
+        marker.write_text("1")
+        dr_guard.deactivate()
+        assert not marker.exists()
+
+    def test_path_follows_data_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DATA_DIR", str(tmp_path / "state"))
+        assert dr_guard.standby_path() == str(tmp_path / "state" / dr_guard.STANDBY_FILE_NAME)
+
+
 class TestHeartbeat:
     def test_file_is_written_refreshed_and_removed(self, tmp_path):
         path = tmp_path / dr_guard.HEARTBEAT_FILE_NAME
