@@ -41,6 +41,14 @@ The server is reached with the same settings ``run_scheduler.py`` uses to start:
 
 The certificate is not verified: the probe always talks to the local process.
 
+Disaster recovery: with ``GS_DR_CONTROL_URL`` set, a standby Chronos waits in the
+startup gate (``gluesync_scheduler/dr_guard.py``) and has no HTTP server yet. While it
+waits the guard touches ``<DATA_DIR>/.dr-chronos-standby`` on every poll, so when the
+local probe fails but that marker is younger than 15 seconds the probe reports healthy
+(``DATA_DIR`` defaults to the image's ``/app/data``). A stale or missing marker, or no
+``GS_DR_CONTROL_URL``, leaves the failure as it is. This file must not import
+``gluesync_scheduler``: it uses the marker name and the path rules by convention.
+
 Usage: ``python3 healthcheck.py [--timeout SECONDS]`` (default 5, or the
 ``HEALTHCHECK_TIMEOUT`` environment variable).
 """
@@ -56,6 +64,9 @@ import time
 HEALTH_PATH = "/health"
 DEFAULT_TIMEOUT = 5.0
 DEFAULT_PORT = 8000  # same default as run_scheduler.py
+DEFAULT_DATA_DIR = "/app/data"  # DATA_DIR of the Linux images
+STANDBY_FILE_NAME = ".dr-chronos-standby"  # written by dr_guard while the startup gate is closed
+STANDBY_MAX_AGE_SECONDS = 15.0
 
 
 def _truthy(value):
@@ -126,6 +137,26 @@ def probe(timeout=DEFAULT_TIMEOUT):
     return False
 
 
+def standby_marker_path():
+    """Where the guard keeps its standby marker: ``DATA_DIR``, else the image's data dir."""
+    return os.path.join(os.getenv("DATA_DIR") or DEFAULT_DATA_DIR, STANDBY_FILE_NAME)
+
+
+def standby_waiting():
+    """True when a disaster-recovery standby Chronos is waiting in the startup gate.
+
+    That is: ``GS_DR_CONTROL_URL`` is set and the guard touched its standby marker in
+    the last 15 seconds.
+    """
+    if not (os.getenv("GS_DR_CONTROL_URL") or "").strip():
+        return False
+    try:
+        age = time.time() - os.stat(standby_marker_path()).st_mtime
+    except OSError:
+        return False
+    return age < STANDBY_MAX_AGE_SECONDS
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Chronos container health probe")
     parser.add_argument(
@@ -135,7 +166,12 @@ def main(argv=None):
         help="overall timeout in seconds (default: %(default)s)",
     )
     args = parser.parse_args(argv)
-    return 0 if probe(args.timeout) else 1
+    if probe(args.timeout):
+        return 0
+    if standby_waiting():
+        print("healthcheck: standby: waiting for Core Hub to serve", file=sys.stderr)
+        return 0
+    return 1
 
 
 if __name__ == "__main__":

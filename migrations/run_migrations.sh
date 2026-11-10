@@ -26,6 +26,9 @@ echo "Running migrations..."
 PROJECT_ROOT="$PROJECT_ROOT" PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}" python3 -c "
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Disaster recovery (opt-in via GS_DR_CONTROL_URL): wait until Core Hub is the serving active node
+from gluesync_scheduler import dr_guard
+dr_guard.activate()
 from gluesync_scheduler.db.migrate import run_migrations
 run_migrations()
 " || exit 1

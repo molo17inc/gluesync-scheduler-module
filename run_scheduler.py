@@ -29,6 +29,7 @@ import subprocess
 import uvicorn
 from shutil import which
 
+from gluesync_scheduler import dr_guard
 from gluesync_scheduler.core.path_resolver import resolve_gluesync_file
 
 # Extract certificates from PKCS12 file if available
@@ -206,6 +207,10 @@ def extract_from_pkcs12():
 
 def main():
     """Run the Gluesync Scheduler Module"""
+    # Disaster recovery gate (opt-in): nothing may open the database before Core Hub
+    # is the serving active node
+    dr_guard.activate()
+
     # Check for SSL certificate paths in environment
     cert_file = os.getenv('SSL_CERT_FILE')
     key_file = os.getenv('SSL_KEY_FILE')

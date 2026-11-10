@@ -28,10 +28,28 @@
 # HTTPS only if it found a certificate and key, otherwise it falls back to HTTP, so the
 # probe tries HTTPS first and retries over HTTP only when the TLS connection fails. A
 # timeout is never retried. The certificate is not verified: the target is local.
+#
+# Disaster recovery: with GS_DR_CONTROL_URL set, a standby Chronos waits in the startup
+# gate (dr_guard.py) and has no HTTP server yet. While it waits the guard touches
+# <DATA_DIR>\.dr-chronos-standby on every poll, so when the probe fails but that marker is
+# younger than 15 seconds this reports healthy (DATA_DIR defaults to C:\app\data).
 
 param([int]$TimeoutSec = 5)
 
 $ErrorActionPreference = 'Stop'
+
+# A standby Chronos waiting in the disaster-recovery gate is healthy even though nothing listens yet
+function Exit-IfStandbyWaiting {
+    if (-not ($env:GS_DR_CONTROL_URL -and $env:GS_DR_CONTROL_URL.Trim())) { return }
+    $dataDir = if ($env:DATA_DIR) { $env:DATA_DIR } else { 'C:\app\data' }
+    $marker = Join-Path $dataDir '.dr-chronos-standby'
+    if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { return }
+    $age = ([DateTime]::UtcNow - (Get-Item -LiteralPath $marker).LastWriteTimeUtc).TotalSeconds
+    if ($age -lt 15) {
+        [Console]::Error.WriteLine('healthcheck: standby: waiting for Core Hub to serve')
+        exit 0
+    }
+}
 
 $port = if ($env:PORT) { $env:PORT } else { '8000' }
 
@@ -55,15 +73,17 @@ foreach ($scheme in $schemes) {
             -SkipCertificateCheck -SkipHttpErrorCheck -MaximumRedirection 0
         if ($response.StatusCode -eq 200) { exit 0 }
         [Console]::Error.WriteLine("healthcheck: $uri returned HTTP $($response.StatusCode)")
+        Exit-IfStandbyWaiting
         exit 1
     }
     catch {
         $message = $_.Exception.Message
         [Console]::Error.WriteLine("healthcheck: $uri $message")
         # A timeout means the server is not answering: unhealthy whatever the scheme
-        if ($message -match 'timeout|timed out|canceled') { exit 1 }
+        if ($message -match 'timeout|timed out|canceled') { Exit-IfStandbyWaiting; exit 1 }
         # Otherwise (TLS refused, connection reset) try the next scheme, if any
     }
 }
 
+Exit-IfStandbyWaiting
 exit 1
