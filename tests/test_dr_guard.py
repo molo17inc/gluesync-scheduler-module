@@ -145,6 +145,58 @@ class TestCheckCoreHub:
         assert state.serving is False
         assert state.description.startswith("unreachable")
 
+    def test_invalid_json_is_not_serving(self, monkeypatch):
+        class Response:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                raise ValueError("not json")
+
+        monkeypatch.setattr(dr_guard.requests, "get", lambda *args, **kwargs: Response())
+        state = dr_guard.check_core_hub("http://corehub:9999")
+        assert state.serving is False
+        assert state.description.startswith("unreachable: ")
+
+    @pytest.mark.parametrize("skip, expected_verify", [
+        (None, True), ("false", True), ("True", False), ("1", False), ("t", False),
+    ])
+    def test_certificate_is_verified_unless_ssl_skip_verify(self, monkeypatch, skip, expected_verify):
+        if skip is None:
+            monkeypatch.delenv("SSL_SKIP_VERIFY", raising=False)
+        else:
+            monkeypatch.setenv("SSL_SKIP_VERIFY", skip)
+        seen = {}
+
+        class Response:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"role": "ACTIVE", "serving": True}
+
+        def fake_get(url, **kwargs):
+            seen.update(url=url, **kwargs)
+            return Response()
+
+        monkeypatch.setattr(dr_guard.requests, "get", fake_get)
+        assert dr_guard.check_core_hub("https://corehub:1719/").serving is True
+        assert seen["url"] == "https://corehub:1719/health"
+        assert seen["verify"] is expected_verify
+        assert seen["timeout"] == dr_guard.REQUEST_TIMEOUT_SECONDS
+
+    def test_untrusted_certificate_is_not_serving(self, monkeypatch):
+        monkeypatch.delenv("SSL_SKIP_VERIFY", raising=False)
+
+        def refuse(url, **kwargs):
+            assert kwargs["verify"] is True
+            raise dr_guard.requests.exceptions.SSLError("certificate verify failed")
+
+        monkeypatch.setattr(dr_guard.requests, "get", refuse)
+        state = dr_guard.check_core_hub("https://corehub:1719")
+        assert state.serving is False
+        assert state.description.startswith("unreachable: ")
+
 
 class TestGate:
     def test_noop_when_env_unset(self, monkeypatch, tmp_path):
@@ -153,7 +205,8 @@ class TestGate:
         assert dr_guard.wait_until_serving() is None
         assert calls == []
         assert not (tmp_path / dr_guard.HEARTBEAT_FILE_NAME).exists()
-        assert dr_guard._heartbeat is None and dr_guard._watcher is None
+        assert dr_guard._heartbeat is None
+        assert dr_guard._watcher is None
 
     def test_waits_until_serving_and_logs_once_per_state_change(self, monkeypatch, caplog):
         monkeypatch.setenv(dr_guard.ENV_CONTROL_URL, "http://corehub:9999")

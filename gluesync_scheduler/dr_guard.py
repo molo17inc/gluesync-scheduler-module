@@ -45,21 +45,22 @@ no-op and Chronos behaves exactly as before.
   transaction is rolled back, and the restart policy brings Chronos back into the
   startup gate.
 
-Standard library only, so the shell entrypoint can use it before anything else.
+Needs only ``requests`` (already a Chronos dependency), so the shell entrypoint can use
+it before anything else. The certificate of the control port is verified unless
+``SSL_SKIP_VERIFY`` is true, like every other call Chronos makes to Core Hub.
 Command line: ``python3 -m gluesync_scheduler.dr_guard`` waits until Core Hub is the
 serving active node and exits 0.
 """
 
 import atexit
-import json
 import logging
 import os
-import ssl
 import sys
 import threading
 import time
-import urllib.request
 from typing import NamedTuple, Optional
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,15 @@ def heartbeat_path() -> str:
     return os.path.join(os.getenv("DATA_DIR", "./data"), HEARTBEAT_FILE_NAME)
 
 
+def _verify_certificate() -> bool:
+    """Whether to verify the control port certificate: always, unless SSL_SKIP_VERIFY is true."""
+    skip_verify = os.getenv("SSL_SKIP_VERIFY", "False").lower() in ("true", "1", "t")
+    if skip_verify:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    return not skip_verify
+
+
 def _say(level: int, message: str) -> None:
     """Log through logging once the application configured it, else to stderr.
 
@@ -111,16 +121,16 @@ def _say(level: int, message: str) -> None:
 def check_core_hub(url: Optional[str] = None) -> CoreHubState:
     """Ask Core Hub's control port whether it is the serving active node.
 
-    Any failure to get a valid answer counts as not serving. Certificates are not
-    verified, like the other Core Hub calls made from the local container network.
+    Any failure to get a valid answer counts as not serving. The certificate of an
+    https control port is verified unless ``SSL_SKIP_VERIFY`` is true, like the other
+    Core Hub calls Chronos makes.
     """
     base = (url if url is not None else control_url()).rstrip("/")
-    context = ssl.create_default_context()
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
+    verify = _verify_certificate()
     try:
-        with urllib.request.urlopen(f"{base}/health", timeout=REQUEST_TIMEOUT_SECONDS, context=context) as response:
-            body = json.loads(response.read().decode("utf-8"))
+        response = requests.get(f"{base}/health", timeout=REQUEST_TIMEOUT_SECONDS, verify=verify)
+        response.raise_for_status()
+        body = response.json()
         if not isinstance(body, dict):
             raise ValueError("unexpected /health body")
     except Exception as e:  # unreachable, timeout, TLS failure, non-200, invalid JSON

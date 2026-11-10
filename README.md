@@ -864,7 +864,7 @@ When Core Hub runs as a disaster-recovery pair (active and standby site), Core H
 
 | Variable            | Description                                                                                                                       | Default |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `GS_DR_CONTROL_URL` | Base URL (http or https, certificates are not verified) of the Core Hub control port, for example `http://<core-hub-host>:<control-port>`. Chronos polls `GET {GS_DR_CONTROL_URL}/health`. | unset   |
+| `GS_DR_CONTROL_URL` | Base URL (http or https) of the Core Hub control port, for example `http://<core-hub-host>:<control-port>`. Chronos polls `GET {GS_DR_CONTROL_URL}/health`. The certificate of an https URL is verified unless `SSL_SKIP_VERIFY` is true, like every other call to Core Hub. | unset   |
 
 - **Startup gate**: before anything opens, creates or migrates the database (the migrations in `entrypoint.sh`, the server, the job runner), Chronos waits until `/health` reports `"serving": true` (older Core Hubs without that field: `"role": "ACTIVE"`), polling every second. An unreachable Core Hub counts as not serving. A cron-launched `job_runner` does not wait: it exits with code 75 without opening the database.
 - **Heartbeat**: while Chronos holds the database it touches `<DATA_DIR>/.dr-chronos-heartbeat` every second and deletes it on an orderly stop. Core Hub treats the database as held while the file is younger than 5 seconds.
