@@ -259,16 +259,8 @@ def test_fresh_marker_with_blank_dr_control_url_exits_1(standby_env, monkeypatch
 
 def test_data_dir_defaults_to_the_image_data_dir(standby_env, monkeypatch):
     monkeypatch.delenv("DATA_DIR")
-    seen = []
 
-    def missing(path):
-        seen.append(path)
-        raise FileNotFoundError(path)
-
-    monkeypatch.setattr(healthcheck.os, "stat", missing)
-
-    assert healthcheck.main(["--timeout", "2"]) == 1
-    assert seen == [os.path.join("/app/data", healthcheck.STANDBY_FILE_NAME)]
+    assert healthcheck.standby_marker_path() == os.path.join("/app/data", healthcheck.STANDBY_FILE_NAME)
 
 
 def test_working_server_does_not_need_the_marker(stub_server, probe_env, monkeypatch, tmp_path):

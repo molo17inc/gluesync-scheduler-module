@@ -137,6 +137,11 @@ def probe(timeout=DEFAULT_TIMEOUT):
     return False
 
 
+def standby_marker_path():
+    """Where the guard keeps its standby marker: ``DATA_DIR``, else the image's data dir."""
+    return os.path.join(os.getenv("DATA_DIR") or DEFAULT_DATA_DIR, STANDBY_FILE_NAME)
+
+
 def standby_waiting():
     """True when a disaster-recovery standby Chronos is waiting in the startup gate.
 
@@ -145,9 +150,8 @@ def standby_waiting():
     """
     if not (os.getenv("GS_DR_CONTROL_URL") or "").strip():
         return False
-    marker = os.path.join(os.getenv("DATA_DIR") or DEFAULT_DATA_DIR, STANDBY_FILE_NAME)
     try:
-        age = time.time() - os.stat(marker).st_mtime
+        age = time.time() - os.stat(standby_marker_path()).st_mtime
     except OSError:
         return False
     return age < STANDBY_MAX_AGE_SECONDS
