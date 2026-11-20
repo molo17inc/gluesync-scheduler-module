@@ -372,13 +372,31 @@ update_budibase_version:
 test:
   stage: test
   image: python:3.12-slim
+  variables:
+    # Test tooling installed next to requirements.txt; part of the venv cache key below.
+    TEST_TOOLS: "pytest pytest-cov pytest-asyncio"
   script:
     - apt-get update
-    - apt-get install -y --no-install-recommends gcc
-    - pip install --upgrade pip
-    - pip install pytest pytest-cov pytest-asyncio
-    - grep -vE "^(gluesync-sdk|pyjks)" requirements.txt > /tmp/requirements-ci.txt
-    - pip install -r /tmp/requirements-ci.txt
+    # curl for the build cache (ci/build-cache.sh); the slim image has tar and gzip.
+    - apt-get install -y --no-install-recommends curl
+    # The test venv (pip upgrade, test tooling, requirements.txt minus gluesync-sdk/pyjks) comes from the HQ
+    # build cache, keyed on requirements.txt, the test tooling and the exact Python build. venv/ is in .gitignore
+    # and omitted from coverage. gcc is only needed to build a wheel from source, so only on a miss.
+    - |
+      . ci/build-cache.sh
+      export BC_KEY_EXTRA="$(python -VV) ${CI_JOB_IMAGE} ${CI_PROJECT_DIR} ${TEST_TOOLS}"
+      VENV_KEY="test-venv-$(bc_key requirements.txt)"
+      if ! bc_restore "$VENV_KEY"; then
+        apt-get install -y --no-install-recommends gcc
+        rm -rf venv
+        python -m venv venv
+        venv/bin/pip install --upgrade pip
+        venv/bin/pip install $TEST_TOOLS
+        grep -vE "^(gluesync-sdk|pyjks)" requirements.txt > /tmp/requirements-ci.txt
+        venv/bin/pip install -r /tmp/requirements-ci.txt
+        bc_save "$VENV_KEY" venv
+      fi
+      export PATH="$CI_PROJECT_DIR/venv/bin:$PATH"
     - pip download --no-deps -d /tmp/sdk-check "$(grep -E '^gluesync-sdk' requirements.txt)"
     - mkdir -p logs
     - sh tests/entrypoint/test-run-as.sh
