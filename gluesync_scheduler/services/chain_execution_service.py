@@ -231,6 +231,10 @@ def _task_type_to_webhook_events(task_type: TaskType) -> list:
         TaskType.VISUALIZE_REFRESH: [],
         # The corehub-backup route returns once Core Hub has answered.
         TaskType.CORE_HUB_BACKUP: [],
+        # The audit routes return once Core Hub has answered: the HTTP answer
+        # is the completion signal, no webhook is awaited.
+        TaskType.PIPELINE_AUDIT_START: [],
+        TaskType.PIPELINE_AUDIT_STOP: [],
     }
     return mapping.get(task_type, ["ENTITY_SNAPSHOT_COMPLETED", "ENTITY_CDC_STARTED", "ENTITY_CDC_STOPPED"])
 
@@ -1284,6 +1288,8 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
         TaskType.BRAIN_REINDEX: "brain-reindex",
         TaskType.VISUALIZE_REFRESH: "visualize-refresh",
         TaskType.CORE_HUB_BACKUP: "corehub-backup",
+        TaskType.PIPELINE_AUDIT_START: "audit-start",
+        TaskType.PIPELINE_AUDIT_STOP: "audit-stop",
     }
     return mapping.get(task_type)
 

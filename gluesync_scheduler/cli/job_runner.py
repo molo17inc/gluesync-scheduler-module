@@ -224,6 +224,10 @@ def _endpoint_for_job(base_url: str, job: ScheduledJob) -> Optional[str]:
     if job.task_type == TaskType.CORE_HUB_BACKUP:
         from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
         return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/corehub-backup"
+    if job.task_type == TaskType.PIPELINE_AUDIT_START:
+        return f"{base_url}/pipelines/{job.pipeline_id}/audit-start"
+    if job.task_type == TaskType.PIPELINE_AUDIT_STOP:
+        return f"{base_url}/pipelines/{job.pipeline_id}/audit-stop"
     logger.error(f"Unknown task type: {job.task_type}")
     return None
 

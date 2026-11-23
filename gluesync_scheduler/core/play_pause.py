@@ -1499,6 +1499,20 @@ class CoreHubClient:
 
         return post_corehub_backup(_post, job_id, fired_at, manual)
 
+    def execute_audit_action(self, action: str, pipeline_id: str, entity_ids=None) -> dict:
+        """POST the transactions audit start or stop with the module JWT. See transactions_audit.py."""
+        from gluesync_scheduler.models.transactions_audit import (
+            CORE_HUB_AUDIT_TIMEOUT_SECONDS,
+            post_audit_action,
+        )
+
+        def _post(path, body):
+            return self.fetch_core_hub(
+                path, method="POST", body=body, raw=True, timeout=CORE_HUB_AUDIT_TIMEOUT_SECONDS,
+            )
+
+        return post_audit_action(_post, action, pipeline_id, entity_ids)
+
     # ------------------------------------------------------------------
     # Enterprise brain reindex
     # ------------------------------------------------------------------
@@ -2207,6 +2221,14 @@ class PipelineManager:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, self.client.execute_corehub_backup, job_id, fired_at, manual,
+        )
+
+    async def execute_audit_action(self, action: str, pipeline_id: str, entity_ids=None) -> dict:
+        """Start or stop a transactions audit; see CoreHubClient."""
+        logger.info("Transactions audit %s requested pipeline=%s entities=%s", action, pipeline_id, entity_ids)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.execute_audit_action, action, pipeline_id, entity_ids,
         )
 
     async def execute_brain_reindex(self) -> tuple:

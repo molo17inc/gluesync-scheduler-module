@@ -219,6 +219,10 @@ def _task_type_to_action(task_type) -> Optional[str]:
         return "visualize-refresh"
     if task_type == TaskType.CORE_HUB_BACKUP:
         return "corehub-backup"
+    if task_type == TaskType.PIPELINE_AUDIT_START:
+        return "audit-start"
+    if task_type == TaskType.PIPELINE_AUDIT_STOP:
+        return "audit-stop"
     return None
 
 

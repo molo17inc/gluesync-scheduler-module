@@ -1267,6 +1267,74 @@ async def execute_visualize_refresh(
         )
 
 
+async def _run_audit_action(action: str, request: Request, pipeline_id: str, body: Optional[dict]):
+    """Shared body of the internal audit-start and audit-stop routes."""
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    entity_ids = [str(e) for e in ((body or {}).get("entity_ids") or [])]
+    logger.info("Received transactions audit %s pipeline=%s entities=%s", action, pipeline_id, entity_ids)
+    try:
+        result = await PipelineManager().execute_audit_action(action, pipeline_id, entity_ids)
+        if not result.get("success"):
+            message = result.get("message") or f"Transactions audit {action} failed"
+            _mark_job_failed(cron_job_identifier, message)
+            http_status = status.HTTP_502_BAD_GATEWAY if result.get("retryable") else status.HTTP_400_BAD_REQUEST
+            raise HTTPException(status_code=http_status, detail=message)
+        _mark_job_succeeded(cron_job_identifier)
+        return {
+            "success": True,
+            "message": result.get("message"),
+            "data": {"pipeline_id": pipeline_id, "entities": entity_ids, "state": result.get("state")},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error executing transactions audit %s", action)
+        _mark_job_failed(cron_job_identifier, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error executing transactions audit {action}: {str(e)}",
+        )
+
+
+@router.post(
+    "/{pipeline_id}/audit-start",
+    response_model=OperationResponse,
+    summary="Start the transactions audit of a pipeline",
+)
+async def execute_audit_start(
+    request: Request,
+    pipeline_id: str = Path(..., description="The pipeline whose transactions audit is started"),
+    body: dict = Body(default=None),
+):
+    """POST Core Hub ``/pipelines/{id}/transactions-audit/start`` as the chronos module.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers (cron, chains, trigger flows).
+
+    Optional ``entity_ids`` in the body; empty means the configured scope. The statements are
+    confirmed (``confirmStatements: true``). 4xx answers 400, 5xx/network (already retried) 502.
+    """
+    return await _run_audit_action("start", request, pipeline_id, body)
+
+
+@router.post(
+    "/{pipeline_id}/audit-stop",
+    response_model=OperationResponse,
+    summary="Stop the transactions audit of a pipeline",
+)
+async def execute_audit_stop(
+    request: Request,
+    pipeline_id: str = Path(..., description="The pipeline whose transactions audit is stopped"),
+    body: dict = Body(default=None),
+):
+    """POST Core Hub ``/pipelines/{id}/transactions-audit/stop`` as the chronos module.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers (cron, chains, trigger flows).
+
+    Optional ``entity_ids`` in the body; empty means every entity of the audit.
+    """
+    return await _run_audit_action("stop", request, pipeline_id, body)
+
+
 def _parse_corehub_backup_body(body: Optional[dict]) -> dict:
     from gluesync_scheduler.models.corehub_backup import FIRED_AT, JOB_ID, MANUAL
 
