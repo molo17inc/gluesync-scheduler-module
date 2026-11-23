@@ -253,3 +253,33 @@ def test_cli_job_runner_endpoint(monkeypatch, task_type, suffix):
     assert execute_job(job) is True
     assert posted["url"].endswith(f"/api/pipelines/pipeline-123/{suffix}")
     assert posted["json"]["entity_ids"] == ["e1"]
+
+
+# --- edge branches ---------------------------------------------------------
+
+def test_entity_ids_tolerate_blank_and_bad_json():
+    assert audit.audit_hub_body("stop", "not json") == {"entityIds": []}
+    assert audit.audit_hub_body("stop", '{"a": 1}') == {"entityIds": []}
+    assert audit.audit_hub_body("stop", ["e1", "", None]) == {"entityIds": ["e1"]}
+
+
+def test_error_without_status_code_or_body():
+    assert audit.classify_hub_result("start", {"status": "error", "status_code": 500, "message": ""})["message"] \
+        == "Core Hub answered HTTP 500"
+    result = audit.classify_hub_result("start", {"status": "error", "status_code": 500, "error": "exception", "message": "x"})
+    assert result["message"] == "Core Hub unreachable: x" and result["retryable"] is True
+    assert audit.classify_hub_result("stop", {"status": "error", "status_code": "bad"})["retryable"] is True
+
+
+def test_route_unexpected_exception_is_a_500(api_client, hub, monkeypatch):
+    job = _create(api_client)
+
+    from gluesync_scheduler.api import pipeline_router
+
+    async def failing(self, action, pipeline_id, entity_ids=None):
+        raise RuntimeError("kaput")
+
+    monkeypatch.setattr(pipeline_router.PipelineManager, "execute_audit_action", failing)
+    result = api_client.post(f"/api/jobs/{job['id']}/run").json()
+    assert result["success"] is False
+    assert "kaput" in result["message"]

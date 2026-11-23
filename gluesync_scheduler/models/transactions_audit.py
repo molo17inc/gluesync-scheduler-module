@@ -29,9 +29,15 @@ Extension point, retention purge: see ``AUDIT_PURGE_TASK_TYPES_PLACEHOLDER``.
 
 import json
 import logging
-import re
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from gluesync_scheduler.models.corehub_backup import (
+    _backoff_delay,
+    _excerpt,
+    _is_error,
+    _status_code_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +51,6 @@ CORE_HUB_AUDIT_PATH = "/pipelines/{pipeline_id}/transactions-audit/{action}"
 CORE_HUB_AUDIT_TIMEOUT_SECONDS = 30
 # Retries after the first attempt (5xx and network errors only).
 CORE_HUB_AUDIT_RETRIES = 2
-_BACKOFF_FACTOR = 1
-_ERROR_EXCERPT_LEN = 200
 
 # ---------------------------------------------------------------------------
 # EXTENSION POINT: retention purge.
@@ -85,32 +89,6 @@ def audit_hub_path(action: str, pipeline_id: str) -> str:
     return CORE_HUB_AUDIT_PATH.format(pipeline_id=pipeline_id, action=action)
 
 
-def _is_error(result) -> bool:
-    return isinstance(result, dict) and result.get("status") == "error" and "status_code" in result
-
-
-def _status_code_of(result) -> Optional[int]:
-    if not _is_error(result):
-        return None
-    try:
-        return int(result.get("status_code"))
-    except (TypeError, ValueError):
-        return None
-
-
-def _excerpt(text) -> str:
-    collapsed = re.sub(r"\s+", " ", str(text or "")).strip()
-    if len(collapsed) > _ERROR_EXCERPT_LEN:
-        return collapsed[:_ERROR_EXCERPT_LEN] + "..."
-    return collapsed
-
-
-def _backoff_delay(failures: int) -> float:
-    if failures <= 1:
-        return 0.0
-    return float(_BACKOFF_FACTOR * (2 ** (failures - 1)))
-
-
 def _outcome(success: bool, message: str, code, retryable: bool, state=None) -> Dict[str, Any]:
     return {
         "success": success,
@@ -121,7 +99,7 @@ def _outcome(success: bool, message: str, code, retryable: bool, state=None) -> 
     }
 
 
-def _success_message(action: str, body) -> (str, Optional[str]):
+def _success_message(action: str, body) -> Tuple[str, Optional[str]]:
     verb = "started" if action == AUDIT_START else "stopped"
     if not isinstance(body, dict):
         return f"Audit {verb}", None
@@ -145,9 +123,8 @@ def _hub_error_text(code, result) -> str:
         body = None
     if isinstance(body, dict) and isinstance(body.get("message"), str):
         detail = _excerpt(body["message"])
-        extras = [str(body[k]) for k in ("code",) if body.get(k)]
-        if extras:
-            detail = f"{detail} ({extras[0]})"
+        if body.get("code"):
+            detail = f"{detail} ({body['code']})"
         if body.get("field"):
             detail = f"{detail} [field {body['field']}]"
     else:
