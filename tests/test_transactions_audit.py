@@ -68,7 +68,8 @@ def test_pipeline_is_required_entities_are_not(task_type):
 
 def test_task_types_are_documented_in_the_schema():
     description = JobCreate.model_fields["task_type"].description
-    assert "pipeline_audit_start" in description and "pipeline_audit_stop" in description
+    assert "pipeline_audit_start" in description
+    assert "pipeline_audit_stop" in description
 
 
 def test_actions_and_chain_events():
@@ -142,7 +143,8 @@ def test_5xx_is_retried_twice_then_fails(monkeypatch):
     sleeps.clear()
     monkeypatch.setattr(audit.time, "sleep", sleeps.append)
     result = client.execute_audit_action("start", "p", [])
-    assert result["success"] is False and result["retryable"] is True
+    assert result["success"] is False
+    assert result["retryable"] is True
     assert len(calls) == 3
     assert sleeps == [2.0]
     assert "after 3 attempts" in result["message"]
@@ -159,7 +161,8 @@ def test_network_error_is_retried(monkeypatch):
 
     client, calls, _ = _client(monkeypatch, [requests.ConnectionError("refused") for _ in range(3)])
     result = client.execute_audit_action("stop", "p", [])
-    assert result["success"] is False and result["retryable"] is True
+    assert result["success"] is False
+    assert result["retryable"] is True
     assert len(calls) == 3
     assert "unreachable" in result["message"]
 
@@ -168,7 +171,8 @@ def test_4xx_uses_the_error_response_and_is_not_retried(monkeypatch):
     body = {"notificationId": -1, "message": "Not configured", "code": "NOT_CONFIGURED", "field": "store"}
     client, calls, _ = _client(monkeypatch, [_Resp(409, text=json.dumps(body))])
     result = client.execute_audit_action("start", "p", [])
-    assert result["success"] is False and result["retryable"] is False
+    assert result["success"] is False
+    assert result["retryable"] is False
     assert result["message"] == "Core Hub answered HTTP 409: Not configured (NOT_CONFIGURED) [field store]"
     assert len(calls) == 1
 
@@ -197,7 +201,8 @@ def test_run_now_start_with_entities(api_client, hub):
     assert call["url"].endswith("/pipelines/pipeline-123/transactions-audit/start")
     assert call["json"] == {"entityIds": ["e1", "e2"], "confirmStatements": True}
     stored = api_client.get(f"/api/jobs/{job['id']}").json()
-    assert stored["last_successful_run"] is not None and stored["last_error_message"] is None
+    assert stored["last_successful_run"] is not None
+    assert stored["last_error_message"] is None
 
 
 def test_run_now_stop_without_entities(api_client, hub):
@@ -267,7 +272,8 @@ def test_error_without_status_code_or_body():
     assert audit.classify_hub_result("start", {"status": "error", "status_code": 500, "message": ""})["message"] \
         == "Core Hub answered HTTP 500"
     result = audit.classify_hub_result("start", {"status": "error", "status_code": 500, "error": "exception", "message": "x"})
-    assert result["message"] == "Core Hub unreachable: x" and result["retryable"] is True
+    assert result["message"] == "Core Hub unreachable: x"
+    assert result["retryable"] is True
     assert audit.classify_hub_result("stop", {"status": "error", "status_code": "bad"})["retryable"] is True
 
 
