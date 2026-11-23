@@ -47,6 +47,8 @@ class TaskType(enum.Enum):
     GROUP_REDO = "group_redo"
     PIPELINE_ENTER_MAINTENANCE = "pipeline_enter_maintenance"
     PIPELINE_EXIT_MAINTENANCE = "pipeline_exit_maintenance"
+    PIPELINE_AUDIT_START = "pipeline_audit_start"
+    PIPELINE_AUDIT_STOP = "pipeline_audit_stop"
     QUERY_STUDIO = "query_studio"
     AI_AGENT_RUN = "ai_agent_run"
     ENTITY_VALIDATE = "entity_validate"

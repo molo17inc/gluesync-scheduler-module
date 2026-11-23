@@ -190,6 +190,21 @@ def _validate_entity_validation_chain(task_type, entity_ids, chained_events) -> 
             require_entity_validation_fields(ce.task_type, ce.entity_ids)
 
 
+_SINGLE_TASK_ACTIONS = {
+    TaskType.GROUP_REDO: "redo-group",
+    TaskType.PIPELINE_ENTER_MAINTENANCE: "enter-maintenance",
+    TaskType.PIPELINE_EXIT_MAINTENANCE: "exit-maintenance",
+    TaskType.QUERY_STUDIO: "query-studio",
+    TaskType.AI_AGENT_RUN: "ai-agent-run",
+    TaskType.ENTITY_VALIDATE: "validate",
+    TaskType.BRAIN_REINDEX: "brain-reindex",
+    TaskType.VISUALIZE_REFRESH: "visualize-refresh",
+    TaskType.CORE_HUB_BACKUP: "corehub-backup",
+    TaskType.PIPELINE_AUDIT_START: "audit-start",
+    TaskType.PIPELINE_AUDIT_STOP: "audit-stop",
+}
+
+
 def _task_type_to_action(task_type) -> Optional[str]:
     if task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START, TaskType.GROUP_START]:
         return "play"
@@ -201,25 +216,7 @@ def _task_type_to_action(task_type) -> Optional[str]:
         return "one-time-snapshot-group"
     if task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
         return "redo"
-    if task_type == TaskType.GROUP_REDO:
-        return "redo-group"
-    if task_type == TaskType.PIPELINE_ENTER_MAINTENANCE:
-        return "enter-maintenance"
-    if task_type == TaskType.PIPELINE_EXIT_MAINTENANCE:
-        return "exit-maintenance"
-    if task_type == TaskType.QUERY_STUDIO:
-        return "query-studio"
-    if task_type == TaskType.AI_AGENT_RUN:
-        return "ai-agent-run"
-    if task_type == TaskType.ENTITY_VALIDATE:
-        return "validate"
-    if task_type == TaskType.BRAIN_REINDEX:
-        return "brain-reindex"
-    if task_type == TaskType.VISUALIZE_REFRESH:
-        return "visualize-refresh"
-    if task_type == TaskType.CORE_HUB_BACKUP:
-        return "corehub-backup"
-    return None
+    return _SINGLE_TASK_ACTIONS.get(task_type)
 
 
 

@@ -51,6 +51,7 @@ The project follows [Semantic Versioning](https://semver.org/) (SemVer) for vers
   - Validate entities with the CoreHub Validator (`entity_validate`), optionally reconciling the target
   - Rebuild the Enterprise brain schema graph (`brain_reindex`)
   - Back up Core Hub to Gluesync Connect (`corehub_backup`)
+  - Start or stop the transactions audit of a pipeline (`pipeline_audit_start`, `pipeline_audit_stop`)
   - More task types can be easily added
 - **Job Management**: View, create, update, disable/enable, and delete scheduled jobs
 - **Containerized Deployment**: Docker support for easy deployment
@@ -539,6 +540,43 @@ X-Chronos-Job-Id: 12
 - `200` is a successful run, whether or not Core Hub started the backup. The answer's `reason` (`started`, `too_soon`, `already_running`, `disabled`, `not_ready`) is the run message, also returned as `message` by `POST /api/jobs/{id}/run`.
 - `5xx` and network errors are retried 3 times (backoff factor 1); if they keep failing the run fails.
 - Any `4xx` fails the run: `last_error_message` is `Core Hub answered HTTP <status>: <body excerpt>`. The job stays enabled, so an older Core Hub without the route picks the schedule up once it is updated.
+
+## Transactions audit (`pipeline_audit_start`, `pipeline_audit_stop`)
+
+Schedule the start and the stop of a pipeline's transactions audit, for example to record only during a business window. `pipeline_id` is required; `entity_ids` is optional (empty means the configured scope for a start, every entity for a stop).
+
+```json
+POST /api/jobs/
+
+{
+  "name": "Audit on during the day",
+  "task_type": "pipeline_audit_start",
+  "pipeline_id": "pipeline-123",
+  "entity_ids": [],
+  "is_cron_expression": true,
+  "cron_expression": "0 8 * * 1-5",
+  "enabled": true
+}
+```
+
+When the job fires, Chronos calls Core Hub with the chronos module JWT (re-authenticating once on 401):
+
+```http
+POST {corehub}/pipelines/pipeline-123/transactions-audit/start
+{"entityIds": [], "confirmStatements": true}
+
+POST {corehub}/pipelines/pipeline-123/transactions-audit/stop
+{"entityIds": []}
+```
+
+The audit must already be configured in Core Hub (`PUT /pipelines/{id}/transactions-audit`). `confirmStatements` is always `true`: whoever creates the schedule confirms the statements Core Hub shows in its preflight. Both calls are idempotent. Outcome:
+
+- `200` and `202` are a successful run; the message is built from Core Hub's answer (for example `Audit started, state RECORDING, 3 of 3 entities recording`).
+- `5xx` and network errors are retried twice (backoff factor 1, 30 s per attempt).
+- Any `4xx` fails the run: `last_error_message` is `Core Hub answered HTTP <status>: <message> (<code>)`, for example `409 ... (NOT_CONFIGURED)`. The job stays enabled.
+- Chained events complete on this answer; no webhook is awaited.
+
+Retention purge is not a Chronos task yet; the extension point is `AUDIT_PURGE_TASK_TYPES_PLACEHOLDER` in `gluesync_scheduler/models/transactions_audit.py`.
 
 ## Scheduling Options
 
