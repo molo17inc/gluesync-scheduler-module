@@ -1335,6 +1335,122 @@ async def execute_audit_stop(
     return await _run_audit_action("stop", request, pipeline_id, body)
 
 
+def _fail_audit_route(cron_job_identifier, result, what: str):
+    message = result.get("message") or f"{what} failed"
+    _mark_job_failed(cron_job_identifier, message)
+    http_status = status.HTTP_502_BAD_GATEWAY if result.get("retryable") else status.HTTP_400_BAD_REQUEST
+    raise HTTPException(status_code=http_status, detail=message)
+
+
+@router.post(
+    "/{pipeline_id}/audit-group-start",
+    response_model=OperationResponse,
+    summary="Start the transactions audit of groups of a pipeline",
+)
+async def execute_audit_group_start(
+    request: Request,
+    pipeline_id: str = Path(..., description="The pipeline whose group audit is started"),
+    body: dict = Body(default=None),
+):
+    """POST Core Hub ``/pipelines/{id}/transactions-audit/groups/{groupId}/start`` once per ``group_ids`` entry.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers. The statements are confirmed.
+    """
+    return await _run_audit_group_action("group-start", request, pipeline_id, body)
+
+
+@router.post(
+    "/{pipeline_id}/audit-group-stop",
+    response_model=OperationResponse,
+    summary="Stop the transactions audit of groups of a pipeline",
+)
+async def execute_audit_group_stop(
+    request: Request,
+    pipeline_id: str = Path(..., description="The pipeline whose group audit is stopped"),
+    body: dict = Body(default=None),
+):
+    """POST Core Hub ``/pipelines/{id}/transactions-audit/groups/{groupId}/stop`` once per ``group_ids`` entry.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers.
+    """
+    return await _run_audit_group_action("group-stop", request, pipeline_id, body)
+
+
+async def _run_audit_group_action(action: str, request: Request, pipeline_id: str, body: Optional[dict]):
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    group_ids = [str(g) for g in ((body or {}).get("group_ids") or [])]
+    logger.info("Received transactions audit %s pipeline=%s groups=%s", action, pipeline_id, group_ids)
+    try:
+        result = await PipelineManager().execute_audit_group_action(action, pipeline_id, group_ids)
+        if not result.get("success"):
+            _fail_audit_route(cron_job_identifier, result, f"Transactions audit {action}")
+        _mark_job_succeeded(cron_job_identifier)
+        return {
+            "success": True,
+            "message": result.get("message"),
+            "data": {"pipeline_id": pipeline_id, "groups": group_ids, "state": result.get("state")},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error executing transactions audit %s", action)
+        _mark_job_failed(cron_job_identifier, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error executing transactions audit {action}: {str(e)}",
+        )
+
+
+@router.post(
+    "/{pipeline_id}/audit-purge",
+    response_model=OperationResponse,
+    summary="Purge old transactions audit ledger rows of a pipeline",
+)
+async def execute_audit_purge(
+    request: Request,
+    pipeline_id: str = Path(..., description="The pipeline whose ledger is purged"),
+    body: dict = Body(default=None),
+):
+    """POST Core Hub ``/pipelines/{id}/transactions-audit/purge`` until it answers ``complete``.
+
+    **INTERNAL USE ONLY**: localhost / scheduler-internal callers.
+
+    Optional ``audit_older_than_days`` (empty: the configured retention) and ``entity_ids``.
+    Core Hub ends a call at its row or time budget; this route calls again, at most
+    ``PURGE_MAX_ROUNDS`` rounds and ``PURGE_DEADLINE_SECONDS`` seconds, and logs each round.
+    """
+    cron_job_identifier = getattr(request.state, "cron_job_identifier", None)
+    body = body or {}
+    older_than_days = body.get("audit_older_than_days")
+    entity_ids = [str(e) for e in (body.get("entity_ids") or [])]
+    logger.info("Received transactions audit purge pipeline=%s days=%s entities=%s", pipeline_id, older_than_days, entity_ids)
+    try:
+        result = await PipelineManager().execute_audit_purge(pipeline_id, older_than_days, entity_ids)
+        if not result.get("success"):
+            _fail_audit_route(cron_job_identifier, result, "Transactions audit purge")
+        _mark_job_succeeded(cron_job_identifier)
+        return {
+            "success": True,
+            "message": result.get("message"),
+            "data": {
+                "pipeline_id": pipeline_id,
+                "entities": entity_ids,
+                "rows_deleted": result.get("rows_deleted"),
+                "rounds": result.get("rounds"),
+                "complete": result.get("complete"),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error executing transactions audit purge")
+        _mark_job_failed(cron_job_identifier, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error executing transactions audit purge: {str(e)}",
+        )
+
+
 def _parse_corehub_backup_body(body: Optional[dict]) -> dict:
     from gluesync_scheduler.models.corehub_backup import FIRED_AT, JOB_ID, MANUAL
 

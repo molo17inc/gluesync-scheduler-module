@@ -89,6 +89,7 @@ class ExecutableEvent:
     validation_reconcile: bool = False
     viz_id: Optional[str] = None
     visualize_parameters: Optional[Any] = None
+    audit_older_than_days: Optional[int] = None
     schedule_id: Optional[int] = None
     resolved_input: Optional[dict] = None
     resolved_idempotency_key: Optional[str] = None
@@ -122,6 +123,7 @@ class ExecutableEvent:
             validation_reconcile=bool(getattr(event, "validation_reconcile", False)),
             viz_id=getattr(event, "viz_id", None),
             visualize_parameters=getattr(event, "visualize_parameters", None),
+            audit_older_than_days=getattr(event, "audit_older_than_days", None),
             schedule_id=getattr(event, "parent_job_id", None),
         )
 
@@ -235,6 +237,9 @@ def _task_type_to_webhook_events(task_type: TaskType) -> list:
         # is the completion signal, no webhook is awaited.
         TaskType.PIPELINE_AUDIT_START: [],
         TaskType.PIPELINE_AUDIT_STOP: [],
+        TaskType.PIPELINE_AUDIT_GROUP_START: [],
+        TaskType.PIPELINE_AUDIT_GROUP_STOP: [],
+        TaskType.PIPELINE_AUDIT_PURGE: [],
     }
     return mapping.get(task_type, ["ENTITY_SNAPSHOT_COMPLETED", "ENTITY_CDC_STARTED", "ENTITY_CDC_STOPPED"])
 
@@ -849,6 +854,9 @@ class ChainExecutionService:
             payload = _event_payload(event)
 
             timeout = int(os.getenv("SCHEDULER_INTERNAL_HTTP_TIMEOUT", "120"))
+            if event.task_type == TaskType.PIPELINE_AUDIT_PURGE:
+                from gluesync_scheduler.models.transactions_audit import purge_http_timeout_seconds
+                timeout = max(timeout, purge_http_timeout_seconds())
             if event.task_type == TaskType.ENTITY_VALIDATE:
                 timeout = max(
                     timeout,
@@ -1290,11 +1298,16 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
         TaskType.CORE_HUB_BACKUP: "corehub-backup",
         TaskType.PIPELINE_AUDIT_START: "audit-start",
         TaskType.PIPELINE_AUDIT_STOP: "audit-stop",
+        TaskType.PIPELINE_AUDIT_GROUP_START: "audit-group-start",
+        TaskType.PIPELINE_AUDIT_GROUP_STOP: "audit-group-stop",
+        TaskType.PIPELINE_AUDIT_PURGE: "audit-purge",
     }
     return mapping.get(task_type)
 
 
 def _event_payload(event: ExecutableEvent) -> dict:
+    from gluesync_scheduler.models.transactions_audit import audit_purge_internal_payload
+
     """Build the Chronos internal pipeline-API payload for an executable event."""
     if event.task_type == TaskType.QUERY_STUDIO:
         return query_studio_http_payload(event)
@@ -1307,6 +1320,8 @@ def _event_payload(event: ExecutableEvent) -> dict:
         return visualize_internal_payload(event)
     if event.task_type == TaskType.CORE_HUB_BACKUP:
         return corehub_backup_chain_payload(event)
+    if event.task_type == TaskType.PIPELINE_AUDIT_PURGE:
+        return audit_purge_internal_payload(event.audit_older_than_days, _parse_json_list(event.entity_ids))
     payload: dict = {}
     entity_ids = _parse_json_list(event.entity_ids)
     group_ids = _parse_json_list(event.group_ids)
@@ -1315,6 +1330,7 @@ def _event_payload(event: ExecutableEvent) -> dict:
     if group_ids and event.task_type in (
         TaskType.GROUP_REDO, TaskType.GROUP_START,
         TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT,
+        TaskType.PIPELINE_AUDIT_GROUP_START, TaskType.PIPELINE_AUDIT_GROUP_STOP,
     ):
         payload["group_ids"] = group_ids
     if event.with_snapshot:

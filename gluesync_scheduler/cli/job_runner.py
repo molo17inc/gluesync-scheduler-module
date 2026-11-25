@@ -228,6 +228,12 @@ def _endpoint_for_job(base_url: str, job: ScheduledJob) -> Optional[str]:
         return f"{base_url}/pipelines/{job.pipeline_id}/audit-start"
     if job.task_type == TaskType.PIPELINE_AUDIT_STOP:
         return f"{base_url}/pipelines/{job.pipeline_id}/audit-stop"
+    if job.task_type == TaskType.PIPELINE_AUDIT_GROUP_START:
+        return f"{base_url}/pipelines/{job.pipeline_id}/audit-group-start"
+    if job.task_type == TaskType.PIPELINE_AUDIT_GROUP_STOP:
+        return f"{base_url}/pipelines/{job.pipeline_id}/audit-group-stop"
+    if job.task_type == TaskType.PIPELINE_AUDIT_PURGE:
+        return f"{base_url}/pipelines/{job.pipeline_id}/audit-purge"
     logger.error(f"Unknown task type: {job.task_type}")
     return None
 
@@ -278,6 +284,14 @@ def _payload_for_job(job: ScheduledJob, entity_ids: list, group_ids: list) -> tu
         json_data = corehub_backup_internal_payload(job)
         request_timeout = 120
 
+    if job.task_type == TaskType.PIPELINE_AUDIT_PURGE:
+        from gluesync_scheduler.models.transactions_audit import (
+            audit_purge_internal_payload,
+            purge_http_timeout_seconds,
+        )
+        json_data = audit_purge_internal_payload(job.audit_older_than_days, entity_ids)
+        request_timeout = purge_http_timeout_seconds()
+
     if job.task_type not in (
         TaskType.QUERY_STUDIO,
         TaskType.AI_AGENT_RUN,
@@ -285,10 +299,13 @@ def _payload_for_job(job: ScheduledJob, entity_ids: list, group_ids: list) -> tu
         TaskType.BRAIN_REINDEX,
         TaskType.VISUALIZE_REFRESH,
         TaskType.CORE_HUB_BACKUP,
+        TaskType.PIPELINE_AUDIT_PURGE,
     ) and entity_ids:
         json_data["entity_ids"] = entity_ids
 
-    if group_ids and job.task_type == TaskType.GROUP_REDO:
+    if group_ids and job.task_type in (
+        TaskType.GROUP_REDO, TaskType.PIPELINE_AUDIT_GROUP_START, TaskType.PIPELINE_AUDIT_GROUP_STOP,
+    ):
         json_data["group_ids"] = group_ids
 
     if job.with_snapshot and job.task_type in _SNAPSHOT_TASKS:

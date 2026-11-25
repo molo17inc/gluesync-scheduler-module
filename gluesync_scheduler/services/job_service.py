@@ -54,6 +54,11 @@ from gluesync_scheduler.models.visualize_refresh import (
     visualize_refresh_orm_kwargs,
 )
 from gluesync_scheduler.models.corehub_backup import corehub_backup_internal_payload
+from gluesync_scheduler.models.transactions_audit import (
+    audit_purge_internal_payload,
+    audit_purge_orm_kwargs,
+    purge_http_timeout_seconds,
+)
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
@@ -69,6 +74,9 @@ _ISO_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 _GROUP_TASK_TYPES = [
     TaskType.GROUP_START, TaskType.GROUP_STOP, TaskType.GROUP_SNAPSHOT, TaskType.GROUP_REDO,
 ]
+# Audit group tasks carry group_ids but run through the internal audit route (one Core Hub
+# call per group), not through the entity-by-entity group operation of _GROUP_TASK_TYPES.
+_AUDIT_GROUP_TASK_TYPES = [TaskType.PIPELINE_AUDIT_GROUP_START, TaskType.PIPELINE_AUDIT_GROUP_STOP]
 _SNAPSHOT_FLAG_TASKS = [
     TaskType.PIPELINE_START,
     TaskType.ENTITY_START,
@@ -152,6 +160,7 @@ def _chained_event_orm(parent_job_id: int, pos: int, ce) -> ChainedJobEvent:
         **ai_agent_run_orm_kwargs(ce),
         **entity_validation_orm_kwargs(ce),
         **visualize_refresh_orm_kwargs(ce),
+        **audit_purge_orm_kwargs(ce),
     )
 
 
@@ -202,6 +211,9 @@ _SINGLE_TASK_ACTIONS = {
     TaskType.CORE_HUB_BACKUP: "corehub-backup",
     TaskType.PIPELINE_AUDIT_START: "audit-start",
     TaskType.PIPELINE_AUDIT_STOP: "audit-stop",
+    TaskType.PIPELINE_AUDIT_GROUP_START: "audit-group-start",
+    TaskType.PIPELINE_AUDIT_GROUP_STOP: "audit-group-stop",
+    TaskType.PIPELINE_AUDIT_PURGE: "audit-purge",
 }
 
 
@@ -580,7 +592,7 @@ class JobService:
             return None, None
 
     def _validate_group_task_type(self, task_type, group_ids) -> None:
-        if task_type not in _GROUP_TASK_TYPES:
+        if task_type not in _GROUP_TASK_TYPES and task_type not in _AUDIT_GROUP_TASK_TYPES:
             return
         if not group_ids or len(group_ids) == 0:
             raise HTTPException(
@@ -663,6 +675,7 @@ class JobService:
                 **ai_agent_run_orm_kwargs(job_data),
                 **entity_validation_orm_kwargs(job_data),
                 **visualize_refresh_orm_kwargs(job_data),
+                **audit_purge_orm_kwargs(job_data),
             )
 
             db_job.cron_job_identifier = f"gluesync_job_{uuid.uuid4().hex[:8]}"
@@ -715,7 +728,7 @@ class JobService:
             del update_data["day_or"]
 
     def _validate_group_ids_for_update(self, final_task_type, final_group_ids) -> None:
-        if final_task_type not in _GROUP_TASK_TYPES:
+        if final_task_type not in _GROUP_TASK_TYPES and final_task_type not in _AUDIT_GROUP_TASK_TYPES:
             return
         if isinstance(final_group_ids, str) and final_group_ids:
             try:
@@ -1272,6 +1285,8 @@ class JobService:
             json_data = visualize_internal_payload(job)
         if job.task_type == TaskType.CORE_HUB_BACKUP:
             json_data = corehub_backup_internal_payload(job, manual=manual, fired_at=fired_at)
+        if job.task_type == TaskType.PIPELINE_AUDIT_PURGE:
+            json_data = audit_purge_internal_payload(job.audit_older_than_days, entity_ids)
 
         if job.task_type not in (
             TaskType.QUERY_STUDIO,
@@ -1280,10 +1295,11 @@ class JobService:
             TaskType.BRAIN_REINDEX,
             TaskType.VISUALIZE_REFRESH,
             TaskType.CORE_HUB_BACKUP,
+            TaskType.PIPELINE_AUDIT_PURGE,
         ) and entity_ids:
             json_data["entity_ids"] = entity_ids
 
-        if group_ids and job.task_type == TaskType.GROUP_REDO:
+        if group_ids and (job.task_type == TaskType.GROUP_REDO or job.task_type in _AUDIT_GROUP_TASK_TYPES):
             json_data["group_ids"] = group_ids
 
         if job.with_snapshot and job.task_type in _SNAPSHOT_FLAG_TASKS:
@@ -1425,6 +1441,8 @@ class JobService:
                         internal_http_timeout,
                         validation_http_timeout_seconds(len(entity_ids)),
                     )
+                if job.task_type == TaskType.PIPELINE_AUDIT_PURGE:
+                    internal_http_timeout = max(internal_http_timeout, purge_http_timeout_seconds())
                 if job.task_type == TaskType.BRAIN_REINDEX:
                     from gluesync_scheduler.models.brain_reindex import (
                         brain_reindex_http_timeout_seconds,
@@ -1629,6 +1647,7 @@ def _rows_to_chained_responses(rows: list) -> list:
             idempotency_key=row.idempotency_key,
             allow_ai_run_loop=bool(getattr(row, "allow_ai_run_loop", False)),
             validation_reconcile=bool(getattr(row, "validation_reconcile", False)),
+            audit_older_than_days=getattr(row, "audit_older_than_days", None),
         )
         result.append(resp)
     return result

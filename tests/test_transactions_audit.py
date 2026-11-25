@@ -90,10 +90,6 @@ def test_chained_event_payload_passes_entity_ids():
     assert _event_payload(event)["entity_ids"] == ["e1", "e2"]
 
 
-def test_purge_extension_point_is_empty():
-    assert audit.AUDIT_PURGE_TASK_TYPES_PLACEHOLDER == ()
-
-
 # --- body and message shapes -----------------------------------------------
 
 def test_hub_bodies_and_paths():
