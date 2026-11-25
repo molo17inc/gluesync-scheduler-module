@@ -1513,6 +1513,34 @@ class CoreHubClient:
 
         return post_audit_action(_post, action, pipeline_id, entity_ids)
 
+    def execute_audit_group_action(self, action: str, pipeline_id: str, group_ids=None) -> dict:
+        """POST the transactions audit start or stop of each group. See transactions_audit.py."""
+        from gluesync_scheduler.models.transactions_audit import (
+            CORE_HUB_AUDIT_TIMEOUT_SECONDS,
+            post_audit_group_action,
+        )
+
+        def _post(path, body):
+            return self.fetch_core_hub(
+                path, method="POST", body=body, raw=True, timeout=CORE_HUB_AUDIT_TIMEOUT_SECONDS,
+            )
+
+        return post_audit_group_action(_post, action, pipeline_id, group_ids)
+
+    def execute_audit_purge(self, pipeline_id: str, older_than_days=None, entity_ids=None) -> dict:
+        """Purge the transactions audit ledger, repeating until complete or capped. See transactions_audit.py."""
+        from gluesync_scheduler.models.transactions_audit import (
+            CORE_HUB_PURGE_TIMEOUT_SECONDS,
+            post_audit_purge,
+        )
+
+        def _post(path, body):
+            return self.fetch_core_hub(
+                path, method="POST", body=body, raw=True, timeout=CORE_HUB_PURGE_TIMEOUT_SECONDS,
+            )
+
+        return post_audit_purge(_post, pipeline_id, older_than_days, entity_ids)
+
     # ------------------------------------------------------------------
     # Enterprise brain reindex
     # ------------------------------------------------------------------
@@ -2229,6 +2257,25 @@ class PipelineManager:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, self.client.execute_audit_action, action, pipeline_id, entity_ids,
+        )
+
+    async def execute_audit_group_action(self, action: str, pipeline_id: str, group_ids=None) -> dict:
+        """Start or stop the transactions audit of groups; see CoreHubClient."""
+        logger.info("Transactions audit group %s requested pipeline=%s groups=%s", action, pipeline_id, group_ids)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.execute_audit_group_action, action, pipeline_id, group_ids,
+        )
+
+    async def execute_audit_purge(self, pipeline_id: str, older_than_days=None, entity_ids=None) -> dict:
+        """Purge the transactions audit ledger; see CoreHubClient."""
+        logger.info(
+            "Transactions audit purge requested pipeline=%s older_than_days=%s entities=%s",
+            pipeline_id, older_than_days, entity_ids,
+        )
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.client.execute_audit_purge, pipeline_id, older_than_days, entity_ids,
         )
 
     async def execute_brain_reindex(self) -> tuple:

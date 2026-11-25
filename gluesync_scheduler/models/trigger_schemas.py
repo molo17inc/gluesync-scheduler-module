@@ -31,6 +31,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, validator
 
 from gluesync_scheduler.models.models import TaskType
 from gluesync_scheduler.models.schemas import (
+    AuditPurgeFieldsMixin,
+    AuditPurgeValidatorMixin,
     AiAgentRunFieldsMixin,
     AiAgentRunValidatorMixin,
     EntityValidationFieldsMixin,
@@ -73,6 +75,8 @@ class TriggerEventBase(
     EntityValidationValidatorMixin,
     VisualizeRefreshFieldsMixin,
     VisualizeRefreshValidatorMixin,
+    AuditPurgeFieldsMixin,
+    AuditPurgeValidatorMixin,
     BaseModel,
 ):
     task_type: TaskType = Field(..., description="Type of task to perform")

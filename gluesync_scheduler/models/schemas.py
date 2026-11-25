@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field, validator, field_validator, field_seriali
 
 from gluesync_scheduler.models.models import TaskType, ExecutionMode, require_query_studio_fields, coerce_query_read_only
 from gluesync_scheduler.models.ai_agent_run import parse_json_list, parse_json_object, require_ai_agent_run_fields
+from gluesync_scheduler.models.transactions_audit import check_older_than_days, require_audit_purge_fields
 from gluesync_scheduler.models.entity_validation import VALIDATION_RECONCILE, require_entity_validation_fields
 from gluesync_scheduler.models.visualize_refresh import coerce_parameter_map, require_visualize_refresh_fields
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
@@ -184,6 +185,25 @@ class EntityValidationValidatorMixin:
 
 
 
+class AuditPurgeFieldsMixin:
+    """Fields of the transactions audit purge task."""
+
+    audit_older_than_days: Optional[int] = Field(
+        None,
+        description=(
+            "pipeline_audit_purge: delete ledger rows recorded more than this many days ago (1 to 36500). "
+            "Empty means the retentionDays of the audit configuration."
+        ),
+    )
+
+
+class AuditPurgeValidatorMixin:
+    @model_validator(mode="after")
+    def _validate_audit_purge(self):
+        require_audit_purge_fields(getattr(self, "task_type", None), getattr(self, "audit_older_than_days", None))
+        return self
+
+
 class VisualizeRefreshFieldsMixin:
     """Fields shared by schedulable Visualize refresh actions."""
 
@@ -228,6 +248,8 @@ class ChainedEventBase(
     EntityValidationValidatorMixin,
     VisualizeRefreshFieldsMixin,
     VisualizeRefreshValidatorMixin,
+    AuditPurgeFieldsMixin,
+    AuditPurgeValidatorMixin,
     BaseModel,
 ):
     """Fields shared by create and response schemas for chained events"""
@@ -314,12 +336,14 @@ class JobBase(
     EntityValidationValidatorMixin,
     VisualizeRefreshFieldsMixin,
     VisualizeRefreshValidatorMixin,
+    AuditPurgeFieldsMixin,
+    AuditPurgeValidatorMixin,
     BaseModel,
 ):
     """Base model for job data with common fields"""
     name: str = Field(..., description="Name of the scheduled job", example="Daily entity backup")
     description: Optional[str] = Field(None, description="Optional description of the job's purpose", example="Create a daily snapshot of critical entities")
-    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent\n- ai_agent_run: Execute a published AI agent with a templated prompt\n- entity_validate: Compare source and target rows of specific entities with the Validator, optionally reconciling the target (validation_reconcile)\n- brain_reindex: Rebuild the Enterprise brain schema graph across every SQL-capable agent\n- visualize_refresh: POST a scheduled Visualize refresh to Core Hub as the chronos module\n- corehub_backup: Ask Core Hub to back up to Gluesync Connect (POST /backup/scheduled-run as the chronos module)\n- pipeline_audit_start: Start the transactions audit of a pipeline (optional entity_ids; empty = the configured scope)\n- pipeline_audit_stop: Stop the transactions audit of a pipeline (optional entity_ids; empty = every entity)")
+    task_type: TaskType = Field(..., description="Type of task to perform (use lowercase values in API requests):\n- entity_start: Start a specific entity within a pipeline\n- entity_stop: Stop a specific entity within a pipeline\n- pipeline_start: Start all entities in a pipeline\n- pipeline_stop: Stop all entities in a pipeline\n- entity_snapshot: Create a data snapshot of a specific entity\n- pipeline_snapshot: Create a data snapshot of all entities in a pipeline\n- group_start: Start all entities within specific groups\n- group_stop: Stop all entities within specific groups\n- group_snapshot: Create a data snapshot of all entities within specific groups\n- entity_redo: Trigger redo (snapshot + CDC restart) for a specific entity\n- pipeline_redo: Trigger redo (snapshot + CDC restart) for all entities in a pipeline\n- group_redo: Trigger redo (snapshot + CDC restart) for all entities within specific groups\n- pipeline_enter_maintenance: Enter maintenance mode for a pipeline\n- pipeline_exit_maintenance: Exit maintenance mode for a pipeline\n- query_studio: Execute a Query Studio SQL query against a pipeline agent\n- ai_agent_run: Execute a published AI agent with a templated prompt\n- entity_validate: Compare source and target rows of specific entities with the Validator, optionally reconciling the target (validation_reconcile)\n- brain_reindex: Rebuild the Enterprise brain schema graph across every SQL-capable agent\n- visualize_refresh: POST a scheduled Visualize refresh to Core Hub as the chronos module\n- corehub_backup: Ask Core Hub to back up to Gluesync Connect (POST /backup/scheduled-run as the chronos module)\n- pipeline_audit_start: Start the transactions audit of a pipeline (optional entity_ids; empty = the configured scope)\n- pipeline_audit_stop: Stop the transactions audit of a pipeline (optional entity_ids; empty = every entity)\n- pipeline_audit_group_start: Start the transactions audit of the entities of groups (group_ids required)\n- pipeline_audit_group_stop: Stop the transactions audit of the entities of groups (group_ids required)\n- pipeline_audit_purge: Purge old transactions audit ledger rows (optional audit_older_than_days, default the configured retention; optional entity_ids; repeats Core Hub calls until complete, up to a cap)")
     schedule: Optional[ScheduleConfig] = Field(None, description="User-friendly schedule configuration")
     cron_expression: Optional[str] = Field(None, description="Cron expression for scheduling (e.g., '0 0 * * *' for daily at midnight). Not required if schedule is provided.", example="0 0 * * *")
     pipeline_id: str = Field("", description="ID of the pipeline to operate on. Optional for ai_agent_run, brain_reindex, visualize_refresh, and corehub_backup.", example="pipeline-123")
@@ -415,6 +439,7 @@ class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
     idempotency_key: Optional[str] = Field(None, description="Updated AI run idempotency key template")
     allow_ai_run_loop: Optional[bool] = Field(None, description="Updated AI_RUN_* loop toggle")
     validation_reconcile: Optional[bool] = Field(None, description="Updated Validator reconcile toggle (entity_validate)")
+    audit_older_than_days: Optional[int] = Field(None, description="Updated purge age in days (pipeline_audit_purge)")
     viz_id: Optional[str] = Field(None, description="Updated visualization id (visualize_refresh)")
     visualize_parameters: Optional[Dict[str, str]] = Field(None, description="Updated Visualize refresh parameter map")
     enabled: Optional[bool] = Field(None, description="Updated enabled status")
@@ -443,6 +468,13 @@ class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
             return None
         return coerce_parameter_map(v)
 
+    @field_validator("audit_older_than_days")
+    @classmethod
+    def _validate_audit_older_than_days(cls, v):
+        # An update may omit task_type, so the age is checked on its own
+        check_older_than_days(v)
+        return v
+
     @model_validator(mode="after")
     def _validate_query_studio(self):
         """Validate Query Studio fields only when the update sets task_type to query_studio."""
@@ -459,6 +491,7 @@ class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
             )
         if self.task_type == TaskType.VISUALIZE_REFRESH:
             require_visualize_refresh_fields(self.task_type, self.viz_id)
+        require_audit_purge_fields(self.task_type, self.audit_older_than_days)
         return self
 
     model_config = ConfigDict(

@@ -51,7 +51,8 @@ The project follows [Semantic Versioning](https://semver.org/) (SemVer) for vers
   - Validate entities with the CoreHub Validator (`entity_validate`), optionally reconciling the target
   - Rebuild the Enterprise brain schema graph (`brain_reindex`)
   - Back up Core Hub to Gluesync Connect (`corehub_backup`)
-  - Start or stop the transactions audit of a pipeline (`pipeline_audit_start`, `pipeline_audit_stop`)
+  - Start or stop the transactions audit of a pipeline or of groups (`pipeline_audit_start`, `pipeline_audit_stop`, `pipeline_audit_group_start`, `pipeline_audit_group_stop`)
+  - Purge old transactions audit rows (`pipeline_audit_purge`)
   - More task types can be easily added
 - **Job Management**: View, create, update, disable/enable, and delete scheduled jobs
 - **Containerized Deployment**: Docker support for easy deployment
@@ -541,7 +542,7 @@ X-Chronos-Job-Id: 12
 - `5xx` and network errors are retried 3 times (backoff factor 1); if they keep failing the run fails.
 - Any `4xx` fails the run: `last_error_message` is `Core Hub answered HTTP <status>: <body excerpt>`. The job stays enabled, so an older Core Hub without the route picks the schedule up once it is updated.
 
-## Transactions audit (`pipeline_audit_start`, `pipeline_audit_stop`)
+## Transactions audit (`pipeline_audit_start`, `pipeline_audit_stop`, `pipeline_audit_group_start`, `pipeline_audit_group_stop`, `pipeline_audit_purge`)
 
 Schedule the start and the stop of a pipeline's transactions audit, for example to record only during a business window. `pipeline_id` is required; `entity_ids` is optional (empty means the configured scope for a start, every entity for a stop).
 
@@ -576,7 +577,20 @@ The audit must already be configured in Core Hub (`PUT /pipelines/{id}/transacti
 - Any `4xx` fails the run: `last_error_message` is `Core Hub answered HTTP <status>: <message> (<code>)`, for example `409 ... (NOT_CONFIGURED)`. The job stays enabled.
 - Chained events complete on this answer; no webhook is awaited.
 
-Retention purge is not a Chronos task yet; the extension point is `AUDIT_PURGE_TASK_TYPES_PLACEHOLDER` in `gluesync_scheduler/models/transactions_audit.py`.
+### Groups (`pipeline_audit_group_start`, `pipeline_audit_group_stop`)
+
+`pipeline_id` and `group_ids` are required. Chronos makes one Core Hub call per group, `POST .../transactions-audit/groups/{groupId}/start` with `{"confirmStatements": true}` and `.../stop` with an empty body. Every group is attempted; the run fails if any group failed (for example `404 ... (GROUP_NOT_FOUND)`), and the message lists each group. Entities of a group that cannot record are skipped by Core Hub and counted in the message.
+
+### Retention purge (`pipeline_audit_purge`)
+
+`pipeline_id` is required. `audit_older_than_days` (1 to 36500) is optional: without it Core Hub applies the `retentionDays` of the audit configuration (`409 ... (RETENTION_NOT_SET)` when neither is set). `entity_ids` is optional: empty purges the whole pipeline ledger. The Core Hub role must be Super admin or Manager.
+
+```http
+POST {corehub}/pipelines/pipeline-123/transactions-audit/purge
+{"olderThanDays": 30, "entityIds": []}
+```
+
+Core Hub ends a call at its row or time budget and answers `complete: false`. Chronos then calls again within the same run and logs each round, until `complete: true` or one of the caps is hit: at most **10 rounds** and **45 minutes** (`PURGE_MAX_ROUNDS`, `PURGE_DEADLINE_SECONDS` in `gluesync_scheduler/models/transactions_audit.py`), and a round that deletes nothing without finishing also ends the run. A run that hits a cap is a success (rows were deleted) whose message says the purge is incomplete; the next scheduled run goes on. A failed round fails the run and reports the rows deleted before it. `5xx` and network errors are retried once per round (330 s per call); any `4xx` (`PURGE_IN_PROGRESS`, `NO_LEDGER`, ...) fails the run and leaves the job enabled. The internal HTTP timeout of a purge run is raised above the 45 minutes automatically.
 
 ## Scheduling Options
 
