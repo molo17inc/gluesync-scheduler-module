@@ -138,6 +138,9 @@ class ChronosWebhookUrlTemplateTests(unittest.TestCase):
         ), mock.patch(
             "gluesync_scheduler.services.chain_execution_service.requests.put",
             side_effect=fake_put,
+        ), mock.patch(
+            "gluesync_scheduler.services.chain_execution_service._flow_webhook_secret",
+            return_value="s3cret",
         ):
             webhook_id = asyncio.run(
                 service._register_platform_event_webhook(1, "ENTITY_SNAPSHOT_COMPLETED")
@@ -149,6 +152,7 @@ class ChronosWebhookUrlTemplateTests(unittest.TestCase):
             registered["webhookUrl"],
             "{{chronos_address}}/api/webhooks/platform-event",
         )
+        self.assertEqual(registered["customHeaders"]["X-Chronos-Webhook-Secret"], "s3cret")
 
     def test_display_callback_base_still_concrete_for_trigger_urls(self):
         from gluesync_scheduler.services.chain_execution_service import (

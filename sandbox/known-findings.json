@@ -17,14 +17,6 @@
       "scenarios": ["chains"],
       "note": "group_start / group_stop chained events act on the whole pipeline instead of only the entities of the group."
     },
-    "platform-event-endpoint-unauthenticated": {
-      "scenarios": ["webhooks"],
-      "note": "POST /api/webhooks/platform-event fires any enabled trigger flow for a caller that only sends two static headers."
-    },
-    "internal-pipeline-api-open-to-private-ranges": {
-      "scenarios": ["internal-api"],
-      "note": "The pipeline control API accepts any caller from private ranges (172.*, 192.168.*) without authentication."
-    },
     "maintenance-406-reason-lost": {
       "scenarios": ["maintenance"],
       "note": "The 406 'pipeline is in maintenance' reason of Core Hub is only in the log, not in the job error shown to the user."

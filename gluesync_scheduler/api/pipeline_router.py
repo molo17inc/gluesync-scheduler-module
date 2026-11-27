@@ -28,6 +28,7 @@ import ipaddress
 import logging
 from sqlalchemy.orm import Session
 
+from gluesync_scheduler.core.internal_auth import INTERNAL_TOKEN_HEADER, is_internal_token
 from gluesync_scheduler.db.database import get_db
 from gluesync_scheduler.core.play_pause import PipelineManager
 from gluesync_scheduler.models.schemas import ErrorResponse, OperationResponse
@@ -118,6 +119,7 @@ def _parse_query_studio_body(body: Optional[dict]):
         )
     return agent_id, query_sql, saved_query_id, query_read_only
 
+
 def is_private_network_host(client_host: Optional[str]) -> bool:
     """
     True when the caller is the local machine or sits on a private network
@@ -159,6 +161,14 @@ async def verify_localhost(request: Request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This endpoint can only be accessed from localhost"
+        )
+    # A private address is not enough (any container on the Docker network, any LAN host):
+    # only Chronos itself knows the internal token (core/internal_auth.py).
+    if not is_internal_token(request.headers.get(INTERNAL_TOKEN_HEADER)):
+        logger.warning(f"Internal API call from {client_host} without a valid {INTERNAL_TOKEN_HEADER}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is internal to Chronos"
         )
 
     # Extract cron_job_identifier from headers or query parameters if present

@@ -22,6 +22,8 @@
 """
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -35,9 +37,39 @@ from typing import Any, Dict, List, Optional, Set
 _CHRONOS_WEBHOOK_PREFIX = "chronos-sync-"
 # Prefix used for platform event trigger flow webhooks.
 _CHRONOS_PLATFORM_WEBHOOK_PREFIX = "chronos-platform-"
+# Header carrying the per-flow secret on platform-event callbacks (see platform_webhook_secret).
+PLATFORM_WEBHOOK_SECRET_HEADER = "X-Chronos-Webhook-Secret"
+
+
+def platform_webhook_secret(flow_id: int, secret_token: str) -> str:
+    """The secret Core Hub sends back on a platform-event callback for one trigger flow.
+
+    Derived from the flow's own secret token, so rotating the token changes it (the webhook is
+    re-registered then) and the token itself never leaves Chronos.
+    """
+    return hmac.new(
+        secret_token.encode("utf-8"),
+        f"chronos-platform-event:{flow_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _flow_webhook_secret(flow_id: int) -> Optional[str]:
+    from gluesync_scheduler.db.database import SessionLocal
+    from gluesync_scheduler.models.models import TriggerFlow
+    db = SessionLocal()
+    try:
+        flow = db.query(TriggerFlow).filter(TriggerFlow.id == flow_id).first()
+        if flow is None or not flow.secret_token:
+            return None
+        return platform_webhook_secret(flow.id, flow.secret_token)
+    finally:
+        db.close()
 
 import requests
 from sqlalchemy.orm import Session
+
+from gluesync_scheduler.core.internal_auth import internal_headers
 
 from gluesync_scheduler.models.models import ChainedJobEvent, ExecutionMode, ScheduledJob, TaskType, query_read_only_of, query_studio_http_payload
 from gluesync_scheduler.models.ai_agent_run import (
@@ -641,6 +673,25 @@ class ChainExecutionService:
         except Exception as exc:
             logger.exception("Failed to delete platform event webhook for flow %d: %s", flow_id, exc)
 
+    async def reregister_platform_event_webhooks(self) -> int:
+        """Register again the webhook of every platform-event trigger flow (called at startup).
+
+        Upserts by id, so it is idempotent; it brings webhooks registered by older versions
+        (without the secret header, which callbacks now need) up to date.
+        """
+        from gluesync_scheduler.db.database import SessionLocal
+        from gluesync_scheduler.models.models import TriggerFlow
+        db = SessionLocal()
+        try:
+            flows = [(f.id, f.platform_event) for f in db.query(TriggerFlow).filter(TriggerFlow.platform_event.isnot(None)).all()]
+        finally:
+            db.close()
+        done = 0
+        for flow_id, platform_event in flows:
+            if platform_event and await self._register_platform_event_webhook(flow_id, platform_event):
+                done += 1
+        return done
+
     async def _register_platform_event_webhook(
         self, flow_id: int, platform_event: str
     ) -> Optional[str]:
@@ -658,6 +709,10 @@ class ChainExecutionService:
             # CoreHub expands {{chronos_address}} to the connected Chronos module.
             callback_url = _corehub_chronos_webhook_url("/api/webhooks/platform-event")
             webhook_id = f"{_CHRONOS_PLATFORM_WEBHOOK_PREFIX}{flow_id}"
+            webhook_secret = _flow_webhook_secret(flow_id)
+            if not webhook_secret:
+                logger.error("Cannot register platform event webhook — flow %d not found", flow_id)
+                return None
 
             new_webhook = {
                 "id": webhook_id,
@@ -671,6 +726,7 @@ class ChainExecutionService:
                 "customHeaders": {
                     "X-Trigger-Flow-ID": str(flow_id),
                     "EXT_MODULE": "chronos",
+                    PLATFORM_WEBHOOK_SECRET_HEADER: webhook_secret,
                 },
                 "skipTlsVerification": True,
                 "retryConfig": {
@@ -876,7 +932,7 @@ class ChainExecutionService:
                 requests.post,
                 endpoint,
                 json=payload,
-                headers={"Content-Type": "application/json"},
+                headers=internal_headers(),
                 timeout=timeout,
                 verify=verify,
             )

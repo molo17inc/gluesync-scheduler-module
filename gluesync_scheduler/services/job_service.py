@@ -59,6 +59,7 @@ from gluesync_scheduler.models.transactions_audit import (
 )
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
+from gluesync_scheduler.core.internal_auth import internal_headers
 from gluesync_scheduler.core.timezone_utils import get_env_timezone, get_zone, next_cron_fire
 
 logger = logging.getLogger(__name__)
@@ -1437,7 +1438,7 @@ class JobService:
                     method=method,
                     url=endpoint,
                     json=json_data,
-                    headers={"Content-Type": "application/json"},
+                    headers=internal_headers(),
                     timeout=internal_http_timeout,
                     verify=verify,
                     cert=cert
