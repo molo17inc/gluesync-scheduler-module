@@ -26,7 +26,6 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-import pytz
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, validator
 
 from gluesync_scheduler.models.models import TaskType
@@ -42,7 +41,7 @@ from gluesync_scheduler.models.schemas import (
     VisualizeRefreshFieldsMixin,
     VisualizeRefreshValidatorMixin,
 )
-from gluesync_scheduler.core.timezone_utils import get_env_timezone
+from gluesync_scheduler.core.timezone_utils import as_utc, get_env_timezone, get_zone
 from gluesync_scheduler.services.origin_routing import (
     ROUTING_BROADCAST,
     ROUTING_ORIGIN,
@@ -217,10 +216,9 @@ class TriggerFlowResponse(TriggerFlowBase):
     def serialize_dt(self, dt: Optional[datetime], info) -> Optional[str]:
         if dt is None:
             return None
-        if dt.tzinfo is None:
-            dt = pytz.UTC.localize(dt)
+        dt = as_utc(dt)
         try:
-            tz = pytz.timezone(get_env_timezone("UTC"))
+            tz = get_zone(get_env_timezone("UTC"))
             dt = dt.astimezone(tz)
         except Exception:
             pass

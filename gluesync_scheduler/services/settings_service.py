@@ -22,7 +22,6 @@
 """
 
 import logging
-import pytz
 import os
 from typing import List, Optional, Dict, Tuple
 from sqlalchemy.orm import Session
@@ -30,7 +29,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gluesync_scheduler.models.models import Setting
 from gluesync_scheduler.models.schemas import SettingCreate, SettingUpdate
-from gluesync_scheduler.core.timezone_utils import get_env_timezone
+from gluesync_scheduler.core.timezone_utils import get_env_timezone, is_valid_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -182,16 +181,12 @@ class SettingsService:
         Returns:
             True if updated, False if timezone is invalid
         """
-        try:
-            # Validate timezone
-            pytz.timezone(timezone_value)
-            
-            # Note: Global timezone setting is no longer used since we load from DB on startup
-            logger.info(f"Validated timezone setting: {timezone_value}")
-            return True
-        except pytz.exceptions.UnknownTimeZoneError:
+        if not is_valid_timezone(timezone_value):
             logger.error(f"Invalid timezone: {timezone_value}")
             return False
+        # Note: Global timezone setting is no longer used since we load from DB on startup
+        logger.info(f"Validated timezone setting: {timezone_value}")
+        return True
     
     def get_timezone(self) -> str:
         """

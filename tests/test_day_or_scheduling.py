@@ -37,9 +37,9 @@ import os
 import sys
 from datetime import datetime, timedelta
 from typing import List
+from zoneinfo import ZoneInfo
 
 import pytest
-import pytz
 import sqlalchemy
 from croniter import croniter
 from sqlalchemy import create_engine
@@ -52,9 +52,9 @@ from gluesync_scheduler.models.models import ScheduledJob, Setting, TaskType
 from gluesync_scheduler.models.schemas import Job, JobCreate, JobUpdate
 
 TZ_NAME = "Asia/Tokyo"
-TZ = pytz.timezone(TZ_NAME)
-WINDOW_START = TZ.localize(datetime(2025, 8, 1))
-WINDOW_END = TZ.localize(datetime(2025, 9, 1))
+TZ = ZoneInfo(TZ_NAME)
+WINDOW_START = datetime(2025, 8, 1, tzinfo=TZ)
+WINDOW_END = datetime(2025, 9, 1, tzinfo=TZ)
 MAX_FIRES = 500
 
 SERVICE_FILE = os.path.join(
@@ -110,7 +110,7 @@ def _clean_scheduler_jobs(request):
 # ---------------------------------------------------------------------------
 
 def _dt(day: int, hour: int, minute: int = 0, month: int = 8):
-    return TZ.localize(datetime(2025, month, day, hour, minute))
+    return datetime(2025, month, day, hour, minute, tzinfo=TZ)
 
 
 def _fires(days, hour, minute=0):

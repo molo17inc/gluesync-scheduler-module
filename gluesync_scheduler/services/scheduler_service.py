@@ -27,7 +27,6 @@ import os
 import sys
 from typing import Iterable, List, NamedTuple, Optional
 from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
@@ -37,7 +36,7 @@ from croniter import croniter
 from sqlalchemy.orm import Session
 
 from gluesync_scheduler.models.models import ScheduledJob, TaskType
-from gluesync_scheduler.core.timezone_utils import get_env_timezone
+from gluesync_scheduler.core.timezone_utils import get_env_timezone, get_zone
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +150,7 @@ def _trigger_for_job(job: ScheduledJob):
         raise ValueError(f"Invalid cron expression: {job.cron_expression}")
     minute, hour, day, month, day_of_week = cron_parts
     cron_dow = _to_apscheduler_day_of_week(day_of_week)
-    tz = ZoneInfo(_job_timezone_name(job))
+    tz = get_zone(_job_timezone_name(job))
     use_or = _day_or_applies(job)
     return _build_trigger(use_or, minute, hour, day, month, cron_dow, tz), cron_dow, use_or, tz
 

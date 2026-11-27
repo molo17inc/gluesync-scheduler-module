@@ -26,9 +26,7 @@ import logging
 import os
 import requests
 import uuid
-import pytz
-from croniter import croniter
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from typing import Dict, List, Optional, Tuple, Any, Union
 
 from fastapi import HTTPException, status
@@ -61,7 +59,7 @@ from gluesync_scheduler.models.transactions_audit import (
 )
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
-from gluesync_scheduler.core.timezone_utils import get_env_timezone
+from gluesync_scheduler.core.timezone_utils import get_env_timezone, get_zone, next_cron_fire
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +264,7 @@ class JobService:
         
         # Validate the timezone
         try:
-            pytz.timezone(timezone_name)
+            get_zone(timezone_name)
             return timezone_name
         except Exception as e:
             logger.error(f"Invalid timezone configured: {timezone_name}. Error: {str(e)}")
@@ -341,7 +339,7 @@ class JobService:
         if hasattr(db_job, 'timezone_name') and db_job.timezone_name:
             # Get the timezone
             try:
-                tz = pytz.timezone(db_job.timezone_name)
+                tz = get_zone(db_job.timezone_name)
                 
                 # Process next_run/start_time if it exists
                 if job_model.next_run and isinstance(job_model.next_run, str):
@@ -413,9 +411,9 @@ class JobService:
         # Resolve the configured timezone once per request (avoids per-job lookups)
         tz_name = self._get_configured_timezone()
         try:
-            tz = pytz.timezone(tz_name)
+            tz = get_zone(tz_name)
         except Exception:
-            tz = pytz.UTC
+            tz = timezone.utc
         now = datetime.now(tz)
 
         # Request-scoped caches keyed by cron expression (many jobs share expressions)
@@ -470,7 +468,7 @@ class JobService:
         self,
         job: ScheduledJob,
         job_model: Job,
-        tz: "pytz.BaseTzInfo",
+        tz: tzinfo,
         now: datetime,
         next_run_cache: Dict[Tuple[str, bool], Optional[datetime]],
     ) -> bool:
@@ -494,19 +492,13 @@ class JobService:
     def _compute_next_run(
         self,
         cron_expression: str,
-        tz: "pytz.BaseTzInfo",
+        tz: tzinfo,
         now: datetime,
         day_or: bool = True,
     ) -> Optional[datetime]:
         """Compute the next run datetime for a cron expression in the given timezone."""
         try:
-            cron_iter = croniter(cron_expression, now, day_or=day_or)
-            nxt = cron_iter.get_next(datetime)
-            if nxt.tzinfo is None:
-                nxt = tz.localize(nxt)
-            elif str(nxt.tzinfo) != str(tz):
-                nxt = nxt.astimezone(tz)
-            return nxt
+            return next_cron_fire(cron_expression, now, tz, day_or=day_or)
         except Exception as e:
             logger.warning(f"Failed to compute next_run for '{cron_expression}': {e}")
             return None
@@ -575,15 +567,9 @@ class JobService:
             return None, None
         try:
             current_timezone = timezone_name or self._get_configured_timezone()
-            tz = pytz.timezone(current_timezone)
+            tz = get_zone(current_timezone)
             logger.info(f"Using timezone for calculation: {current_timezone}")
-            now = datetime.now(tz)
-            cron_iter = croniter(cron_expression, now, day_or=day_or)
-            next_run_datetime = cron_iter.get_next(datetime)
-            if next_run_datetime.tzinfo is None:
-                next_run_datetime = tz.localize(next_run_datetime)
-            elif str(next_run_datetime.tzinfo) != str(tz):
-                next_run_datetime = next_run_datetime.astimezone(tz)
+            next_run_datetime = next_cron_fire(cron_expression, datetime.now(tz), tz, day_or=day_or)
             next_run_time = next_run_datetime.strftime(_ISO_DATETIME_FORMAT)
             logger.info(f"Calculated next run time: {next_run_time} in timezone {current_timezone}")
             return next_run_time, next_run_datetime
@@ -886,16 +872,12 @@ class JobService:
             return
         try:
             current_timezone = timezone_name or self._get_configured_timezone()
-            tz = pytz.timezone(current_timezone)
+            tz = get_zone(current_timezone)
             logger.info(f"Using timezone for calculation: {current_timezone}")
-            now = datetime.now(tz)
             self._log_cron_actual_days(db_job.cron_expression)
-            cron_iter = croniter(db_job.cron_expression, now, day_or=db_job.day_or is not False)
-            next_run_datetime = cron_iter.get_next(datetime)
-            if next_run_datetime.tzinfo is None:
-                next_run_datetime = tz.localize(next_run_datetime)
-            elif str(next_run_datetime.tzinfo) != str(tz):
-                next_run_datetime = next_run_datetime.astimezone(tz)
+            next_run_datetime = next_cron_fire(
+                db_job.cron_expression, datetime.now(tz), tz, day_or=db_job.day_or is not False,
+            )
             weekday_name = next_run_datetime.strftime("%A").lower()
             logger.info(f"Next run calculated for: {next_run_datetime}, which is a {weekday_name}")
             db_job.start_time = next_run_datetime.strftime(_ISO_DATETIME_FORMAT)
