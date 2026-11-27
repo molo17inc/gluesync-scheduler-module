@@ -622,6 +622,9 @@ class JobService:
             next_run_time, next_run_dt = self._calculate_next_run_times(
                 job_data.cron_expression, job_data.day_or, job_timezone,
             )
+            if next_run_dt is None:
+                # Rejected before anything is stored (sandbox finding failed-create-leaves-job-row).
+                raise ValueError(f"Invalid cron expression: '{job_data.cron_expression}'")
             is_cron_expression = bool(job_data.cron_expression and not job_data.schedule)
 
             self._validate_group_task_type(job_data.task_type, job_data.group_ids)
@@ -671,7 +674,15 @@ class JobService:
             self.db.refresh(db_job)
 
             if db_job.enabled:
-                job_id = self.scheduler_service.create_job(db_job)
+                try:
+                    job_id = self.scheduler_service.create_job(db_job)
+                except Exception as sched_error:
+                    # Do not leave an enabled row that was never scheduled behind.
+                    self.db.delete(db_job)
+                    self.db.commit()
+                    if isinstance(sched_error.__cause__, ValueError):
+                        raise ValueError(str(sched_error.__cause__)) from sched_error
+                    raise
                 db_job.command = f"Scheduled job ID: {job_id}"
                 self.db.commit()
                 self.db.refresh(db_job)

@@ -1,14 +1,6 @@
 {
   "_comment": "Findings accepted for now, on the repo build (APScheduler 3.11.3). A failed check whose finding is listed here does not fail the run; a listed finding that a scenario no longer reports does (stale: fixed? remove it). See README, 'Known findings and the exit status'.",
   "findings": {
-    "create-job-client-errors-answer-500": {
-      "scenarios": ["jobs-crud"],
-      "note": "Invalid create-job requests (group_start without group_ids, no schedule or cron, invalid cron) answer HTTP 500 instead of a 4xx."
-    },
-    "failed-create-leaves-job-row": {
-      "scenarios": ["jobs-crud"],
-      "note": "A job whose scheduling fails is committed anyway and stays in the list as an enabled but never scheduled row."
-    },
     "trailing-async-chained-event-dropped": {
       "scenarios": ["chains"],
       "note": "An async chained event placed after the last awaited step is never executed."
