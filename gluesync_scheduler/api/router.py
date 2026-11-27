@@ -478,9 +478,9 @@ def run_job(
     }
 })
 def get_chain_status(
+    job_id: Annotated[int, Path(description="The ID of the job to check")],
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[CurrentUser, Depends(current_user)],
-    job_id: int = Path(..., description="The ID of the job to check"),
 ):
     """
     Get the chain execution status for a job.
