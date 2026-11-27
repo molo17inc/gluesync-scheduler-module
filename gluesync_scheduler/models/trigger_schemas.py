@@ -105,17 +105,8 @@ class TriggerEventResponse(TriggerEventBase):
     position: int
     trigger_flow_id: int
 
-    @validator("entity_ids", pre=True)
-    def parse_entity_ids(cls, v):
-        if isinstance(v, str):
-            try:
-                return json.loads(v)
-            except json.JSONDecodeError:
-                return None
-        return v
-
-    @validator("group_ids", pre=True)
-    def parse_group_ids(cls, v):
+    @validator("entity_ids", "group_ids", pre=True)
+    def parse_json_id_list(cls, v):
         if isinstance(v, str):
             try:
                 return json.loads(v)

@@ -40,16 +40,21 @@ def brain_job_status(job: dict) -> str:
     return str((job or {}).get("status") or "").upper()
 
 
+def _job_count(job: dict, camel_key: str, snake_key: str):
+    """Counter from the brain job, camelCase first, snake_case fallback, else 0."""
+    value = job.get(camel_key)
+    if value is None:
+        value = job.get(snake_key) or 0
+    return value
+
+
 def brain_job_message(job: dict) -> str:
     """Human-readable outcome stored as the job error when the rebuild fails."""
+    job = job or {}
     status = brain_job_status(job)
-    message = str((job or {}).get("message") or "").strip()
-    tables = (job or {}).get("tablesSeen")
-    if tables is None:
-        tables = (job or {}).get("tables_seen") or 0
-    edges = (job or {}).get("edgesSeen")
-    if edges is None:
-        edges = (job or {}).get("edges_seen") or 0
+    message = str(job.get("message") or "").strip()
+    tables = _job_count(job, "tablesSeen", "tables_seen")
+    edges = _job_count(job, "edgesSeen", "edges_seen")
     if status == STATUS_READY:
         base = message or "Enterprise brain is ready."
         return f"{base} ({tables} tables, {edges} edges)"

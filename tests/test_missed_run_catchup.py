@@ -126,7 +126,8 @@ def test_miss_older_than_the_window_is_skipped(module, caplog):
     now = datetime(2026, 6, 10, 12, 30, tzinfo=UTC) + GRACE + timedelta(seconds=1)
     with caplog.at_level("WARNING"):
         assert module.plan_missed_runs([job], now) == []
-    assert "job 7 'nightly'" in caplog.text and "2026-06-10T12:30:00" in caplog.text
+    assert "job 7 'nightly'" in caplog.text
+    assert "2026-06-10T12:30:00" in caplog.text
 
 
 def test_miss_exactly_at_the_window_edge_is_replayed(module):
@@ -229,7 +230,8 @@ def test_plan_survives_a_broken_job(module, caplog):
     with caplog.at_level("ERROR"):
         plan = module.plan_missed_runs([broken, bad_tz, good], datetime(2026, 6, 10, 12, 40, tzinfo=UTC))
     assert [r.job_id for r in plan] == [3]
-    assert "job 1" in caplog.text and "job 2" in caplog.text
+    assert "job 1" in caplog.text
+    assert "job 2" in caplog.text
 
 
 def test_job_in_a_timezone_east_of_utc_missed_ten_minutes_ago_is_replayed(module):

@@ -201,6 +201,70 @@ def _get_corehub_ssl_verify() -> bool:
     return not ssl_skip_verify if ssl_enabled else True
 
 
+# HTTP statuses CoreHub returns for a successful webhook-list PUT.
+_WEBHOOK_PUT_OK = (200, 201, 202, 204)
+
+
+async def _get_webhook_list(
+    config_endpoint: str, auth_headers: dict, ssl_verify: bool
+) -> requests.Response:
+    """GET the CoreHub webhook list in a worker thread."""
+    return await asyncio.to_thread(
+        requests.get, config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify,
+    )
+
+
+async def _put_webhook_list(
+    config_endpoint: str, webhooks: list, auth_headers: dict, ssl_verify: bool
+) -> requests.Response:
+    """PUT the full CoreHub webhook list in a worker thread."""
+    return await asyncio.to_thread(
+        requests.put,
+        config_endpoint,
+        json=webhooks,
+        headers=auth_headers,
+        timeout=10,
+        verify=ssl_verify,
+    )
+
+
+def _json_list(response: requests.Response) -> Optional[list]:
+    """Return the response body when it is a JSON list, else None."""
+    try:
+        data = response.json()
+    except Exception:
+        return None
+    return data if isinstance(data, list) else None
+
+
+def _run_coroutine_blocking(coro_factory, thread_error: str) -> None:
+    """Run ``coro_factory()`` to completion from sync code.
+
+    Uses ``asyncio.run``; when an event loop is already running in this
+    thread, runs a fresh coroutine in a helper thread (waiting up to 30 s).
+    Exceptions other than that ``RuntimeError`` propagate to the caller.
+    """
+    coro = coro_factory()
+    try:
+        asyncio.run(coro)
+    except RuntimeError:
+        # Event loop already running — fall back to thread.
+        # Close the coroutine created above to avoid a
+        # "coroutine was never awaited" RuntimeWarning, then recreate it
+        # inside the thread.
+        coro.close()
+
+        def _run():
+            try:
+                asyncio.run(coro_factory())
+            except Exception as exc:
+                logger.exception("%s: %s", thread_error, exc)
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=30)
+
+
 def _task_type_to_webhook_events(task_type: TaskType) -> list:
     """Map a TaskType to the WebhookEventType enum names that signal
     completion of the operation.
@@ -502,25 +566,12 @@ class ChainExecutionService:
         if not sync_events:
             return
         try:
-            coro = self._register_webhooks_batch(events, main_job_task_type)
-            asyncio.run(coro)
-        except RuntimeError:
-            # Event loop already running — fall back to thread.
-            # The coroutine was already created above; close it to avoid
-            # "coroutine was never awaited" RuntimeWarning, then recreate
-            # inside the thread.
-            coro.close()
-            import threading
-            def _run():
-                try:
-                    asyncio.run(self._register_webhooks_batch(events, main_job_task_type))
-                except Exception as exc:
-                    logger.error("Failed to register webhooks in thread: %s", exc)
-            t = threading.Thread(target=_run, daemon=True)
-            t.start()
-            t.join(timeout=30)
+            _run_coroutine_blocking(
+                lambda: self._register_webhooks_batch(events, main_job_task_type),
+                "Failed to register webhooks in thread",
+            )
         except Exception as exc:
-            logger.error("Failed to register webhooks for events: %s", exc)
+            logger.exception("Failed to register webhooks for events: %s", exc)
 
     def sync_delete_webhooks_for_events(self, event_ids: List[int]) -> None:
         """Sync wrapper to delete persistent webhooks for the given event IDs.
@@ -531,21 +582,12 @@ class ChainExecutionService:
             return
         webhook_ids = [f"{_CHRONOS_WEBHOOK_PREFIX}{eid}" for eid in event_ids]
         try:
-            coro = self._delete_webhooks_batch(webhook_ids)
-            asyncio.run(coro)
-        except RuntimeError:
-            coro.close()
-            import threading
-            def _run():
-                try:
-                    asyncio.run(self._delete_webhooks_batch(webhook_ids))
-                except Exception as exc:
-                    logger.error("Failed to delete webhooks in thread: %s", exc)
-            t = threading.Thread(target=_run, daemon=True)
-            t.start()
-            t.join(timeout=30)
+            _run_coroutine_blocking(
+                lambda: self._delete_webhooks_batch(webhook_ids),
+                "Failed to delete webhooks in thread",
+            )
         except Exception as exc:
-            logger.error("Failed to delete webhooks for events %s: %s", event_ids, exc)
+            logger.exception("Failed to delete webhooks for events %s: %s", event_ids, exc)
 
     def sync_delete_webhooks_for_job(self, job_id: int) -> None:
         """Sync wrapper to delete all persistent webhooks for a job's chained events.
@@ -564,7 +606,7 @@ class ChainExecutionService:
                 db.close()
             self.sync_delete_webhooks_for_events(event_ids)
         except Exception as exc:
-            logger.error("Failed to delete webhooks for job %d: %s", job_id, exc)
+            logger.exception("Failed to delete webhooks for job %d: %s", job_id, exc)
 
     # ------------------------------------------------------------------
     # Platform event trigger flow webhook management
@@ -581,41 +623,23 @@ class ChainExecutionService:
         if not platform_event:
             return
         try:
-            coro = self._register_platform_event_webhook(flow_id, platform_event)
-            asyncio.run(coro)
-        except RuntimeError:
-            coro.close()
-            import threading
-            def _run():
-                try:
-                    asyncio.run(self._register_platform_event_webhook(flow_id, platform_event))
-                except Exception as exc:
-                    logger.error("Failed to register platform event webhook in thread: %s", exc)
-            t = threading.Thread(target=_run, daemon=True)
-            t.start()
-            t.join(timeout=30)
+            _run_coroutine_blocking(
+                lambda: self._register_platform_event_webhook(flow_id, platform_event),
+                "Failed to register platform event webhook in thread",
+            )
         except Exception as exc:
-            logger.error("Failed to register platform event webhook for flow %d: %s", flow_id, exc)
+            logger.exception("Failed to register platform event webhook for flow %d: %s", flow_id, exc)
 
     def sync_delete_platform_event_webhook(self, flow_id: int) -> None:
         """Delete the persistent webhook from CoreHub for a platform event trigger flow."""
         webhook_id = f"{_CHRONOS_PLATFORM_WEBHOOK_PREFIX}{flow_id}"
         try:
-            coro = self._delete_webhooks_batch([webhook_id])
-            asyncio.run(coro)
-        except RuntimeError:
-            coro.close()
-            import threading
-            def _run():
-                try:
-                    asyncio.run(self._delete_webhooks_batch([webhook_id]))
-                except Exception as exc:
-                    logger.error("Failed to delete platform event webhook in thread: %s", exc)
-            t = threading.Thread(target=_run, daemon=True)
-            t.start()
-            t.join(timeout=30)
+            _run_coroutine_blocking(
+                lambda: self._delete_webhooks_batch([webhook_id]),
+                "Failed to delete platform event webhook in thread",
+            )
         except Exception as exc:
-            logger.error("Failed to delete platform event webhook for flow %d: %s", flow_id, exc)
+            logger.exception("Failed to delete platform event webhook for flow %d: %s", flow_id, exc)
 
     async def _register_platform_event_webhook(
         self, flow_id: int, platform_event: str
@@ -657,55 +681,49 @@ class ChainExecutionService:
                 },
             }
 
-            config_endpoint = f"{corehub_url}/global-config/webhooks"
-            auth_headers = _get_corehub_auth_headers()
-            ssl_verify = _get_corehub_ssl_verify()
-            loop = asyncio.get_event_loop()
+            def _on_failure(attempt: int, max_attempts: int, put_resp: requests.Response) -> None:
+                logger.error(
+                    "Failed to register platform event webhook (attempt %d/%d): HTTP %d — response: %s",
+                    attempt, max_attempts, put_resp.status_code, put_resp.text[:300],
+                )
 
-            max_attempts = 3
-            for attempt in range(1, max_attempts + 1):
-                async with self._get_webhook_list_lock():
-                    get_resp = await loop.run_in_executor(
-                        None,
-                        lambda: requests.get(config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify),
-                    )
-                    existing: list = []
-                    if get_resp.status_code == 200:
-                        try:
-                            existing = get_resp.json()
-                            if not isinstance(existing, list):
-                                existing = []
-                        except Exception:
-                            existing = []
-
-                    filtered = [w for w in existing if w.get("id") != webhook_id]
-                    updated = filtered + [new_webhook]
-                    put_resp = await loop.run_in_executor(
-                        None,
-                        lambda: requests.put(
-                            config_endpoint,
-                            json=updated,
-                            headers=auth_headers,
-                            timeout=10,
-                            verify=ssl_verify,
-                        ),
-                    )
-                    if put_resp.status_code in (200, 201, 202, 204):
-                        logger.info("Registered platform event webhook %s for flow %d (event=%s)", webhook_id, flow_id, platform_event)
-                        return webhook_id
-
-                    logger.error(
-                        "Failed to register platform event webhook (attempt %d/%d): HTTP %d — response: %s",
-                        attempt, max_attempts, put_resp.status_code, put_resp.text[:300],
-                    )
-
-                if attempt < max_attempts:
-                    await asyncio.sleep(0.5 * attempt)
-
+            if await self._upsert_webhook_with_retry(new_webhook, corehub_url, _on_failure):
+                logger.info("Registered platform event webhook %s for flow %d (event=%s)", webhook_id, flow_id, platform_event)
+                return webhook_id
             return None
         except Exception as exc:
-            logger.error("Exception registering platform event webhook: %s", exc)
+            logger.exception("Exception registering platform event webhook: %s", exc)
             return None
+
+    async def _upsert_webhook_with_retry(self, new_webhook: dict, corehub_url: str, on_failure) -> bool:
+        """Upsert ``new_webhook`` into CoreHub's webhook list (GET, replace by id, PUT).
+
+        Tries up to 3 times under ``_webhook_list_lock``, calling
+        ``on_failure(attempt, max_attempts, put_resp)`` after each rejected PUT.
+        Returns True once a PUT succeeds.
+        """
+        config_endpoint = f"{corehub_url}/global-config/webhooks"
+        auth_headers = _get_corehub_auth_headers()
+        ssl_verify = _get_corehub_ssl_verify()
+        webhook_id = new_webhook["id"]
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            async with self._get_webhook_list_lock():
+                get_resp = await _get_webhook_list(config_endpoint, auth_headers, ssl_verify)
+                existing = (_json_list(get_resp) if get_resp.status_code == 200 else None) or []
+
+                # Remove any existing webhook with the same id (idempotent upsert)
+                updated = [w for w in existing if w.get("id") != webhook_id] + [new_webhook]
+                put_resp = await _put_webhook_list(config_endpoint, updated, auth_headers, ssl_verify)
+                if put_resp.status_code in _WEBHOOK_PUT_OK:
+                    return True
+                on_failure(attempt, max_attempts, put_resp)
+
+            if attempt < max_attempts:
+                await asyncio.sleep(0.5 * attempt)
+
+        return False
 
     async def _register_webhooks_batch(
         self, events: List[ChainedJobEvent], main_job_task_type: TaskType
@@ -756,24 +774,17 @@ class ChainExecutionService:
             config_endpoint = f"{corehub_url}/global-config/webhooks"
             auth_headers = _get_corehub_auth_headers()
             ssl_verify = _get_corehub_ssl_verify()
-            loop = asyncio.get_event_loop()
 
             ids_to_remove = set(webhook_ids)
 
             async with self._get_webhook_list_lock():
-                get_resp = await loop.run_in_executor(
-                    None,
-                    lambda: requests.get(config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify),
-                )
+                get_resp = await _get_webhook_list(config_endpoint, auth_headers, ssl_verify)
                 if get_resp.status_code != 200:
                     logger.warning("Cannot fetch webhook list for batch delete: HTTP %d", get_resp.status_code)
                     return
 
-                try:
-                    existing: list = get_resp.json()
-                    if not isinstance(existing, list):
-                        return
-                except Exception:
+                existing = _json_list(get_resp)
+                if existing is None:
                     return
 
                 updated = [w for w in existing if w.get("id") not in ids_to_remove]
@@ -781,17 +792,8 @@ class ChainExecutionService:
                     # Nothing to delete
                     return
 
-                put_resp = await loop.run_in_executor(
-                    None,
-                    lambda: requests.put(
-                        config_endpoint,
-                        json=updated,
-                        headers=auth_headers,
-                        timeout=10,
-                        verify=ssl_verify,
-                    ),
-                )
-                if put_resp.status_code in (200, 201, 202, 204):
+                put_resp = await _put_webhook_list(config_endpoint, updated, auth_headers, ssl_verify)
+                if put_resp.status_code in _WEBHOOK_PUT_OK:
                     removed = len(existing) - len(updated)
                     logger.info("Batch deleted %d webhook(s) from corehub", removed)
                 else:
@@ -870,16 +872,13 @@ class ChainExecutionService:
             ssl_skip = os.getenv("SSL_SKIP_VERIFY", "False").lower() in ("true", "1", "t")
             verify = not ssl_skip if ssl_enabled else True
 
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: requests.post(
-                    endpoint,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=timeout,
-                    verify=verify,
-                ),
+            response = await asyncio.to_thread(
+                requests.post,
+                endpoint,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=timeout,
+                verify=verify,
             )
             if response.status_code in (200, 201, 202):
                 logger.info("Event id=%d executed OK (HTTP %d)", event.id, response.status_code)
@@ -892,7 +891,7 @@ class ChainExecutionService:
                 )
                 return False
         except Exception as exc:
-            logger.error("Event id=%d raised exception: %s", event.id, exc)
+            logger.exception("Event id=%d raised exception: %s", event.id, exc)
             return False
 
     async def _execute_sync_event(
@@ -993,62 +992,22 @@ class ChainExecutionService:
                 },
             }
 
-            config_endpoint = f"{corehub_url}/global-config/webhooks"
-            auth_headers = _get_corehub_auth_headers()
-            ssl_verify = _get_corehub_ssl_verify()
-            loop = asyncio.get_event_loop()
+            def _on_failure(attempt: int, max_attempts: int, put_resp: requests.Response) -> None:
+                self._last_webhook_error = (
+                    f"HTTP {put_resp.status_code}: {put_resp.text[:200]}"
+                )
+                logger.error(
+                    "Failed to register corehub webhook (attempt %d/%d): HTTP %d — response: %s",
+                    attempt, max_attempts, put_resp.status_code, put_resp.text[:300]
+                )
 
-            max_attempts = 3
-            for attempt in range(1, max_attempts + 1):
-                async with self._get_webhook_list_lock():
-                    # GET existing list
-                    get_resp = await loop.run_in_executor(
-                        None,
-                        lambda: requests.get(config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify),
-                    )
-                    existing: list = []
-                    if get_resp.status_code == 200:
-                        try:
-                            existing = get_resp.json()
-                            if not isinstance(existing, list):
-                                existing = []
-                        except Exception:
-                            existing = []
-
-                    # Remove any existing webhook with the same id (idempotent upsert)
-                    filtered = [w for w in existing if w.get("id") != webhook_id]
-
-                    # PUT updated list
-                    updated = filtered + [new_webhook]
-                    put_resp = await loop.run_in_executor(
-                        None,
-                        lambda: requests.put(
-                            config_endpoint,
-                            json=updated,
-                            headers=auth_headers,
-                            timeout=10,
-                            verify=ssl_verify,
-                        ),
-                    )
-                    if put_resp.status_code in (200, 201, 202, 204):
-                        logger.info("Registered corehub webhook %s for event %d", webhook_id, event.id)
-                        return webhook_id
-
-                    self._last_webhook_error = (
-                        f"HTTP {put_resp.status_code}: {put_resp.text[:200]}"
-                    )
-                    logger.error(
-                        "Failed to register corehub webhook (attempt %d/%d): HTTP %d — response: %s",
-                        attempt, max_attempts, put_resp.status_code, put_resp.text[:300]
-                    )
-
-                if attempt < max_attempts:
-                    await asyncio.sleep(0.5 * attempt)
-
+            if await self._upsert_webhook_with_retry(new_webhook, corehub_url, _on_failure):
+                logger.info("Registered corehub webhook %s for event %d", webhook_id, event.id)
+                return webhook_id
             return None
         except Exception as exc:
             self._last_webhook_error = str(exc)
-            logger.error("Exception registering corehub webhook: %s", exc)
+            logger.exception("Exception registering corehub webhook: %s", exc)
             return None
 
     async def _delete_corehub_webhook(self, webhook_config_id: str) -> None:
@@ -1068,13 +1027,9 @@ class ChainExecutionService:
                 config_endpoint = f"{corehub_url}/global-config/webhooks"
                 auth_headers = _get_corehub_auth_headers()
                 ssl_verify = _get_corehub_ssl_verify()
-                loop = asyncio.get_event_loop()
 
                 async with self._get_webhook_list_lock():
-                    get_resp = await loop.run_in_executor(
-                        None,
-                        lambda: requests.get(config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify),
-                    )
+                    get_resp = await _get_webhook_list(config_endpoint, auth_headers, ssl_verify)
                     if get_resp.status_code != 200:
                         logger.warning(
                             "Cannot fetch webhook list for deletion (attempt %d/%d): HTTP %d",
@@ -1084,25 +1039,10 @@ class ChainExecutionService:
                             await asyncio.sleep(0.5 * attempt)
                         continue
 
-                    try:
-                        existing: list = get_resp.json()
-                        if not isinstance(existing, list):
-                            existing = []
-                    except Exception:
-                        existing = []
-
+                    existing = _json_list(get_resp) or []
                     updated = [w for w in existing if w.get("id") != webhook_config_id]
-                    put_resp = await loop.run_in_executor(
-                        None,
-                        lambda: requests.put(
-                            config_endpoint,
-                            json=updated,
-                            headers=auth_headers,
-                            timeout=10,
-                            verify=ssl_verify,
-                        ),
-                    )
-                    if put_resp.status_code in (200, 201, 202, 204):
+                    put_resp = await _put_webhook_list(config_endpoint, updated, auth_headers, ssl_verify)
+                    if put_resp.status_code in _WEBHOOK_PUT_OK:
                         logger.info("Deleted corehub webhook %s", webhook_config_id)
                         return
 
@@ -1165,22 +1105,15 @@ class ChainExecutionService:
             config_endpoint = f"{corehub_url}/global-config/webhooks"
             auth_headers = _get_corehub_auth_headers()
             ssl_verify = _get_corehub_ssl_verify()
-            loop = asyncio.get_event_loop()
 
             async with chain_execution_service._get_webhook_list_lock():
-                get_resp = await loop.run_in_executor(
-                    None,
-                    lambda: requests.get(config_endpoint, headers=auth_headers, timeout=10, verify=ssl_verify),
-                )
+                get_resp = await _get_webhook_list(config_endpoint, auth_headers, ssl_verify)
                 if get_resp.status_code != 200:
                     logger.warning("Cannot fetch webhook list for cleanup: HTTP %d", get_resp.status_code)
                     return 0
 
-                try:
-                    existing: list = get_resp.json()
-                    if not isinstance(existing, list):
-                        return 0
-                except Exception:
+                existing = _json_list(get_resp)
+                if existing is None:
                     return 0
 
                 # Find chronos webhooks that are orphans (event/flow no longer in DB)
@@ -1197,17 +1130,8 @@ class ChainExecutionService:
 
                 orphan_ids = {w.get("id") for w in orphans}
                 updated = [w for w in existing if w.get("id") not in orphan_ids]
-                put_resp = await loop.run_in_executor(
-                    None,
-                    lambda: requests.put(
-                        config_endpoint,
-                        json=updated,
-                        headers=auth_headers,
-                        timeout=10,
-                        verify=ssl_verify,
-                    ),
-                )
-                if put_resp.status_code in (200, 201, 202, 204):
+                put_resp = await _put_webhook_list(config_endpoint, updated, auth_headers, ssl_verify)
+                if put_resp.status_code in _WEBHOOK_PUT_OK:
                     removed = len(orphans)
                     logger.info("Cleaned up %d orphaned chronos webhook(s) from corehub", removed)
                 else:

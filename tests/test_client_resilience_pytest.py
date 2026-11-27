@@ -15,18 +15,18 @@ from gluesync_scheduler.core.gluesync_sdk_client import GluesyncSDKClient
 from gluesync_sdk.exceptions import GluesyncConnectionError
 
 @pytest.mark.asyncio
-async def test_sdk_client_initialization_deduplication():
+async def test_sdk_client_initialization_deduplication(monkeypatch):
     """
     Test that concurrent calls to GluesyncSDKClient().initialize()
     are deduplicated using the _initializing state lock and do not trigger
     duplicate client recreation or connections.
     """
     # Reset singleton state for a clean test
-    GluesyncSDKClient._instance = None
-    GluesyncSDKClient._is_initialized = False
-    GluesyncSDKClient._initializing = False
-    GluesyncSDKClient._token = None
-    GluesyncSDKClient._client = None
+    monkeypatch.setattr(GluesyncSDKClient, "_instance", None)
+    monkeypatch.setattr(GluesyncSDKClient, "_is_initialized", False)
+    monkeypatch.setattr(GluesyncSDKClient, "_initializing", False)
+    monkeypatch.setattr(GluesyncSDKClient, "_token", None)
+    monkeypatch.setattr(GluesyncSDKClient, "_client", None)
     
     client_instance = GluesyncSDKClient()
     
@@ -54,17 +54,17 @@ async def test_sdk_client_initialization_deduplication():
         mock_class.assert_called_once()
 
 @pytest.mark.asyncio
-async def test_sdk_client_exponential_backoff_retry():
+async def test_sdk_client_exponential_backoff_retry(monkeypatch):
     """
     Test that GluesyncSDKClient().initialize() retries with exponential backoff
     on GluesyncConnectionError, doubling the backoff as expected.
     """
     # Reset singleton state for a clean test
-    GluesyncSDKClient._instance = None
-    GluesyncSDKClient._is_initialized = False
-    GluesyncSDKClient._initializing = False
-    GluesyncSDKClient._token = None
-    GluesyncSDKClient._client = None
+    monkeypatch.setattr(GluesyncSDKClient, "_instance", None)
+    monkeypatch.setattr(GluesyncSDKClient, "_is_initialized", False)
+    monkeypatch.setattr(GluesyncSDKClient, "_initializing", False)
+    monkeypatch.setattr(GluesyncSDKClient, "_token", None)
+    monkeypatch.setattr(GluesyncSDKClient, "_client", None)
     
     client_instance = GluesyncSDKClient()
     

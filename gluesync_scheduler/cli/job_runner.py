@@ -196,44 +196,44 @@ def _job_runner_base_url() -> tuple:
     return base_url, ssl_enabled
 
 
+# Task type -> pipeline API action for jobs addressed by the raw pipeline id.
+_RAW_PIPELINE_ACTIONS = {
+    TaskType.PIPELINE_START: "play",
+    TaskType.ENTITY_START: "play",
+    TaskType.PIPELINE_STOP: "pause",
+    TaskType.ENTITY_STOP: "pause",
+    TaskType.PIPELINE_SNAPSHOT: "one-time-snapshot",
+    TaskType.ENTITY_SNAPSHOT: "one-time-snapshot",
+    TaskType.PIPELINE_REDO: "redo",
+    TaskType.ENTITY_REDO: "redo",
+    TaskType.GROUP_REDO: "redo-group",
+    TaskType.QUERY_STUDIO: "query-studio",
+    TaskType.ENTITY_VALIDATE: "validate",
+    TaskType.PIPELINE_AUDIT_START: "audit-start",
+    TaskType.PIPELINE_AUDIT_STOP: "audit-stop",
+    TaskType.PIPELINE_AUDIT_GROUP_START: "audit-group-start",
+    TaskType.PIPELINE_AUDIT_GROUP_STOP: "audit-group-stop",
+    TaskType.PIPELINE_AUDIT_PURGE: "audit-purge",
+}
+# Task type -> action for jobs whose pipeline id goes through pipeline_path_id()
+# (they may target Core Hub rather than a real pipeline).
+_PATH_ID_ACTIONS = {
+    TaskType.AI_AGENT_RUN: "ai-agent-run",
+    TaskType.BRAIN_REINDEX: "brain-reindex",
+    TaskType.VISUALIZE_REFRESH: "visualize-refresh",
+    TaskType.CORE_HUB_BACKUP: "corehub-backup",
+}
+
+
 def _endpoint_for_job(base_url: str, job: ScheduledJob) -> Optional[str]:
     """Map task type to pipeline API endpoint; return None if unknown."""
-    if job.task_type in [TaskType.PIPELINE_START, TaskType.ENTITY_START]:
-        return f"{base_url}/pipelines/{job.pipeline_id}/play"
-    if job.task_type in [TaskType.PIPELINE_STOP, TaskType.ENTITY_STOP]:
-        return f"{base_url}/pipelines/{job.pipeline_id}/pause"
-    if job.task_type in [TaskType.PIPELINE_SNAPSHOT, TaskType.ENTITY_SNAPSHOT]:
-        return f"{base_url}/pipelines/{job.pipeline_id}/one-time-snapshot"
-    if job.task_type in [TaskType.PIPELINE_REDO, TaskType.ENTITY_REDO]:
-        return f"{base_url}/pipelines/{job.pipeline_id}/redo"
-    if job.task_type == TaskType.GROUP_REDO:
-        return f"{base_url}/pipelines/{job.pipeline_id}/redo-group"
-    if job.task_type == TaskType.QUERY_STUDIO:
-        return f"{base_url}/pipelines/{job.pipeline_id}/query-studio"
-    if job.task_type == TaskType.AI_AGENT_RUN:
+    action = _RAW_PIPELINE_ACTIONS.get(job.task_type)
+    if action is not None:
+        return f"{base_url}/pipelines/{job.pipeline_id}/{action}"
+    action = _PATH_ID_ACTIONS.get(job.task_type)
+    if action is not None:
         from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
-        return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/ai-agent-run"
-    if job.task_type == TaskType.ENTITY_VALIDATE:
-        return f"{base_url}/pipelines/{job.pipeline_id}/validate"
-    if job.task_type == TaskType.BRAIN_REINDEX:
-        from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
-        return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/brain-reindex"
-    if job.task_type == TaskType.VISUALIZE_REFRESH:
-        from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
-        return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/visualize-refresh"
-    if job.task_type == TaskType.CORE_HUB_BACKUP:
-        from gluesync_scheduler.models.ai_agent_run import pipeline_path_id
-        return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/corehub-backup"
-    if job.task_type == TaskType.PIPELINE_AUDIT_START:
-        return f"{base_url}/pipelines/{job.pipeline_id}/audit-start"
-    if job.task_type == TaskType.PIPELINE_AUDIT_STOP:
-        return f"{base_url}/pipelines/{job.pipeline_id}/audit-stop"
-    if job.task_type == TaskType.PIPELINE_AUDIT_GROUP_START:
-        return f"{base_url}/pipelines/{job.pipeline_id}/audit-group-start"
-    if job.task_type == TaskType.PIPELINE_AUDIT_GROUP_STOP:
-        return f"{base_url}/pipelines/{job.pipeline_id}/audit-group-stop"
-    if job.task_type == TaskType.PIPELINE_AUDIT_PURGE:
-        return f"{base_url}/pipelines/{job.pipeline_id}/audit-purge"
+        return f"{base_url}/pipelines/{pipeline_path_id(job.pipeline_id)}/{action}"
     logger.error(f"Unknown task type: {job.task_type}")
     return None
 

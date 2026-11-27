@@ -27,10 +27,9 @@ import os
 import ssl
 import json
 import uvicorn
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from gluesync_scheduler.version import __version__
-import pytz
 from fastapi import FastAPI, Request
 import fastapi
 from fastapi.middleware.cors import CORSMiddleware
@@ -650,7 +649,7 @@ class JSONEncoder(json.JSONEncoder):
         if isinstance(obj, datetime):
             # Ensure datetime has timezone information
             if obj.tzinfo is None:
-                obj = obj.replace(tzinfo=pytz.UTC)
+                obj = obj.replace(tzinfo=timezone.utc)
             return obj.isoformat()
         return super().default(obj)
 
