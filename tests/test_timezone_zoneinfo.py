@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
+from croniter import CroniterBadCronError
 from fastapi import HTTPException
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -227,8 +228,9 @@ def test_naive_now_is_read_as_utc():
 
 
 def test_invalid_cron_raises():
-    with pytest.raises(Exception):
-        next_cron_fire("not a cron", datetime(2026, 7, 1, tzinfo=UTC), ROME)
+    now = datetime(2026, 7, 1, tzinfo=UTC)
+    with pytest.raises(CroniterBadCronError):
+        next_cron_fire("not a cron", now, ROME)
 
 
 _SWEEP_ZONES = ["Europe/Rome", "America/New_York", "Australia/Sydney", "Australia/Lord_Howe", "America/Santiago", "Europe/Dublin", "Asia/Tokyo"]
