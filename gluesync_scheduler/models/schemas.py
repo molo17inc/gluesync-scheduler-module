@@ -23,12 +23,10 @@
 
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime, timezone, timedelta
-import pytz
 import json
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import os
 from enum import Enum
-from croniter import croniter
 from pydantic import BaseModel, Field, validator, field_validator, field_serializer, model_validator, ConfigDict
 
 from gluesync_scheduler.models.models import TaskType, ExecutionMode, require_query_studio_fields, coerce_query_read_only
@@ -36,7 +34,7 @@ from gluesync_scheduler.models.ai_agent_run import parse_json_list, parse_json_o
 from gluesync_scheduler.models.transactions_audit import check_older_than_days, require_audit_purge_fields
 from gluesync_scheduler.models.entity_validation import VALIDATION_RECONCILE, require_entity_validation_fields
 from gluesync_scheduler.models.visualize_refresh import coerce_parameter_map, require_visualize_refresh_fields
-from gluesync_scheduler.core.timezone_utils import get_env_timezone
+from gluesync_scheduler.core.timezone_utils import as_utc, get_env_timezone, get_zone, next_cron_fire
 
 _SNAPSHOT_WRITE_METHOD_PATTERN = "^(UPSERT|INSERT)$"
 
@@ -607,23 +605,10 @@ class Job(JobBase):
             
         try:
             # Get current time in the configured timezone
-            tz = pytz.timezone(get_env_timezone('UTC'))
-            now = datetime.now(tz)
-            
-            # Use croniter to calculate the next run time
-            cron_iter = croniter(cron, now, day_or=values.get('day_or') is not False)
-            next_datetime = cron_iter.get_next(datetime)
-            
-            # Make sure the datetime has the correct timezone
-            if next_datetime.tzinfo is None:
-                next_datetime = tz.localize(next_datetime)
-            elif str(next_datetime.tzinfo) != str(tz):
-                # Convert to the configured timezone
-                next_datetime = next_datetime.astimezone(tz)
-            
-            return next_datetime
+            tz = get_zone(get_env_timezone('UTC'))
+            return next_cron_fire(cron, datetime.now(tz), tz, day_or=values.get('day_or') is not False)
         except Exception:
-            # If croniter fails, return current time + 1 day as fallback
+            # If the cron cannot be evaluated, return current time + 1 day as fallback
             # This ensures we at least have a value for next_run
             return datetime.now(timezone.utc) + timedelta(days=1)
     start_time: Optional[str] = Field(None, description="Scheduled start time for the job in the job's timezone", example="2025-04-14T23:19:46+02:00")
@@ -689,21 +674,20 @@ class Job(JobBase):
         tz = None
         if hasattr(self, 'timezone_name') and self.timezone_name:
             try:
-                tz = pytz.timezone(self.timezone_name)
-            except:
+                tz = get_zone(self.timezone_name)
+            except Exception:
                 pass
         
         # Fallback to settings timezone if job doesn't have one
         if tz is None:
             try:
-                tz = pytz.timezone(get_env_timezone('UTC'))
-            except:
-                tz = pytz.UTC
+                tz = get_zone(get_env_timezone('UTC'))
+            except Exception:
+                tz = timezone.utc
         
         # Ensure datetime has timezone information
-        if dt.tzinfo is None:
-            # If no timezone info, assume it's in UTC
-            dt = pytz.UTC.localize(dt)
+        # If no timezone info, assume it's in UTC
+        dt = as_utc(dt)
         
         # Convert to the job's timezone
         dt_in_timezone = dt.astimezone(tz)
@@ -731,20 +715,19 @@ class Job(JobBase):
             tz = None
             if hasattr(self, 'timezone_name') and self.timezone_name:
                 try:
-                    tz = pytz.timezone(self.timezone_name)
-                except:
+                    tz = get_zone(self.timezone_name)
+                except Exception:
                     pass
             
             # Fallback to settings timezone
             if tz is None:
                 try:
-                    tz = pytz.timezone(get_env_timezone('UTC'))
-                except:
-                    tz = pytz.UTC
+                    tz = get_zone(get_env_timezone('UTC'))
+                except Exception:
+                    tz = timezone.utc
             
             # Ensure datetime has timezone information
-            if dt.tzinfo is None:
-                dt = pytz.UTC.localize(dt)
+            dt = as_utc(dt)
             
             # Convert to the job's timezone
             dt_in_timezone = dt.astimezone(tz)

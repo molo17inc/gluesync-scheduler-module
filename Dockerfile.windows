@@ -87,10 +87,12 @@ COPY . .
 RUN if not exist VERSION (echo 0.0.0-dev > VERSION)
 
 # Build EXE with PyInstaller (final step)
+# tzdata is bundled explicitly: Windows has no IANA tz database, and zoneinfo reads it from the tzdata package
 RUN pyinstaller `
   --onefile `
   --name GluesyncScheduler `
   --collect-all gluesync_scheduler `
+  --collect-all tzdata `
   --add-data "gluesync-sdk;gluesync-sdk" `
   --add-data "data;data" `
   run_scheduler.py

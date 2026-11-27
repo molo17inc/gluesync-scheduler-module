@@ -35,6 +35,7 @@ from gluesync_scheduler.security import (
 )
 from gluesync_scheduler.services.settings_service import SettingsService
 from gluesync_scheduler.config.settings import settings
+from gluesync_scheduler.core.timezone_utils import is_valid_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -198,10 +199,7 @@ async def update_setting(
     
     # Special validation for timezone
     if key == "timezone" and setting_data.value:
-        try:
-            import pytz
-            pytz.timezone(setting_data.value)
-        except Exception:
+        if not is_valid_timezone(setting_data.value):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid timezone: '{setting_data.value}'"
@@ -287,10 +285,7 @@ async def create_setting(
     
     # Special validation for timezone
     if setting_data.key == "timezone" and setting_data.value:
-        try:
-            import pytz
-            pytz.timezone(setting_data.value)
-        except Exception:
+        if not is_valid_timezone(setting_data.value):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid timezone: '{setting_data.value}'"
