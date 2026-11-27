@@ -510,9 +510,38 @@ async def _cleanup_stale_webhooks():
         logger.warning("Stale webhook cleanup failed (non-fatal): %s", e)
 
 
+# Strong reference to the Core Hub link task (see _corehub_link)
+_corehub_link_task = None
+
+
+async def _corehub_link():
+    """Connect to Core Hub, then start what needs it, in the order startup used to run it.
+
+    The SDK client retries the connection forever. It runs in the background so the HTTP
+    server listens right away: /health then reports "degraded" (HTTP 200) while Core Hub
+    cannot be reached, instead of nothing listening on the port. With the connection in
+    startup_event, an unreachable Core Hub (firewall between the containers, licence
+    rejected, Core Hub still starting) kept uvicorn from binding, so the Docker HEALTHCHECK
+    probe was refused, the container turned unhealthy and the proxy dropped /chronos.
+    """
+    try:
+        await _init_sdk_client()
+        _start_health_check()
+        missed_runs = _load_existing_jobs()
+        logger.info("Gluesync Scheduler Module connected to Core Hub and loaded its jobs")
+        _start_catchup(missed_runs)
+        await _cleanup_stale_webhooks()
+    except asyncio.CancelledError:
+        logger.info("Core Hub link cancelled before it completed")
+        raise
+    except Exception as e:
+        logger.exception(f"Core Hub link failed: {e}")
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize resources on startup"""
+    global _corehub_link_task
     _print_version_banner()
     logger.info("Starting Gluesync Chronos module...")
 
@@ -520,20 +549,20 @@ async def startup_event():
     db_url = _resolve_db_url()
     _init_database(db_url)
     _init_default_settings()
-    await _init_sdk_client()
-    _start_health_check()
-    missed_runs = _load_existing_jobs()
     _log_configuration(db_url)
 
-    logger.info("Gluesync Scheduler Module started successfully")
-
-    _start_catchup(missed_runs)
-    await _cleanup_stale_webhooks()
+    # Core Hub may be unreachable for a long time: never hold the HTTP server back for it
+    _corehub_link_task = asyncio.create_task(_corehub_link())
+    logger.info("Gluesync Scheduler Module started successfully (connecting to Core Hub in the background)")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on shutdown"""
     logger.info("Shutting down Gluesync Scheduler Module...")
+
+    # Stop the Core Hub link if it is still connecting
+    if _corehub_link_task is not None and not _corehub_link_task.done():
+        _corehub_link_task.cancel()
 
     # Stop the CoreHub health check
     try:
