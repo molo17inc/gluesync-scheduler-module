@@ -1,14 +1,6 @@
 {
   "_comment": "Findings accepted for now, on the repo build (APScheduler 3.11.3). A failed check whose finding is listed here does not fail the run; a listed finding that a scenario no longer reports does (stale: fixed? remove it). See README, 'Known findings and the exit status'.",
   "findings": {
-    "trailing-async-chained-event-dropped": {
-      "scenarios": ["chains"],
-      "note": "An async chained event placed after the last awaited step is never executed."
-    },
-    "group-chained-events-act-on-whole-pipeline": {
-      "scenarios": ["chains"],
-      "note": "group_start / group_stop chained events act on the whole pipeline instead of only the entities of the group."
-    },
     "maintenance-406-reason-lost": {
       "scenarios": ["maintenance"],
       "note": "The 406 'pipeline is in maintenance' reason of Core Hub is only in the log, not in the job error shown to the user."

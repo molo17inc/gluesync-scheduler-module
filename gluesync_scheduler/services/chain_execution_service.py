@@ -431,27 +431,49 @@ class ChainExecutionService:
         self, job: ScheduledJob, events: List[ChainedJobEvent], db: Session, errors: list
     ) -> None:
         """Execute chained events sequentially; append to errors and stop on SYNC failure."""
-        for index, event in enumerate(events):
-            logger.info(
-                "Chained event pos=%d type=%s mode=%s pipeline=%s",
-                event.position, event.task_type, event.execution_mode, event.pipeline_id,
-            )
-            if event.execution_mode == ExecutionMode.ASYNC:
-                # Fire-and-forget: trigger the event but don't await its HTTP result
-                task = asyncio.create_task(self._execute_chained_event(event, db))
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
-                continue
+        pending: List[asyncio.Task] = []
+        try:
+            for index, event in enumerate(events):
+                logger.info(
+                    "Chained event pos=%d type=%s mode=%s pipeline=%s",
+                    event.position, event.task_type, event.execution_mode, event.pipeline_id,
+                )
+                if event.execution_mode == ExecutionMode.ASYNC:
+                    # Not awaited before the next step, but finished before the chain returns.
+                    pending.append(self._start_async(self._execute_chained_event(event, db)))
+                    continue
 
-            # Sync: wait for preceding step's callback, then fire the event.
-            # QUERY_STUDIO has no Hub completion webhook — skip wait and use HTTP.
-            preceding = job.task_type if index == 0 else events[index - 1].task_type
-            success = await self._execute_sync_event(event, db, preceding)
-            if not success:
-                err_msg = self._sync_event_failure_message(event)
-                logger.error(err_msg)
-                errors.append(err_msg)
-                break
+                # Sync: wait for preceding step's callback, then fire the event.
+                # QUERY_STUDIO has no Hub completion webhook — skip wait and use HTTP.
+                preceding = job.task_type if index == 0 else events[index - 1].task_type
+                success = await self._execute_sync_event(event, db, preceding)
+                if not success:
+                    err_msg = self._sync_event_failure_message(event)
+                    logger.error(err_msg)
+                    errors.append(err_msg)
+                    break
+        finally:
+            await self._finish_async(pending)
+
+    def _start_async(self, coro) -> "asyncio.Task":
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    @staticmethod
+    async def _finish_async(pending: List["asyncio.Task"]) -> None:
+        """Wait for the async events a chain started.
+
+        Scheduled jobs run their chain with asyncio.run() on a worker thread, which cancels every
+        task still pending when the chain returns: an async event with nothing awaited after it
+        was cancelled before it sent its request (sandbox finding trailing-async-chained-event-dropped).
+        """
+        if not pending:
+            return
+        for result in await asyncio.gather(*pending, return_exceptions=True):
+            if isinstance(result, BaseException):
+                logger.error("Async chained event failed: %s", result)
 
     def _persist_chain_errors(self, job: ScheduledJob, db: Session, errors: list) -> None:
         """Persist chain errors onto the parent job so the UI can surface them."""
@@ -562,16 +584,16 @@ class ChainExecutionService:
         to scheduled chained events via execute_chain).  TriggerFlow sync
         events fire one at a time and check the HTTP response only.
         """
-        for event in events:
-            logger.info(
-                "Executing event pos=%d type=%s mode=%s pipeline=%s",
-                event.position, event.task_type, event.execution_mode, event.pipeline_id,
-            )
-            if event.execution_mode == ExecutionMode.ASYNC:
-                task = asyncio.create_task(self._execute_event(event))
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
-            else:
+        pending: List[asyncio.Task] = []
+        try:
+            for event in events:
+                logger.info(
+                    "Executing event pos=%d type=%s mode=%s pipeline=%s",
+                    event.position, event.task_type, event.execution_mode, event.pipeline_id,
+                )
+                if event.execution_mode == ExecutionMode.ASYNC:
+                    pending.append(self._start_async(self._execute_event(event)))
+                    continue
                 success = await self._execute_event(event)
                 if not success:
                     logger.error(
@@ -579,7 +601,9 @@ class ChainExecutionService:
                         event.position,
                     )
                     return False
-        return True
+            return True
+        finally:
+            await self._finish_async(pending)
 
     def sync_register_webhooks_for_events(
         self, events: List[ChainedJobEvent], main_job_task_type: TaskType
@@ -1258,10 +1282,10 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
     mapping = {
         TaskType.ENTITY_START: "play",
         TaskType.PIPELINE_START: "play",
-        TaskType.GROUP_START: "play",
+        TaskType.GROUP_START: "start-group",
         TaskType.ENTITY_STOP: "pause",
         TaskType.PIPELINE_STOP: "pause",
-        TaskType.GROUP_STOP: "pause",
+        TaskType.GROUP_STOP: "stop-group",
         TaskType.ENTITY_SNAPSHOT: "one-time-snapshot",
         TaskType.PIPELINE_SNAPSHOT: "one-time-snapshot",
         TaskType.GROUP_SNAPSHOT: "one-time-snapshot-group",

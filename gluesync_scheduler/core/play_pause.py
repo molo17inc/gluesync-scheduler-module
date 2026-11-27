@@ -1872,6 +1872,31 @@ class PipelineManager:
         
         return success
 
+    async def start_groups(self, pipeline_id: str, group_ids: List[str], with_snapshot: bool = False,
+                           snapshot_write_method: str = 'UPSERT') -> bool:
+        """Start each group with Core Hub's start-group command, as scheduled group jobs do."""
+        loop = asyncio.get_running_loop()
+        success = True
+        for group_id in group_ids:
+            logger.info(f"Starting group {group_id} in pipeline {pipeline_id} (with_snapshot={with_snapshot})")
+            if not await loop.run_in_executor(
+                None, self.client.start_group, pipeline_id, group_id, with_snapshot, snapshot_write_method
+            ):
+                logger.error(f"Failed to start group {group_id}")
+                success = False
+        return success
+
+    async def stop_groups(self, pipeline_id: str, group_ids: List[str]) -> bool:
+        """Stop each group with Core Hub's stop-group command, as scheduled group jobs do."""
+        loop = asyncio.get_running_loop()
+        success = True
+        for group_id in group_ids:
+            logger.info(f"Stopping group {group_id} in pipeline {pipeline_id}")
+            if not await loop.run_in_executor(None, self.client.stop_group, pipeline_id, group_id):
+                logger.error(f"Failed to stop group {group_id}")
+                success = False
+        return success
+
     async def redo_group(self, pipeline_id: str, group_id: str, with_snapshot: bool = False,
                          snapshot_write_method: str = 'UPSERT') -> bool:
         """Trigger redo for all entities in a specific group"""

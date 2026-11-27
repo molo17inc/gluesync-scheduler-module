@@ -510,6 +510,60 @@ async def redo_groups(
                 logger.error(f"Error updating job status to failed: {str(update_error)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error triggering group redo: {str(e)}")
 
+def _record_cron_job_status(cron_job_identifier: Optional[str], ok: bool, message: Optional[str] = None) -> None:
+    if not cron_job_identifier:
+        return
+    from gluesync_scheduler.cli.job_runner import update_job_status
+    try:
+        update_job_status(cron_job_identifier, ok, message)
+    except Exception as update_error:
+        logger.error(f"Error updating job status for {cron_job_identifier}: {update_error}")
+
+
+async def _group_start_stop(request: Request, pipeline_id: str, body: Optional[dict], start: bool) -> dict:
+    body = body or {}
+    group_ids = body.get("group_ids") or []
+    if not group_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="group_ids must be provided for group operations")
+    cron_job_identifier = getattr(request.state, 'cron_job_identifier', None)
+    verb = "start" if start else "stop"
+    manager = PipelineManager()
+    if start:
+        ok = await manager.start_groups(
+            pipeline_id, group_ids, bool(body.get("with_snapshot", False)), body.get("snapshot_write_method") or "UPSERT",
+        )
+    else:
+        ok = await manager.stop_groups(pipeline_id, group_ids)
+    message = f"Groups {group_ids} {'started' if start else 'stopped'} in pipeline {pipeline_id}" if ok else f"Failed to {verb} groups {group_ids} in pipeline {pipeline_id}"
+    _record_cron_job_status(cron_job_identifier, ok, None if ok else message)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
+    return {"success": True, "message": message, "data": {"pipeline_id": pipeline_id, "groups": group_ids}}
+
+
+@router.post("/{pipeline_id}/start-group", response_model=OperationResponse, summary="Start the entities of specific groups")
+async def start_groups(
+    request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline containing the groups"),
+    body: dict = Body(default=None),
+):
+    """Start groups with Core Hub's start-group command, one call per group (chained events and
+    trigger flows; scheduled group jobs call Core Hub directly). Body: group_ids, with_snapshot,
+    snapshot_write_method. **INTERNAL USE ONLY**."""
+    return await _group_start_stop(request, pipeline_id, body, start=True)
+
+
+@router.post("/{pipeline_id}/stop-group", response_model=OperationResponse, summary="Stop the entities of specific groups")
+async def stop_groups(
+    request: Request,
+    pipeline_id: str = Path(..., description="The ID of the pipeline containing the groups"),
+    body: dict = Body(default=None),
+):
+    """Stop groups with Core Hub's stop-group command, one call per group. Body: group_ids.
+    **INTERNAL USE ONLY**."""
+    return await _group_start_stop(request, pipeline_id, body, start=False)
+
+
 @router.post("/{pipeline_id}/pause", response_model=OperationResponse, summary="Stop a pipeline or entities")
 async def pause_pipeline(
     request: Request,
