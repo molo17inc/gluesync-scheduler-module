@@ -69,9 +69,9 @@ Scenarios that need their own Chronos (clock, time zone, restarts) start contain
 | `ai-agent` | agent run POST, polling, failure, approval wait, validation | 1 min |
 | `core-hub-tasks` | entity validation (differences, reconcile, failure), brain reindex, Visualize refresh (404, 4xx, 5xx retry) | 1 min |
 | `maintenance` | enter/exit jobs and what happens to sync jobs refused with 406 while a pipeline is in maintenance | 1 min |
-| `corehub-faults` | 503, dropped connection, slow answer, introspection failing, revoked module token | 2 min |
+| `corehub-faults` | 503 once (retried) and on every attempt, dropped connection, slow answer, introspection failing, revoked module token | 2 min |
 | `corehub-outage` | Core Hub down 70 s, dropped WebSocket: how long Chronos needs to recover | 6-9 min |
-| `corehub-slow` | a command answered after 135 s, longer than the 120 s internal timeout | 3 min |
+| `corehub-slow` | a command answered after 135 s (the old 120 s internal timeout): the job waits and its outcome matches what Core Hub did | 3 min |
 | `dst-fallback-freeze` | GSSD-1457: every-minute job plus the customer's maintenance jobs, TZ Europe/Rome, clock 02:55:30 CEST on 2026-10-25 | 6 min |
 | `dst-fallback-customer` | GSSD-1457 replay: 01:50 enter / 03:10 exit maintenance on two pipelines, an every-minute job, freeze at 02:59 CEST, restart at 06:03 CET | 12 min |
 | `dst-fallback-patterns` | matrix: 7 cron patterns x scheduler TZ (Europe/Rome, UTC) x job timezone (Europe/Rome, unset), one container per cell | 20-30 min |
@@ -108,14 +108,15 @@ The customer's freeze came from their frequent job, not from the maintenance job
 
 **Health check.** This branch adds `GET /health` and an image `HEALTHCHECK`. On the repo build, `dst-fallback-freeze --keep` froze at 02:58:59 CEST and Docker marked the container `unhealthy` (every probe "timed out", failing streak 9); `docker restart` brought it back `healthy` with `{"status":"ok"}` at 02:05 CET. Plain Docker only marks the container, it does not restart it; Swarm does.
 
-**Other findings** (fast scenarios on the repo build, still present on the bumped one):
+**Other findings**, all fixed since (`known-findings.json` is empty, so any of them coming back fails the run):
 
-- `jobs-crud`: validation errors (HTTP 400) answer 500; a job whose scheduling fails is committed anyway and stays enabled but never scheduled.
-- `chains`: an async chained event after the last awaited step never runs; `group_start` / `group_stop` act on the whole pipeline.
-- `maintenance`: the 406 "pipeline in maintenance" reason is only in the log, not in the job error.
-- `corehub-faults`: one transient Core Hub 5xx fails a scheduled command for good (no retry); the 401 recovery reconnects the SDK on a throw-away event loop, so the WebSocket dies right after the retried call.
-- `webhooks`: `POST /api/webhooks/platform-event` fires any enabled trigger flow for a caller that only sends two static headers.
-- `internal-api`: the pipeline control API accepts any caller from 172.* and 192.168.* without authentication.
+- `jobs-crud`: validation errors (HTTP 400) answered 500; a job whose scheduling failed was committed anyway and stayed enabled but never scheduled.
+- `chains`: an async chained event after the last awaited step never ran; `group_start` / `group_stop` acted on the whole pipeline.
+- `maintenance`: the 406 "pipeline in maintenance" reason was only in the log, not in the job error.
+- `corehub-faults`: one transient Core Hub 5xx failed a scheduled command for good (no retry); the 401 recovery reconnected the SDK on a throw-away event loop, so the WebSocket died right after the retried call.
+- `corehub-slow`: a command Core Hub answered after the 120 s internal timeout was applied although the job had been reported failed.
+- `webhooks`: `POST /api/webhooks/platform-event` fired any enabled trigger flow for a caller that only sent two static headers.
+- `internal-api`: the pipeline control API accepted any caller from 172.* and 192.168.* without authentication.
 
 ## Reading a report
 
@@ -132,7 +133,7 @@ A check that fails because Chronos misbehaves carries a finding; a check that fa
 
 ## Known findings and the exit status
 
-The sandbox finds real defects, so on today's code many checks fail. `known-findings.json` lists the findings accepted for now, each with the scenarios that report it and a one-line note:
+The sandbox finds real defects. `known-findings.json` lists the findings accepted for now (none today), each with the scenarios that report it and a one-line note:
 
 ```json
 { "findings": { "no-retry-on-corehub-5xx": { "scenarios": ["corehub-faults"], "note": "..." } } }

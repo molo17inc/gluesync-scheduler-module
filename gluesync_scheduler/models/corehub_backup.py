@@ -44,7 +44,7 @@ REASON_STARTED = "started"
 _ERROR_EXCERPT_LEN = 200
 
 # Per attempt. Four attempts plus the 0+2+4 s backoff stay inside the default
-# internal HTTP timeout (SCHEDULER_INTERNAL_HTTP_TIMEOUT=120) of the job runner.
+# internal HTTP timeout (SCHEDULER_INTERNAL_HTTP_TIMEOUT, 900 s by default) of the job runner.
 CORE_HUB_BACKUP_TIMEOUT_SECONDS = 25
 
 # Same budget as visualize_refresh (total=3, backoff_factor=1): 4xx are terminal,

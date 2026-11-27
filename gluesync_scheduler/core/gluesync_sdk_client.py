@@ -91,6 +91,8 @@ class GluesyncSDKClient:
     _client = None
     _is_initialized = False
     _initializing = False
+    # The event loop the SDK lives on (the app's main loop): its WebSocket and ping task run there.
+    _home_loop = None
     
     @classmethod
     def get_instance(cls):
@@ -109,6 +111,11 @@ class GluesyncSDKClient:
         """Get the Gluesync client instance"""
         return self._client
     
+    @property
+    def home_loop(self):
+        """The event loop the SDK connection runs on, once initialize() ran there."""
+        return self._home_loop
+
     @property
     def is_initialized(self) -> bool:
         """Check if the client is initialized"""
@@ -158,6 +165,8 @@ class GluesyncSDKClient:
                 so a fresh login handshake is performed. This is used by the 401
                 retry path in CoreHubClient to recover from stale/invalidated tokens.
         """
+        if not force_reconnect and (self._home_loop is None or self._home_loop.is_closed()):
+            self._home_loop = asyncio.get_running_loop()
         if force_reconnect:
             await self._force_reconnect_disconnect()
         elif self._initializing:

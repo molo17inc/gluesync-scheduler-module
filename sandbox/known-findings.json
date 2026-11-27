@@ -1,21 +1,4 @@
 {
   "_comment": "Findings accepted for now, on the repo build (APScheduler 3.11.3). A failed check whose finding is listed here does not fail the run; a listed finding that a scenario no longer reports does (stale: fixed? remove it). See README, 'Known findings and the exit status'.",
-  "findings": {
-    "maintenance-406-reason-lost": {
-      "scenarios": ["maintenance"],
-      "note": "The 406 'pipeline is in maintenance' reason of Core Hub is only in the log, not in the job error shown to the user."
-    },
-    "no-retry-on-corehub-5xx": {
-      "scenarios": ["corehub-faults"],
-      "note": "One transient Core Hub 5xx fails a scheduled command for good: the command is not retried."
-    },
-    "sdk-relogin-on-throwaway-event-loop": {
-      "scenarios": ["corehub-faults"],
-      "note": "The 401 recovery reconnects the SDK on a throw-away event loop, so the WebSocket dies right after the retried call."
-    },
-    "slow-corehub-false-failure": {
-      "scenarios": ["corehub-slow"],
-      "note": "A command Core Hub answers after the 120 s internal timeout is reported as failed although Core Hub applied it."
-    }
-  }
+  "findings": {}
 }

@@ -22,6 +22,7 @@
 """
 
 import json
+import time
 import logging
 import os
 import requests
@@ -59,7 +60,7 @@ from gluesync_scheduler.models.transactions_audit import (
 )
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
-from gluesync_scheduler.core.internal_auth import internal_headers
+from gluesync_scheduler.core.internal_auth import internal_headers, internal_http_timeout_seconds
 from gluesync_scheduler.core.timezone_utils import get_env_timezone, get_zone, next_cron_fire
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,15 @@ _SNAPSHOT_WRITE_METHOD_TASKS = [
     TaskType.ENTITY_REDO,
     TaskType.GROUP_REDO,
 ]
+
+
+def _with_core_hub_reason(message: Optional[str], pipeline_id: Optional[str], since: float) -> Optional[str]:
+    """Add the reason Core Hub gave for refusing a command during this run, when there is one."""
+    from gluesync_scheduler.core.play_pause import recent_core_hub_error
+    reason = recent_core_hub_error(pipeline_id, since)
+    if not reason or (message and reason.split(": ", 1)[-1] in message):
+        return message
+    return f"{message} ({reason})" if message else reason
 
 
 def _day_to_str(day) -> str:
@@ -1167,7 +1177,10 @@ class JobService:
             logger.info(f"Running job {job_id}: {job.name}")
             
             # Execute the job logic
+            started = time.time()
             success, message, _ = self._execute_job_logic(job, manual=manual, fired_at=now)
+            if not success:
+                message = _with_core_hub_reason(message, job.pipeline_id, started)
             
             # Update job status based on execution result
             if success:
@@ -1427,7 +1440,7 @@ class JobService:
 
             try:
                 verify, cert = self._http_ssl_options(protocol)
-                internal_http_timeout = int(os.getenv('SCHEDULER_INTERNAL_HTTP_TIMEOUT', '120'))
+                internal_http_timeout = internal_http_timeout_seconds()
                 if job.task_type == TaskType.ENTITY_VALIDATE:
                     # The validate route blocks until CoreHub finishes the
                     # comparison (and the optional reconciliation).

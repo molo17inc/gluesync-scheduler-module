@@ -161,6 +161,10 @@ Configure the application using environment variables:
 | `ALLOWED_ORIGINS`                       | CORS allowed origins (comma-separated)                                                                                                                                                               | `*`                        |
 | `CRONTAB_USER`                          | User for crontab operations (None for current user)                                                                                                                                                  | `None`                     |
 | `CHRONOS_SDK_TOKEN_REFRESH_ON_401`      | Whether to automatically refresh the SDK token on 401 Unauthorized and retry outbound CoreHub calls exactly once                                                                                     | `True`                     |
+| `CHRONOS_COREHUB_TIMEOUT`               | Seconds Chronos waits for Core Hub to answer a request that sets no timeout of its own (pipeline commands)                                                                                           | `300`                      |
+| `CHRONOS_COREHUB_RETRIES`               | How many times a command Core Hub answered with 502 or 503 is sent again (after 1 s, 2 s, ...)                                                                                                       | `2`                        |
+| `SCHEDULER_INTERNAL_HTTP_TIMEOUT`       | Seconds a job waits for Chronos's own internal route; keep it above `CHRONOS_COREHUB_TIMEOUT`                                                                                                        | `900`                      |
+| `CHRONOS_INTERNAL_TOKEN`                | Token on Chronos's calls to its internal `/api/pipelines/*` API; unset: generated in `<DATA_DIR>/.internal-token`                                                                                    | `_(generated)_`            |
 | `CHRONOS_REDO_PAUSE_TIMEOUT`            | Maximum seconds to wait for entities to leave the Active state (Hold, Error, or Warning accepted) before issuing a redo command. See [Pause before redo](#pause-before-redo).                        | `60`                       |
 | `CHRONOS_REDO_POLL_INTERVAL`            | Seconds between CoreHub `entities-status` checks while polling for entities to leave the Active state (Hold, Error, or Warning accepted) before a redo. See [Pause before redo](#pause-before-redo). | `5`                        |
 | `CHRONOS_HEALTH_CHECK_ENABLED`          | Whether the periodic CoreHub connection health check is enabled. See [Connection health check](#connection-health-check).                                                                            | `true`                     |
@@ -230,8 +234,14 @@ Permission matrix (mirrors CoreHub `UserRole` + gluesync-nodejs-monorepo UI):
 | Change chronos configuration (`require_config`)     | ✅          | ✅      | ❌      | ❌     | ❌              |
 
 The legacy `/api/pipelines/*` routes are chronos-internal (invoked by
-cron jobs) and remain protected by the existing `verify_localhost`
-dependency, not by user roles.
+the scheduler, chained events and the CLI job runner). They are not
+protected by user roles but by `verify_localhost`: the caller must be on a
+private network **and** send `X-Chronos-Internal-Token`, a per-installation
+token (`CHRONOS_INTERNAL_TOKEN`, or generated in `<DATA_DIR>/.internal-token`).
+Set `CHRONOS_INTERNAL_TOKEN` when `SCHEDULER_INTERNAL_HOST` points at another
+container. Core Hub callbacks to `/api/webhooks/platform-event` carry
+`X-Chronos-Webhook-Secret`, derived from the trigger flow's secret token, and
+are refused without it.
 
 You can set these in a `.env` file in the project root.
 

@@ -1,13 +1,13 @@
 import { jobSpec } from '../lib/chronos.mjs';
 import { corehub } from '../lib/stack.mjs';
 import { request, sleep } from '../lib/util.mjs';
-import { pipelineState } from './common.mjs';
+import { pipelineState, ranOk } from './common.mjs';
 
 const DELAY_MS = 135000;
 
 export default {
   name: 'corehub-slow',
-  description: 'Core Hub answers a pipeline command after 135 s, longer than the 120 s internal read timeout of a scheduled job',
+  description: 'Core Hub answers a pipeline command after 135 s (the old 120 s internal timeout): the job waits for the answer and its outcome matches what Core Hub did',
   async run(ctx) {
     const { api } = await ctx.resetMain();
     ctx.usedMain = true;
@@ -30,8 +30,8 @@ export default {
     const r = await run;
     activeAtTimeout = (await pipelineState('pl-orders')).entities.filter(e => e.active).length;
     const after = (await api.getJob(job.id)).json;
-    ctx.check('the run is reported as failed once the 120 s internal timeout expires', r.status >= 400 || r.json?.success === false, `HTTP ${r.status} after ${Math.round(finished / 1000)} s: ${r.json?.message || r.text?.slice(0, 160)}`);
-    ctx.check('the failure says the request timed out', /timed out|timeout/i.test(`${after.last_error_message} ${r.json?.message}`), `last_error_message=${after.last_error_message}`);
+    ctx.check('the run waits for Core Hub\'s answer instead of giving up after 120 s', ranOk(r) && finished >= DELAY_MS - 5000, `HTTP ${r.status} after ${Math.round(finished / 1000)} s: ${r.json?.message || r.text?.slice(0, 160)}`);
+    ctx.check('the job is recorded as successful', !!after.last_successful_run && !after.last_error_message, `last_successful_run=${after.last_successful_run} last_error_message=${after.last_error_message}`);
     ctx.check('Chronos stays responsive while the command is pending', probes.length > 0 && probes.every(s => s === 307), `probes ${probes.join(',')}`);
 
     await sleep(Math.max(0, DELAY_MS - (Date.now() - began)) + 8000);
@@ -46,12 +46,12 @@ export default {
       allEntitiesStoppedLater: applied,
       jobLastError: after.last_error_message,
     };
-    ctx.check('a command reported as failed is not applied afterwards', !applied, `Core Hub answered ${hubCall?.status} after ${hubCall?.ms} ms and the pipeline ended up ${applied ? 'stopped' : 'unchanged'}`, {
+    ctx.check('the job outcome matches what Core Hub did (no command reported failed and applied anyway)', ranOk(r) === applied, `job ${ranOk(r) ? 'succeeded' : 'failed'}; Core Hub answered ${hubCall?.status} after ${hubCall?.ms} ms and the pipeline ended up ${applied ? 'stopped' : 'unchanged'}`, {
       finding: {
         id: 'slow-corehub-false-failure',
-        title: 'No client timeout towards Core Hub: a command answered after 120 s is applied although the job was already reported failed',
+        title: 'A command Core Hub answers after 120 s is applied although the job was already reported failed',
         severity: 'observation',
-        detail: 'CoreHubClient.fetch_core_hub calls requests with timeout=None for pipeline commands, while the scheduled job gives up on Chronos\' own route after SCHEDULER_INTERNAL_HTTP_TIMEOUT (120 s). The job is recorded as failed (and a retry or notification may follow) while the worker thread keeps waiting and Core Hub still executes the command.',
+        detail: 'The scheduled job must not give up on Chronos\' own route (SCHEDULER_INTERNAL_HTTP_TIMEOUT) before the Core Hub request it waits on (CHRONOS_COREHUB_TIMEOUT) can still succeed; otherwise the job is recorded as failed while Core Hub executes the command.',
         evidence,
       },
       evidence,

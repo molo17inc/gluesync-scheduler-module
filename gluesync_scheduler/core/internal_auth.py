@@ -89,6 +89,19 @@ def internal_token() -> str:
         return _cached
 
 
+def internal_http_timeout_seconds() -> int:
+    """How long a job waits for Chronos's own internal route (SCHEDULER_INTERNAL_HTTP_TIMEOUT).
+
+    Defaults to well above the Core Hub client timeout (CHRONOS_COREHUB_TIMEOUT, 300 s), so a job
+    is never reported failed while the Core Hub request it waits on may still succeed; a route
+    may send several Core Hub requests (redo: stop, poll, redo).
+    """
+    try:
+        return max(1, int(os.getenv("SCHEDULER_INTERNAL_HTTP_TIMEOUT", "900")))
+    except ValueError:
+        return 900
+
+
 def internal_headers() -> Dict[str, str]:
     """Headers for a call to the internal pipeline API."""
     return {"Content-Type": "application/json", INTERNAL_TOKEN_HEADER: internal_token()}

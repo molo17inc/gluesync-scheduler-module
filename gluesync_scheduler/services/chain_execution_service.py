@@ -69,7 +69,7 @@ def _flow_webhook_secret(flow_id: int) -> Optional[str]:
 import requests
 from sqlalchemy.orm import Session
 
-from gluesync_scheduler.core.internal_auth import internal_headers
+from gluesync_scheduler.core.internal_auth import internal_headers, internal_http_timeout_seconds
 
 from gluesync_scheduler.models.models import ChainedJobEvent, ExecutionMode, ScheduledJob, TaskType, query_read_only_of, query_studio_http_payload
 from gluesync_scheduler.models.ai_agent_run import (
@@ -935,7 +935,7 @@ class ChainExecutionService:
             endpoint = f"{base_url}/pipelines/{pipeline_path_id(event.pipeline_id)}/{action}"
             payload = _event_payload(event)
 
-            timeout = int(os.getenv("SCHEDULER_INTERNAL_HTTP_TIMEOUT", "120"))
+            timeout = internal_http_timeout_seconds()
             if event.task_type == TaskType.PIPELINE_AUDIT_PURGE:
                 from gluesync_scheduler.models.transactions_audit import purge_http_timeout_seconds
                 timeout = max(timeout, purge_http_timeout_seconds())
