@@ -70,7 +70,7 @@ def test_previous_ready_row_is_not_this_run(monkeypatch):
     assert brain_rebuild_settled(settled, saw_creating=False, before_generation="gen-old", before_known=True) is True
     failed = {"status": "FAILED", "generation": "gen-old", "message": "catalog walk failed"}
     assert brain_rebuild_settled(failed, saw_creating=True, before_generation="gen-old", before_known=True) is True
-    assert "catalog walk failed" == brain_job_message(failed)
+    assert brain_job_message(failed) == "catalog walk failed"
     assert "4 tables, 2 edges" in brain_job_message(settled)
     assert brain_reindex_http_timeout_seconds() == 3630
 

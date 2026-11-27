@@ -51,6 +51,8 @@ from gluesync_scheduler.services.trigger_flow_service import TriggerFlowService
 from gluesync_scheduler.models.ai_agent_run import MAX_FIRE_BODY_BYTES, parse_capped_json_body
 
 logger = logging.getLogger(__name__)
+
+_FLOW_ID_DESCRIPTION = "TriggerFlow ID"
 _background_fire_tasks: Set[asyncio.Future] = set()
 
 
@@ -188,7 +190,7 @@ def list_trigger_flows(
     summary="Get a single trigger flow",
 )
 def get_trigger_flow(
-    flow_id: int = Path(..., description="TriggerFlow ID"),
+    flow_id: int = Path(..., description=_FLOW_ID_DESCRIPTION),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(current_user),
 ):
@@ -221,7 +223,7 @@ def create_trigger_flow(
     try:
         flow, token = svc.create_flow(data)
     except Exception as exc:
-        logger.error("Error creating TriggerFlow: %s", exc)
+        logger.exception("Error creating TriggerFlow: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating TriggerFlow: {exc}",
@@ -239,7 +241,7 @@ def create_trigger_flow(
     summary="Update a trigger flow",
 )
 def update_trigger_flow(
-    flow_id: int = Path(..., description="TriggerFlow ID"),
+    flow_id: int = Path(..., description=_FLOW_ID_DESCRIPTION),
     data: TriggerFlowUpdate = Body(...),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_manage),
@@ -263,7 +265,7 @@ def update_trigger_flow(
     summary="Enable or disable a trigger flow",
 )
 def toggle_trigger_flow_status(
-    flow_id: int = Path(..., description="TriggerFlow ID"),
+    flow_id: int = Path(..., description=_FLOW_ID_DESCRIPTION),
     enabled: bool = Body(..., embed=True, description="true to enable, false to disable"),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_control),
@@ -281,7 +283,7 @@ def toggle_trigger_flow_status(
     summary="Delete a trigger flow",
 )
 def delete_trigger_flow(
-    flow_id: int = Path(..., description="TriggerFlow ID"),
+    flow_id: int = Path(..., description=_FLOW_ID_DESCRIPTION),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_manage),
 ):
@@ -298,7 +300,7 @@ def delete_trigger_flow(
     summary="Regenerate the secret token for a trigger flow",
 )
 def regenerate_token(
-    flow_id: int = Path(..., description="TriggerFlow ID"),
+    flow_id: int = Path(..., description=_FLOW_ID_DESCRIPTION),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(require_manage),
 ):
@@ -333,7 +335,7 @@ def regenerate_token(
     },
 )
 async def fire_trigger_flow(
-    flow_id: int = Path(..., description="TriggerFlow ID"),
+    flow_id: int = Path(..., description=_FLOW_ID_DESCRIPTION),
     wait: bool = Query(
         False,
         description="Block until the chain finishes. Useful for CI/CD pipelines.",
@@ -423,7 +425,7 @@ async def fire_trigger_flow(
     },
 )
 async def fire_trigger_flow_internal(
-    flow_id: int = Path(..., description="TriggerFlow ID"),
+    flow_id: int = Path(..., description=_FLOW_ID_DESCRIPTION),
     wait: bool = Query(
         False,
         description="Block until the chain finishes.",
@@ -480,14 +482,13 @@ async def fire_trigger_flow_internal(
 @router.get(
     "/{flow_id}/logs",
     summary="Get recent execution logs for a trigger flow",
-    response_model=list[ExecutionLogResponse],
     responses={
         200: {"description": "List of recent execution logs"},
         404: {"description": "TriggerFlow not found"},
     },
 )
 async def get_trigger_flow_logs(
-    flow_id: int = Path(..., description="TriggerFlow ID"),
+    flow_id: int = Path(..., description=_FLOW_ID_DESCRIPTION),
     limit: int = Query(20, ge=1, le=100, description="Max logs to return"),
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(current_user),

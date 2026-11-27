@@ -44,7 +44,7 @@ from gluesync_scheduler.services.trigger_flow_service import TriggerFlowService
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def db_engine():
     """File-based SQLite so multiple connections share the same DB state."""
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -71,7 +71,7 @@ def db_engine():
         pass
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def db_session(db_engine):
     Session = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
     db = Session()
@@ -81,7 +81,7 @@ def db_session(db_engine):
         db.close()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def api_client(db_engine):
     """FastAPI TestClient wired to the file-based test DB.
 
@@ -152,7 +152,8 @@ class TestTriggerFlowServiceCRUD:
         flow, token = svc.create_flow(data)
 
         assert flow.id is not None
-        assert isinstance(token, str) and len(token) > 20
+        assert isinstance(token, str)
+        assert len(token) > 20
         assert flow.name == "test-flow"
         assert flow.enabled is True
 

@@ -192,7 +192,8 @@ def test_group_failure_does_not_skip_the_other_groups(monkeypatch):
 def test_group_needs_a_group_id(monkeypatch):
     client, calls, _ = _client(monkeypatch, [])
     result = client.execute_audit_group_action("group-start", "p", [])
-    assert result["success"] is False and calls == []
+    assert result["success"] is False
+    assert calls == []
 
 
 def test_group_5xx_is_retried(monkeypatch):
@@ -225,9 +226,11 @@ def test_purge_calls_again_until_complete(monkeypatch, caplog):
     with caplog.at_level("INFO", logger=audit.logger.name):
         result = client.execute_audit_purge("p", 30)
     assert len(calls) == 3
-    assert result["complete"] is True and result["rounds"] == 3 and result["rows_deleted"] == 1507
+    assert result["complete"] is True
+    assert result["rounds"] == 3
+    assert result["rows_deleted"] == 1507
     assert sum("round=" in r.getMessage() for r in caplog.records) == 3
-    assert "Purge complete after 3 round(s), 1507 rows deleted" == result["message"]
+    assert result["message"] == "Purge complete after 3 round(s), 1507 rows deleted"
 
 
 def test_purge_stops_at_the_round_cap(monkeypatch):
@@ -235,8 +238,10 @@ def test_purge_stops_at_the_round_cap(monkeypatch):
     client, calls, _ = _client(monkeypatch, responses)
     result = client.execute_audit_purge("p", 30)
     assert len(calls) == audit.PURGE_MAX_ROUNDS
-    assert result["success"] is True and result["complete"] is False
-    assert "incomplete" in result["message"] and "next run goes on" in result["message"]
+    assert result["success"] is True
+    assert result["complete"] is False
+    assert "incomplete" in result["message"]
+    assert "next run goes on" in result["message"]
 
 
 def test_purge_stops_at_the_deadline():
@@ -250,7 +255,8 @@ def test_purge_stops_at_the_deadline():
 
     result = audit.post_audit_purge(post, "p", 30, deadline_seconds=100, clock=lambda: next(ticks))
     assert len(calls) == 1
-    assert result["complete"] is False and result["success"] is True
+    assert result["complete"] is False
+    assert result["success"] is True
 
 
 def test_purge_without_progress_does_not_spin(monkeypatch):
@@ -264,7 +270,8 @@ def test_purge_4xx_fails_with_the_hub_code(monkeypatch):
     body = {"message": "Nothing says how old", "code": "RETENTION_NOT_SET", "field": "olderThanDays"}
     client, calls, _ = _client(monkeypatch, [_Resp(409, text=json.dumps(body))])
     result = client.execute_audit_purge("p")
-    assert result["success"] is False and result["retryable"] is False
+    assert result["success"] is False
+    assert result["retryable"] is False
     assert result["message"] == "Core Hub answered HTTP 409: Nothing says how old (RETENTION_NOT_SET) [field olderThanDays]"
     assert len(calls) == 1
 
@@ -272,8 +279,10 @@ def test_purge_4xx_fails_with_the_hub_code(monkeypatch):
 def test_purge_5xx_is_retried_once_then_fails(monkeypatch):
     client, calls, _ = _client(monkeypatch, [_Resp(502, {"message": "store"}) for _ in range(2)])
     result = client.execute_audit_purge("p")
-    assert result["success"] is False and result["retryable"] is True
-    assert len(calls) == 2 and "after 2 attempts" in result["message"]
+    assert result["success"] is False
+    assert result["retryable"] is True
+    assert len(calls) == 2
+    assert "after 2 attempts" in result["message"]
 
 
 def test_purge_failure_in_a_later_round_reports_the_rows_already_deleted(monkeypatch):
@@ -281,7 +290,8 @@ def test_purge_failure_in_a_later_round_reports_the_rows_already_deleted(monkeyp
     client, _, _ = _client(monkeypatch, [_Resp(200, _purge_answer(40, False)), _Resp(409, text=json.dumps(body))])
     result = client.execute_audit_purge("p")
     assert result["success"] is False
-    assert "PURGE_IN_PROGRESS" in result["message"] and "40 rows deleted before it" in result["message"]
+    assert "PURGE_IN_PROGRESS" in result["message"]
+    assert "40 rows deleted before it" in result["message"]
 
 
 # --- REST API end to end ---------------------------------------------------
@@ -316,9 +326,11 @@ def test_run_now_purge_4xx_fails_and_leaves_the_job_enabled(api_client, hub):
     job = _create(api_client)
     hub["responses"].append(_Resp(409, text=json.dumps({"message": "No ledger", "code": "NO_LEDGER"})))
     result = api_client.post(f"/api/jobs/{job['id']}/run").json()
-    assert result["success"] is False and "NO_LEDGER" in result["message"]
+    assert result["success"] is False
+    assert "NO_LEDGER" in result["message"]
     stored = api_client.get(f"/api/jobs/{job['id']}").json()
-    assert stored["enabled"] is True and "HTTP 409" in stored["last_error_message"]
+    assert stored["enabled"] is True
+    assert "HTTP 409" in stored["last_error_message"]
 
 
 def test_update_purge_age(api_client):
@@ -361,7 +373,8 @@ def test_group_run_4xx_fails_the_run(api_client, hub):
     job = _create(api_client, GROUP)
     hub["responses"].append(_Resp(404, text=json.dumps({"message": "gone", "code": "GROUP_NOT_FOUND"})))
     result = api_client.post(f"/api/jobs/{job['id']}/run").json()
-    assert result["success"] is False and "GROUP_NOT_FOUND" in result["message"]
+    assert result["success"] is False
+    assert "GROUP_NOT_FOUND" in result["message"]
 
 
 def test_route_unexpected_exception_is_a_500(api_client, hub, monkeypatch):
@@ -374,7 +387,8 @@ def test_route_unexpected_exception_is_a_500(api_client, hub, monkeypatch):
     monkeypatch.setattr(pipeline_router.PipelineManager, "execute_audit_group_action", failing)
     for job in (_create(api_client), _create(api_client, GROUP)):
         result = api_client.post(f"/api/jobs/{job['id']}/run").json()
-        assert result["success"] is False and "kaput" in result["message"]
+        assert result["success"] is False
+        assert "kaput" in result["message"]
 
 
 @pytest.mark.parametrize("task_type,suffix", [

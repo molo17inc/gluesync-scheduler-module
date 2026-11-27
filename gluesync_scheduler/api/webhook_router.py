@@ -31,6 +31,10 @@ from gluesync_scheduler.services.chain_execution_service import chain_execution_
 
 logger = logging.getLogger(__name__)
 
+# Strong references to fire-and-forget tasks so they are not garbage
+# collected before they finish.
+_background_tasks: set = set()
+
 router = APIRouter(
     prefix="/webhooks",
     tags=["webhooks"],
@@ -192,7 +196,9 @@ async def platform_event_notify(
         finally:
             db.close()
 
-    asyncio.ensure_future(_fire_flow())
+    task = asyncio.ensure_future(_fire_flow())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,

@@ -276,22 +276,34 @@ def audit_group_hub_path(action: str, pipeline_id: str, group_id: str) -> str:
     )
 
 
+def _entity_outcome_counts(body: Dict[str, Any]) -> Dict[str, int]:
+    """Count the per-entity ``outcome`` strings of a group audit answer."""
+    counts: Dict[str, int] = {}
+    for entity in body.get("entities") or []:
+        outcome = entity.get("outcome") if isinstance(entity, dict) else None
+        if isinstance(outcome, str):
+            counts[outcome] = counts.get(outcome, 0) + 1
+    return counts
+
+
+def _group_state(body: Dict[str, Any]) -> Optional[str]:
+    status = body.get("status")
+    if isinstance(status, dict) and isinstance(status.get("state"), str):
+        return status["state"]
+    return None
+
+
 def _group_success_message(action: str, group_id: str, body) -> Tuple[str, Optional[str]]:
     verb = "started" if action == AUDIT_GROUP_START else "stopped"
     name = body.get("groupName") if isinstance(body, dict) and isinstance(body.get("groupName"), str) else None
     parts = [f"Audit {verb} for group {name or group_id}"]
     state = None
     if isinstance(body, dict):
-        counts: Dict[str, int] = {}
-        for entity in body.get("entities") or []:
-            outcome = entity.get("outcome") if isinstance(entity, dict) else None
-            if isinstance(outcome, str):
-                counts[outcome] = counts.get(outcome, 0) + 1
+        counts = _entity_outcome_counts(body)
         if counts:
             parts.append(", ".join(f"{n} {o.lower().replace('_', ' ')}" for o, n in sorted(counts.items())))
-        status = body.get("status")
-        if isinstance(status, dict) and isinstance(status.get("state"), str):
-            state = status["state"]
+        state = _group_state(body)
+        if state is not None:
             parts.append(f"state {state}")
     return ", ".join(parts), state
 
@@ -391,9 +403,7 @@ def post_audit_purge(
             CORE_HUB_PURGE_RETRIES, f"Transactions audit purge on pipeline {pipeline_id} round {rounds}",
         )
         if not outcome["success"]:
-            if total_rows:
-                outcome["message"] = f"{outcome['message']} (round {rounds}; {total_rows} rows deleted before it)"
-            return outcome
+            return _failed_purge_round(outcome, rounds, total_rows)
         answer = outcome.get("body") if isinstance(outcome.get("body"), dict) else {}
         rows = answer.get("rowsDeleted") if isinstance(answer.get("rowsDeleted"), int) else 0
         total_rows += rows
@@ -402,18 +412,36 @@ def post_audit_purge(
             "Transactions audit purge pipeline=%s round=%s/%s: %s rows deleted, complete=%s",
             pipeline_id, rounds, max_rounds, rows, complete,
         )
-        if complete:
-            return _purge_outcome(f"Purge complete after {rounds} round(s), {total_rows} rows deleted", total_rows, rounds, True)
-        if rows == 0:
-            return _purge_outcome(
-                f"Purge incomplete: round {rounds} made no progress, {total_rows} rows deleted; the next run goes on",
-                total_rows, rounds, False,
-            )
-        if rounds >= max_rounds or clock() - started >= deadline_seconds:
-            return _purge_outcome(
-                f"Purge incomplete after {rounds} round(s) (cap reached), {total_rows} rows deleted; the next run goes on",
-                total_rows, rounds, False,
-            )
+        cap_reached = rounds >= max_rounds or clock() - started >= deadline_seconds
+        finished = _purge_round_end(rounds, rows, total_rows, complete, cap_reached)
+        if finished is not None:
+            return finished
+
+
+def _failed_purge_round(outcome: Dict[str, Any], rounds: int, total_rows: int) -> Dict[str, Any]:
+    """Keep the rows already deleted in the message of a failed purge round."""
+    if total_rows:
+        outcome["message"] = f"{outcome['message']} (round {rounds}; {total_rows} rows deleted before it)"
+    return outcome
+
+
+def _purge_round_end(
+    rounds: int, rows: int, total_rows: int, complete: bool, cap_reached: bool,
+) -> Optional[Dict[str, Any]]:
+    """Outcome that ends the purge after a successful round, or None to go on."""
+    if complete:
+        return _purge_outcome(f"Purge complete after {rounds} round(s), {total_rows} rows deleted", total_rows, rounds, True)
+    if rows == 0:
+        return _purge_outcome(
+            f"Purge incomplete: round {rounds} made no progress, {total_rows} rows deleted; the next run goes on",
+            total_rows, rounds, False,
+        )
+    if cap_reached:
+        return _purge_outcome(
+            f"Purge incomplete after {rounds} round(s) (cap reached), {total_rows} rows deleted; the next run goes on",
+            total_rows, rounds, False,
+        )
+    return None
 
 
 def _purge_outcome(message: str, rows: int, rounds: int, complete: bool) -> Dict[str, Any]:

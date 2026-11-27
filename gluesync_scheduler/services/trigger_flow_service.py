@@ -29,7 +29,6 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-import pytz
 from sqlalchemy.orm import Session
 
 from gluesync_scheduler.models.models import ExecutionMode, TaskType, TriggerFlow, TriggerFlowEvent, TriggerFlowExecutionLog, require_query_studio_fields, query_read_only_of
@@ -192,7 +191,7 @@ class TriggerFlowService:
                     flow.id, data.platform_event
                 )
             except Exception as exc:
-                logger.error("Failed to register platform event webhook for flow %d: %s", flow.id, exc)
+                logger.exception("Failed to register platform event webhook for flow %d: %s", flow.id, exc)
 
         return flow, token
 
@@ -281,7 +280,7 @@ class TriggerFlowService:
             try:
                 chain_execution_service.sync_delete_platform_event_webhook(flow_id)
             except Exception as exc:
-                logger.error("Failed to delete platform event webhook for flow %d: %s", flow_id, exc)
+                logger.exception("Failed to delete platform event webhook for flow %d: %s", flow_id, exc)
 
         self.db.delete(flow)
         self.db.commit()
@@ -365,7 +364,7 @@ class TriggerFlowService:
                 event_payload=event_payload,
             )
         except Exception as exc:
-            logger.error("TriggerFlow %d raised an unhandled exception: %s", flow_id, exc)
+            logger.exception("TriggerFlow %d raised an unhandled exception: %s", flow_id, exc)
             success = False
             self._record_error(flow_id, str(exc))
             self._record_execution_log(flow_id, "failed", source, str(exc), start_time)

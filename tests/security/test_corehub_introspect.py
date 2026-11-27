@@ -260,7 +260,8 @@ class TestCacheBehaviour:
         r2 = await ins.introspect(
             cookie_header="gs-auth=tok", authorization_header=None
         )
-        assert r1 is None and r2 is None
+        assert r1 is None
+        assert r2 is None
         assert call_count == 2  # both calls hit CoreHub
 
     async def test_403_is_not_cached(self, mock_transport_factory) -> None:

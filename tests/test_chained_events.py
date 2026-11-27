@@ -62,7 +62,7 @@ from gluesync_scheduler.services.job_service import JobService, _load_chained_ev
 TEST_DB_URL = "sqlite:///:memory:"
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def db_session():
     engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)

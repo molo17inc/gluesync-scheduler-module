@@ -38,6 +38,8 @@ from gluesync_scheduler.models.entity_validation import VALIDATION_RECONCILE, re
 from gluesync_scheduler.models.visualize_refresh import coerce_parameter_map, require_visualize_refresh_fields
 from gluesync_scheduler.core.timezone_utils import get_env_timezone
 
+_SNAPSHOT_WRITE_METHOD_PATTERN = "^(UPSERT|INSERT)$"
+
 
 class QueryStudioFieldsMixin:
     """Fields shared by schedulable Query Studio actions."""
@@ -258,7 +260,7 @@ class ChainedEventBase(
     entity_ids: Optional[List[str]] = Field(None, description="Entity IDs (required for entity operations)")
     group_ids: Optional[List[str]] = Field(None, description="Group IDs (required for group operations)")
     with_snapshot: bool = Field(False, description="Whether to include a snapshot")
-    snapshot_write_method: str = Field("UPSERT", description="Snapshot write method: UPSERT or INSERT", pattern="^(UPSERT|INSERT)$")
+    snapshot_write_method: str = Field("UPSERT", description="Snapshot write method: UPSERT or INSERT", pattern=_SNAPSHOT_WRITE_METHOD_PATTERN)
     execution_mode: ChainedEventMode = Field(ChainedEventMode.ASYNC, description="async: fire-and-forget; sync: wait for corehub webhook callback before next event")
     webhook_timeout_seconds: int = Field(3600, description="Timeout in seconds for waiting on webhook callback in sync mode (default: 3600 = 1 hour)", ge=1)
 
@@ -350,7 +352,7 @@ class JobBase(
     entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on (required for entity operations)", example=["entity-456", "entity-789"])
     group_ids: Optional[List[str]] = Field(None, description="List of group IDs to operate on (required for group operations)", example=["group-123", "group-456"])
     with_snapshot: bool = Field(False, description="Whether to include snapshot when starting entities")
-    snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
+    snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern=_SNAPSHOT_WRITE_METHOD_PATTERN)
     enabled: bool = Field(True, description="Whether the job is enabled and should be executed according to schedule")
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     day_or: bool = Field(True, description=_DAY_OR_DESCRIPTION)
@@ -426,7 +428,7 @@ class JobUpdate(AiAgentRunValidatorMixin, BaseModel):
     entity_ids: Optional[List[str]] = Field(None, description="List of entity IDs to operate on", example=["entity-456", "entity-789"])
     group_ids: Optional[List[str]] = Field(None, description="List of group IDs to operate on", example=["group-123", "group-456"])
     with_snapshot: Optional[bool] = Field(None, description="Updated snapshot setting")
-    snapshot_write_method: Optional[str] = Field(None, description="Updated write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
+    snapshot_write_method: Optional[str] = Field(None, description="Updated write method for snapshot operations (UPSERT or INSERT)", pattern=_SNAPSHOT_WRITE_METHOD_PATTERN)
     agent_id: Optional[str] = Field(None, description="Updated Query Studio agent ID")
     query_sql: Optional[str] = Field(None, description="Updated Query Studio SQL snapshot")
     saved_query_id: Optional[str] = Field(None, description="Updated Query Studio saved-query ID")
@@ -528,7 +530,7 @@ class Job(JobBase):
     command: str = Field(..., description="Command that will be executed by the cron job", example="python play_pause.py resync --pipeline pipeline-123 --entity entity-456")
     schedule_days: List[str] = Field(default_factory=list, description="Array of days when the job is scheduled to run (e.g., ['monday', 'wednesday', 'friday'])")
     # Explicitly re-define snapshot_write_method to ensure it's included in the response
-    snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern="^(UPSERT|INSERT)$")
+    snapshot_write_method: str = Field("UPSERT", description="Write method for snapshot operations (UPSERT or INSERT)", pattern=_SNAPSHOT_WRITE_METHOD_PATTERN)
     is_cron_expression: bool = Field(False, description="Whether the job was created with a cron expression (true) or schedule configuration (false)")
     day_or: bool = Field(True, description=_DAY_OR_DESCRIPTION)
     

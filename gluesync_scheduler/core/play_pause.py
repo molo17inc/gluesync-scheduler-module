@@ -42,6 +42,11 @@ _SUCCESS_JSON_FIELDS = ("id", "name", "message")
 
 
 
+def _hub_result_ok(result) -> bool:
+    """True when a raw ``fetch_core_hub`` result is a dict that is not an error."""
+    return isinstance(result, dict) and result.get("status") != "error"
+
+
 def _copy_success_payload_fields(safe, json_data):
     """Copy known scalar fields and list payloads onto the sanitized success dict."""
     for key in _SUCCESS_JSON_FIELDS:
@@ -1558,16 +1563,11 @@ class CoreHubClient:
         from gluesync_scheduler.models.brain_reindex import (
             BRAIN_JOB_PATH,
             STATUS_CREATING,
-            STATUS_FAILED,
-            brain_job_message,
             brain_job_status,
-            brain_rebuild_settled,
-            brain_reindex_poll_seconds,
-            brain_reindex_timeout_seconds,
         )
 
         before = self._read_brain_job()
-        before_known = isinstance(before, dict) and before.get("status") != "error"
+        before_known = _hub_result_ok(before)
         before_generation = before.get("generation") if before_known else None
         saw_creating = before_known and brain_job_status(before) == STATUS_CREATING
 
@@ -1578,23 +1578,35 @@ class CoreHubClient:
             timeout=60,
             raw=True,
         )
-        if not isinstance(started, dict) or started.get("status") == "error":
+        if not _hub_result_ok(started):
             reason = started.get("message") if isinstance(started, dict) else started
             return False, f"Enterprise brain reindex could not be started: {reason}", {}
+
+        return self._wait_for_brain_rebuild(started, saw_creating, before_generation, before_known)
+
+    def _wait_for_brain_rebuild(self, started, saw_creating, before_generation, before_known) -> tuple:
+        """Poll the brain job until this trigger's rebuild settles or times out."""
+        from gluesync_scheduler.models.brain_reindex import (
+            STATUS_CREATING,
+            STATUS_FAILED,
+            brain_job_message,
+            brain_job_status,
+            brain_rebuild_settled,
+            brain_reindex_poll_seconds,
+            brain_reindex_timeout_seconds,
+        )
 
         deadline = time.time() + brain_reindex_timeout_seconds()
         last = started
         while time.time() < deadline:
             current = self._read_brain_job()
-            if isinstance(current, dict) and current.get("status") != "error":
+            if _hub_result_ok(current):
                 last = current
                 if brain_job_status(current) == STATUS_CREATING:
                     saw_creating = True
                 if brain_rebuild_settled(current, saw_creating, before_generation, before_known):
-                    message = brain_job_message(current)
-                    if brain_job_status(current) == STATUS_FAILED:
-                        return False, message, current
-                    return True, message, current
+                    succeeded = brain_job_status(current) != STATUS_FAILED
+                    return succeeded, brain_job_message(current), current
             time.sleep(brain_reindex_poll_seconds())
 
         message = (
@@ -1694,6 +1706,10 @@ class CoreHubClient:
             logger.error(message)
             return False, message, details
 
+        return self._reconcile_validation(entity, job_id, differences, breakdown, details)
+
+    def _reconcile_validation(self, entity, job_id, differences, breakdown, details) -> tuple:
+        """Reconcile every difference of a finished Validator run and report the outcome."""
         reconciliation = self.fetch_core_hub(
             f"/data-comparison/runs/{job_id}/reconciliation",
             method="POST",
@@ -1701,7 +1717,7 @@ class CoreHubClient:
             timeout=self.DATA_VALIDATION_RECONCILE_TIMEOUT_SECONDS,
             raw=True,
         )
-        if not isinstance(reconciliation, dict) or reconciliation.get("status") == "error":
+        if not _hub_result_ok(reconciliation):
             reason = reconciliation.get("message") if isinstance(reconciliation, dict) else reconciliation
             message = (
                 f"Validation of entity {entity} found {differences} difference(s): {breakdown}. "
