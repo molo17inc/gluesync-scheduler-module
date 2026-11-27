@@ -76,6 +76,7 @@ Scenarios that need their own Chronos (clock, time zone, restarts) start contain
 | `dst-fallback-customer` | GSSD-1457 replay: 01:50 enter / 03:10 exit maintenance on two pipelines, an every-minute job, freeze at 02:59 CEST, restart at 06:03 CET | 12 min |
 | `dst-fallback-patterns` | matrix: 7 cron patterns x scheduler TZ (Europe/Rome, UTC) x job timezone (Europe/Rome, unset), one container per cell | 20-30 min |
 | `dst-springforward` | 2026-03-29 with `30 2 * * *` and an every-minute job | 6 min |
+| `dst-next-run` | the `next_run` answered by create and update on both DST nights (skipped and repeated wall times; Europe/Rome, Europe/London, America/New_York; enabled and disabled jobs), against hand-written expected instants | 2 min |
 | `restart-catchup` | a daily job misses its fire time while Chronos is down | 3 min |
 | `upgrade-from-ga` | GSSD-1457 upgrade from the published GA image: `next_run` converted when the GA predates the fix, else the marker is already there; runs missed during the upgrade replayed | 3 min |
 | `upgrade-from-pre-utc` | GSSD-1457 conversion: upgrade from 0.3.1, the last release that stored `next_run` as wall clock; the rows are converted and the missed runs replayed | 3 min |
