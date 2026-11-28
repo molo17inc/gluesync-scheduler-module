@@ -7,6 +7,7 @@ import coreHubTasks from './core-hub-tasks.mjs';
 import dstFallbackCustomer from './dst-fallback-customer.mjs';
 import dstFallbackFreeze from './dst-fallback-freeze.mjs';
 import dstFallbackPatterns from './dst-fallback-patterns.mjs';
+import dstNextRun from './dst-next-run.mjs';
 import dstSpringforward from './dst-springforward.mjs';
 import internalApi from './internal-api.mjs';
 import jobsCrud from './jobs-crud.mjs';
@@ -41,6 +42,7 @@ export const scenarios = [
   dstFallbackCustomer,
   dstFallbackPatterns,
   dstSpringforward,
+  dstNextRun,
   restartCatchup,
   upgradeFromGa,
   upgradeFromPreUtc,
