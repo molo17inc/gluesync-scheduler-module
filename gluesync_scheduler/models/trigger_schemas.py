@@ -54,6 +54,19 @@ from gluesync_scheduler.services.origin_routing import (
 # Shared sub-schemas
 # ---------------------------------------------------------------------------
 
+def _in_scheduler_timezone(dt: Optional[datetime]) -> Optional[str]:
+    """ISO 8601 with its offset, in the scheduler's TIMEZONE. SQLite returns naive values,
+    which are UTC; sent without an offset, the UI would read them as local time (GS-1495)."""
+    if dt is None:
+        return None
+    dt = as_utc(dt)
+    try:
+        dt = dt.astimezone(get_zone(get_env_timezone("UTC")))
+    except Exception:
+        pass
+    return dt.isoformat()
+
+
 class TriggerEventMode(str, Enum):
     ASYNC = "async"
     SYNC = "sync"
@@ -214,15 +227,7 @@ class TriggerFlowResponse(TriggerFlowBase):
         "last_trigger_error_time", "created_at", "updated_at",
     )
     def serialize_dt(self, dt: Optional[datetime], info) -> Optional[str]:
-        if dt is None:
-            return None
-        dt = as_utc(dt)
-        try:
-            tz = get_zone(get_env_timezone("UTC"))
-            dt = dt.astimezone(tz)
-        except Exception:
-            pass
-        return dt.isoformat()
+        return _in_scheduler_timezone(dt)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -268,5 +273,9 @@ class ExecutionLogResponse(BaseModel):
     error_message: Optional[str] = None
     duration_ms: Optional[int] = None
     triggered_at: datetime
+
+    @field_serializer("triggered_at")
+    def serialize_triggered_at(self, dt: datetime, info) -> Optional[str]:
+        return _in_scheduler_timezone(dt)
 
     model_config = ConfigDict(from_attributes=True)
