@@ -71,7 +71,8 @@ def test_an_unknown_flow_is_401_not_404(client):
 
 def test_the_right_secret_fires_the_flow(client):
     r = _post(client, 7, platform_webhook_secret(7, "tok-7"))
-    assert r.status_code == 200 and r.json()["acknowledged"] is True
+    assert r.status_code == 200
+    assert r.json()["acknowledged"] is True
     for _ in range(50):  # the flow fires in a background task
         if client.fired:
             break

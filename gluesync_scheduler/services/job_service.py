@@ -613,6 +613,21 @@ class JobService:
         from gluesync_scheduler.services.chain_execution_service import chain_execution_service
         chain_execution_service.sync_register_webhooks_for_events(created_events, db_job.task_type)
 
+    def _schedule_new_job(self, db_job: ScheduledJob) -> None:
+        """Schedule a freshly stored job; delete the row again if scheduling fails."""
+        try:
+            job_id = self.scheduler_service.create_job(db_job)
+        except Exception as sched_error:
+            # Do not leave an enabled row that was never scheduled behind.
+            self.db.delete(db_job)
+            self.db.commit()
+            if isinstance(sched_error.__cause__, ValueError):
+                raise ValueError(str(sched_error.__cause__)) from sched_error
+            raise
+        db_job.command = f"Scheduled job ID: {job_id}"
+        self.db.commit()
+        self.db.refresh(db_job)
+
     def create_job(self, job_data: JobCreate) -> Job:
         """
         Create a new scheduled job
@@ -684,18 +699,7 @@ class JobService:
             self.db.refresh(db_job)
 
             if db_job.enabled:
-                try:
-                    job_id = self.scheduler_service.create_job(db_job)
-                except Exception as sched_error:
-                    # Do not leave an enabled row that was never scheduled behind.
-                    self.db.delete(db_job)
-                    self.db.commit()
-                    if isinstance(sched_error.__cause__, ValueError):
-                        raise ValueError(str(sched_error.__cause__)) from sched_error
-                    raise
-                db_job.command = f"Scheduled job ID: {job_id}"
-                self.db.commit()
-                self.db.refresh(db_job)
+                self._schedule_new_job(db_job)
 
             self._persist_new_chained_events(db_job, job_data.chained_events)
 

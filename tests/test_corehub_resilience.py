@@ -95,7 +95,8 @@ def test_a_timeout_says_the_command_may_still_be_applied(hub):
     queue += [requests.exceptions.ReadTimeout("slow")]
     result = client.fetch_core_hub("/pipelines/pl-1/commands/sync/stop", method="POST")
     assert result["status_code"] == 504
-    assert "timed out" in result["message"] and "may still be applied" in result["message"]
+    assert "timed out" in result["message"]
+    assert "may still be applied" in result["message"]
 
 
 def test_the_internal_call_waits_longer_than_core_hub(monkeypatch):

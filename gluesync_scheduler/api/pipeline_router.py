@@ -37,6 +37,8 @@ from gluesync_scheduler.config.settings import settings
 # Configure logging
 logger = logging.getLogger(__name__)
 
+_GROUP_PIPELINE_ID_DESCRIPTION = "The ID of the pipeline containing the groups"
+
 
 _AUTH_ERROR_MARKERS = ("Authentication failed", "Invalid authorization token", "CoreHub rejected")
 
@@ -422,7 +424,7 @@ async def redo_pipeline(
 )
 async def redo_groups(
     request: Request,
-    pipeline_id: str = Path(..., description="The ID of the pipeline containing the groups"),
+    pipeline_id: str = Path(..., description=_GROUP_PIPELINE_ID_DESCRIPTION),
     group_ids: Optional[List[str]] = Query(None, description="List of group IDs to redo"),
     with_snapshot: bool = Query(False, description="Whether to perform a snapshot before restarting CDC"),
     snapshot_write_method: str = Query("UPSERT", description="Write method for snapshot: UPSERT or INSERT."),
@@ -516,8 +518,8 @@ def _record_cron_job_status(cron_job_identifier: Optional[str], ok: bool, messag
     from gluesync_scheduler.cli.job_runner import update_job_status
     try:
         update_job_status(cron_job_identifier, ok, message)
-    except Exception as update_error:
-        logger.error(f"Error updating job status for {cron_job_identifier}: {update_error}")
+    except Exception:
+        logger.exception(f"Error updating job status for {cron_job_identifier}")
 
 
 async def _group_start_stop(request: Request, pipeline_id: str, body: Optional[dict], start: bool) -> dict:
@@ -534,7 +536,10 @@ async def _group_start_stop(request: Request, pipeline_id: str, body: Optional[d
         )
     else:
         ok = await manager.stop_groups(pipeline_id, group_ids)
-    message = f"Groups {group_ids} {'started' if start else 'stopped'} in pipeline {pipeline_id}" if ok else f"Failed to {verb} groups {group_ids} in pipeline {pipeline_id}"
+    if ok:
+        message = f"Groups {group_ids} {'started' if start else 'stopped'} in pipeline {pipeline_id}"
+    else:
+        message = f"Failed to {verb} groups {group_ids} in pipeline {pipeline_id}"
     _record_cron_job_status(cron_job_identifier, ok, None if ok else message)
     if not ok:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
@@ -544,7 +549,7 @@ async def _group_start_stop(request: Request, pipeline_id: str, body: Optional[d
 @router.post("/{pipeline_id}/start-group", response_model=OperationResponse, summary="Start the entities of specific groups")
 async def start_groups(
     request: Request,
-    pipeline_id: str = Path(..., description="The ID of the pipeline containing the groups"),
+    pipeline_id: str = Path(..., description=_GROUP_PIPELINE_ID_DESCRIPTION),
     body: dict = Body(default=None),
 ):
     """Start groups with Core Hub's start-group command, one call per group (chained events and
@@ -556,7 +561,7 @@ async def start_groups(
 @router.post("/{pipeline_id}/stop-group", response_model=OperationResponse, summary="Stop the entities of specific groups")
 async def stop_groups(
     request: Request,
-    pipeline_id: str = Path(..., description="The ID of the pipeline containing the groups"),
+    pipeline_id: str = Path(..., description=_GROUP_PIPELINE_ID_DESCRIPTION),
     body: dict = Body(default=None),
 ):
     """Stop groups with Core Hub's stop-group command, one call per group. Body: group_ids.
@@ -838,7 +843,7 @@ async def resync_pipeline(
 )
 async def resync_groups(
     request: Request,
-    pipeline_id: str = Path(..., description="The ID of the pipeline containing the groups"),
+    pipeline_id: str = Path(..., description=_GROUP_PIPELINE_ID_DESCRIPTION),
     group_ids: Optional[List[str]] = Query(None, description="Group IDs to snapshot"),
     snapshot_write_method: str = Query("UPSERT", description="Snapshot write method"),
     body: dict = Body(default=None),

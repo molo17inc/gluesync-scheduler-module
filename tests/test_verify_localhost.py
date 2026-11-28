@@ -52,8 +52,9 @@ def _request(host, token="test-internal-token"):
 
 
 def _status(request):
+    check = verify_localhost(request)
     with pytest.raises(HTTPException) as error:
-        asyncio.run(verify_localhost(request))
+        asyncio.run(check)
     return error.value.status_code
 
 
