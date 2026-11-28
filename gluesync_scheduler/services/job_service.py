@@ -22,6 +22,7 @@
 """
 
 import json
+import time
 import logging
 import os
 import requests
@@ -59,6 +60,7 @@ from gluesync_scheduler.models.transactions_audit import (
 )
 from gluesync_scheduler.models.schemas import JobCreate, JobUpdate, Job, ScheduleConfig, ChainedEventResponse
 from gluesync_scheduler.services.scheduler_service import scheduler_service
+from gluesync_scheduler.core.internal_auth import internal_headers, internal_http_timeout_seconds
 from gluesync_scheduler.core.timezone_utils import get_env_timezone, get_zone, next_cron_fire
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,15 @@ _SNAPSHOT_WRITE_METHOD_TASKS = [
     TaskType.ENTITY_REDO,
     TaskType.GROUP_REDO,
 ]
+
+
+def _with_core_hub_reason(message: Optional[str], pipeline_id: Optional[str], since: float) -> Optional[str]:
+    """Add the reason Core Hub gave for refusing a command during this run, when there is one."""
+    from gluesync_scheduler.core.play_pause import recent_core_hub_error
+    reason = recent_core_hub_error(pipeline_id, since)
+    if not reason or (message and reason.split(": ", 1)[-1] in message):
+        return message
+    return f"{message} ({reason})" if message else reason
 
 
 def _day_to_str(day) -> str:
@@ -602,6 +613,21 @@ class JobService:
         from gluesync_scheduler.services.chain_execution_service import chain_execution_service
         chain_execution_service.sync_register_webhooks_for_events(created_events, db_job.task_type)
 
+    def _schedule_new_job(self, db_job: ScheduledJob) -> None:
+        """Schedule a freshly stored job; delete the row again if scheduling fails."""
+        try:
+            job_id = self.scheduler_service.create_job(db_job)
+        except Exception as sched_error:
+            # Do not leave an enabled row that was never scheduled behind.
+            self.db.delete(db_job)
+            self.db.commit()
+            if isinstance(sched_error.__cause__, ValueError):
+                raise ValueError(str(sched_error.__cause__)) from sched_error
+            raise
+        db_job.command = f"Scheduled job ID: {job_id}"
+        self.db.commit()
+        self.db.refresh(db_job)
+
     def create_job(self, job_data: JobCreate) -> Job:
         """
         Create a new scheduled job
@@ -621,6 +647,9 @@ class JobService:
             next_run_time, next_run_dt = self._calculate_next_run_times(
                 job_data.cron_expression, job_data.day_or, job_timezone,
             )
+            if next_run_dt is None:
+                # Rejected before anything is stored (sandbox finding failed-create-leaves-job-row).
+                raise ValueError(f"Invalid cron expression: '{job_data.cron_expression}'")
             is_cron_expression = bool(job_data.cron_expression and not job_data.schedule)
 
             self._validate_group_task_type(job_data.task_type, job_data.group_ids)
@@ -670,10 +699,7 @@ class JobService:
             self.db.refresh(db_job)
 
             if db_job.enabled:
-                job_id = self.scheduler_service.create_job(db_job)
-                db_job.command = f"Scheduled job ID: {job_id}"
-                self.db.commit()
-                self.db.refresh(db_job)
+                self._schedule_new_job(db_job)
 
             self._persist_new_chained_events(db_job, job_data.chained_events)
 
@@ -1155,7 +1181,10 @@ class JobService:
             logger.info(f"Running job {job_id}: {job.name}")
             
             # Execute the job logic
+            started = time.time()
             success, message, _ = self._execute_job_logic(job, manual=manual, fired_at=now)
+            if not success:
+                message = _with_core_hub_reason(message, job.pipeline_id, started)
             
             # Update job status based on execution result
             if success:
@@ -1415,7 +1444,7 @@ class JobService:
 
             try:
                 verify, cert = self._http_ssl_options(protocol)
-                internal_http_timeout = int(os.getenv('SCHEDULER_INTERNAL_HTTP_TIMEOUT', '120'))
+                internal_http_timeout = internal_http_timeout_seconds()
                 if job.task_type == TaskType.ENTITY_VALIDATE:
                     # The validate route blocks until CoreHub finishes the
                     # comparison (and the optional reconciliation).
@@ -1437,7 +1466,7 @@ class JobService:
                     method=method,
                     url=endpoint,
                     json=json_data,
-                    headers={"Content-Type": "application/json"},
+                    headers=internal_headers(),
                     timeout=internal_http_timeout,
                     verify=verify,
                     cert=cert

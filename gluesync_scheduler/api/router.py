@@ -264,6 +264,9 @@ async def create_job(job_data: Annotated[JobCreate, Body(description="Job data t
     try:
         job = job_service.create_job(job_data)
         return job
+    except HTTPException:
+        # Already the right answer (400 from validation, 404, ...): do not turn it into a 500.
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -387,6 +390,9 @@ async def update_job(job_id: Annotated[int, Path(description="The ID of the job 
     try:
         updated_job = job_service.update_job(job_id, job_data)
         return updated_job
+    except HTTPException:
+        # Already the right answer (400 from validation, 404, ...): do not turn it into a 500.
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -595,6 +601,9 @@ def delete_job(
     try:
         job_service.delete_job(job_id)
         return None
+    except HTTPException:
+        # Already the right answer (400 from validation, 404, ...): do not turn it into a 500.
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

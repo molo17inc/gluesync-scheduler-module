@@ -340,7 +340,8 @@ def execute_job(job: ScheduledJob) -> bool:
         logger.info(f"Executing job {job.cron_job_identifier} - {job.name}")
         logger.info(f"Endpoint: POST {endpoint}")
 
-        headers = {"Content-Type": "application/json"}
+        from gluesync_scheduler.core.internal_auth import internal_headers
+        headers = internal_headers()
         verify = _ssl_verify_flag(ssl_enabled)
 
         log_payload = json_data

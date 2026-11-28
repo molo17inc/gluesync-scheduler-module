@@ -19,19 +19,23 @@ export default {
     const base = await attempt();
     ctx.check('baseline run succeeds', ranOk(base.r), `HTTP ${base.r.status}`);
 
-    // ---- 503 once
+    // ---- 503 once: Chronos sends the command again (CHRONOS_COREHUB_RETRIES, 2 by default)
     await corehub.addFault({ mode: 'status', status: 503, count: 1, match: { path: '/pipelines/pl-orders/commands' } });
     const f1 = await attempt();
-    ctx.check('a 503 from Core Hub fails the run and the error is recorded on the job', ranFailed(f1.r) && !!f1.after.last_error_message && !!f1.after.last_run_error_time, `HTTP ${f1.r.status} err=${f1.after.last_error_message}`);
-    ctx.check('a transient 503 does not lose the run (the command is retried)', f1.calls.length > 1 || ranOk(f1.r), `${f1.calls.length} POST(s) sent, run ${ranOk(f1.r) ? 'succeeded' : 'failed'}`, {
+    ctx.check('a transient 503 does not lose the run (the command is retried)', ranOk(f1.r) && f1.calls.length === 2, `${f1.calls.length} POST(s) sent, run ${ranOk(f1.r) ? 'succeeded' : 'failed'}`, {
       finding: {
         id: 'no-retry-on-corehub-5xx',
         title: 'A single transient Core Hub 5xx fails a scheduled command for good',
         severity: 'observation',
-        detail: 'Pipeline commands are sent once with no retry. A 503 at 01:50 means the "enter maintenance" run is lost until the next cron match (one week later for a weekly job); only Visualize refresh has a retry policy.',
+        detail: 'Pipeline commands are sent once with no retry. A 503 at 01:50 means the "enter maintenance" run is lost until the next cron match (one week later for a weekly job).',
         evidence: { posts: ctx.describe(f1.calls), lastError: f1.after.last_error_message },
       },
     });
+
+    // ---- 503 on every attempt: the run fails and says so
+    await corehub.addFault({ mode: 'status', status: 503, count: 3, match: { path: '/pipelines/pl-orders/commands' } });
+    const f1p = await attempt();
+    ctx.check('a Core Hub that keeps answering 503 fails the run after the retries, and the error is recorded on the job', ranFailed(f1p.r) && f1p.calls.length === 3 && !!f1p.after.last_error_message && !!f1p.after.last_run_error_time, `HTTP ${f1p.r.status}, ${f1p.calls.length} POST(s), err=${f1p.after.last_error_message}`);
     const f1b = await attempt();
     ctx.check('the next run succeeds and clears the error', ranOk(f1b.r) && !f1b.after.last_error_message, `HTTP ${f1b.r.status} err=${f1b.after.last_error_message}`);
 

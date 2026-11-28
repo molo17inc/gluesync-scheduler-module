@@ -294,6 +294,12 @@ class TriggerFlowService:
         flow.secret_token = token
         self.db.commit()
         self.db.refresh(flow)
+        if flow.platform_event:
+            # The webhook secret is derived from the token: register the webhook again.
+            try:
+                chain_execution_service.sync_register_platform_event_webhook(flow_id, flow.platform_event)
+            except Exception:
+                logger.exception("Failed to re-register platform event webhook for flow %d", flow_id)
         return self.get_flow(flow_id), token
 
     # ------------------------------------------------------------------

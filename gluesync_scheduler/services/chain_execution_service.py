@@ -22,6 +22,8 @@
 """
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -35,9 +37,39 @@ from typing import Any, Dict, List, Optional, Set
 _CHRONOS_WEBHOOK_PREFIX = "chronos-sync-"
 # Prefix used for platform event trigger flow webhooks.
 _CHRONOS_PLATFORM_WEBHOOK_PREFIX = "chronos-platform-"
+# Header carrying the per-flow secret on platform-event callbacks (see platform_webhook_secret).
+PLATFORM_WEBHOOK_SECRET_HEADER = "X-Chronos-Webhook-Secret"
+
+
+def platform_webhook_secret(flow_id: int, secret_token: str) -> str:
+    """The secret Core Hub sends back on a platform-event callback for one trigger flow.
+
+    Derived from the flow's own secret token, so rotating the token changes it (the webhook is
+    re-registered then) and the token itself never leaves Chronos.
+    """
+    return hmac.new(
+        secret_token.encode("utf-8"),
+        f"chronos-platform-event:{flow_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _flow_webhook_secret(flow_id: int) -> Optional[str]:
+    from gluesync_scheduler.db.database import SessionLocal
+    from gluesync_scheduler.models.models import TriggerFlow
+    db = SessionLocal()
+    try:
+        flow = db.query(TriggerFlow).filter(TriggerFlow.id == flow_id).first()
+        if flow is None or not flow.secret_token:
+            return None
+        return platform_webhook_secret(flow.id, flow.secret_token)
+    finally:
+        db.close()
 
 import requests
 from sqlalchemy.orm import Session
+
+from gluesync_scheduler.core.internal_auth import internal_headers, internal_http_timeout_seconds
 
 from gluesync_scheduler.models.models import ChainedJobEvent, ExecutionMode, ScheduledJob, TaskType, query_read_only_of, query_studio_http_payload
 from gluesync_scheduler.models.ai_agent_run import (
@@ -399,27 +431,49 @@ class ChainExecutionService:
         self, job: ScheduledJob, events: List[ChainedJobEvent], db: Session, errors: list
     ) -> None:
         """Execute chained events sequentially; append to errors and stop on SYNC failure."""
-        for index, event in enumerate(events):
-            logger.info(
-                "Chained event pos=%d type=%s mode=%s pipeline=%s",
-                event.position, event.task_type, event.execution_mode, event.pipeline_id,
-            )
-            if event.execution_mode == ExecutionMode.ASYNC:
-                # Fire-and-forget: trigger the event but don't await its HTTP result
-                task = asyncio.create_task(self._execute_chained_event(event, db))
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
-                continue
+        pending: List[asyncio.Task] = []
+        try:
+            for index, event in enumerate(events):
+                logger.info(
+                    "Chained event pos=%d type=%s mode=%s pipeline=%s",
+                    event.position, event.task_type, event.execution_mode, event.pipeline_id,
+                )
+                if event.execution_mode == ExecutionMode.ASYNC:
+                    # Not awaited before the next step, but finished before the chain returns.
+                    pending.append(self._start_async(self._execute_chained_event(event, db)))
+                    continue
 
-            # Sync: wait for preceding step's callback, then fire the event.
-            # QUERY_STUDIO has no Hub completion webhook — skip wait and use HTTP.
-            preceding = job.task_type if index == 0 else events[index - 1].task_type
-            success = await self._execute_sync_event(event, db, preceding)
-            if not success:
-                err_msg = self._sync_event_failure_message(event)
-                logger.error(err_msg)
-                errors.append(err_msg)
-                break
+                # Sync: wait for preceding step's callback, then fire the event.
+                # QUERY_STUDIO has no Hub completion webhook — skip wait and use HTTP.
+                preceding = job.task_type if index == 0 else events[index - 1].task_type
+                success = await self._execute_sync_event(event, db, preceding)
+                if not success:
+                    err_msg = self._sync_event_failure_message(event)
+                    logger.error(err_msg)
+                    errors.append(err_msg)
+                    break
+        finally:
+            await self._finish_async(pending)
+
+    def _start_async(self, coro) -> "asyncio.Task":
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    @staticmethod
+    async def _finish_async(pending: List["asyncio.Task"]) -> None:
+        """Wait for the async events a chain started.
+
+        Scheduled jobs run their chain with asyncio.run() on a worker thread, which cancels every
+        task still pending when the chain returns: an async event with nothing awaited after it
+        was cancelled before it sent its request (sandbox finding trailing-async-chained-event-dropped).
+        """
+        if not pending:
+            return
+        for result in await asyncio.gather(*pending, return_exceptions=True):
+            if isinstance(result, BaseException):
+                logger.error("Async chained event failed: %s", result)
 
     def _persist_chain_errors(self, job: ScheduledJob, db: Session, errors: list) -> None:
         """Persist chain errors onto the parent job so the UI can surface them."""
@@ -530,16 +584,16 @@ class ChainExecutionService:
         to scheduled chained events via execute_chain).  TriggerFlow sync
         events fire one at a time and check the HTTP response only.
         """
-        for event in events:
-            logger.info(
-                "Executing event pos=%d type=%s mode=%s pipeline=%s",
-                event.position, event.task_type, event.execution_mode, event.pipeline_id,
-            )
-            if event.execution_mode == ExecutionMode.ASYNC:
-                task = asyncio.create_task(self._execute_event(event))
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
-            else:
+        pending: List[asyncio.Task] = []
+        try:
+            for event in events:
+                logger.info(
+                    "Executing event pos=%d type=%s mode=%s pipeline=%s",
+                    event.position, event.task_type, event.execution_mode, event.pipeline_id,
+                )
+                if event.execution_mode == ExecutionMode.ASYNC:
+                    pending.append(self._start_async(self._execute_event(event)))
+                    continue
                 success = await self._execute_event(event)
                 if not success:
                     logger.error(
@@ -547,7 +601,9 @@ class ChainExecutionService:
                         event.position,
                     )
                     return False
-        return True
+            return True
+        finally:
+            await self._finish_async(pending)
 
     def sync_register_webhooks_for_events(
         self, events: List[ChainedJobEvent], main_job_task_type: TaskType
@@ -641,6 +697,25 @@ class ChainExecutionService:
         except Exception as exc:
             logger.exception("Failed to delete platform event webhook for flow %d: %s", flow_id, exc)
 
+    async def reregister_platform_event_webhooks(self) -> int:
+        """Register again the webhook of every platform-event trigger flow (called at startup).
+
+        Upserts by id, so it is idempotent; it brings webhooks registered by older versions
+        (without the secret header, which callbacks now need) up to date.
+        """
+        from gluesync_scheduler.db.database import SessionLocal
+        from gluesync_scheduler.models.models import TriggerFlow
+        db = SessionLocal()
+        try:
+            flows = [(f.id, f.platform_event) for f in db.query(TriggerFlow).filter(TriggerFlow.platform_event.isnot(None)).all()]
+        finally:
+            db.close()
+        done = 0
+        for flow_id, platform_event in flows:
+            if platform_event and await self._register_platform_event_webhook(flow_id, platform_event):
+                done += 1
+        return done
+
     async def _register_platform_event_webhook(
         self, flow_id: int, platform_event: str
     ) -> Optional[str]:
@@ -658,6 +733,10 @@ class ChainExecutionService:
             # CoreHub expands {{chronos_address}} to the connected Chronos module.
             callback_url = _corehub_chronos_webhook_url("/api/webhooks/platform-event")
             webhook_id = f"{_CHRONOS_PLATFORM_WEBHOOK_PREFIX}{flow_id}"
+            webhook_secret = _flow_webhook_secret(flow_id)
+            if not webhook_secret:
+                logger.error("Cannot register platform event webhook — flow %d not found", flow_id)
+                return None
 
             new_webhook = {
                 "id": webhook_id,
@@ -671,6 +750,7 @@ class ChainExecutionService:
                 "customHeaders": {
                     "X-Trigger-Flow-ID": str(flow_id),
                     "EXT_MODULE": "chronos",
+                    PLATFORM_WEBHOOK_SECRET_HEADER: webhook_secret,
                 },
                 "skipTlsVerification": True,
                 "retryConfig": {
@@ -855,7 +935,7 @@ class ChainExecutionService:
             endpoint = f"{base_url}/pipelines/{pipeline_path_id(event.pipeline_id)}/{action}"
             payload = _event_payload(event)
 
-            timeout = int(os.getenv("SCHEDULER_INTERNAL_HTTP_TIMEOUT", "120"))
+            timeout = internal_http_timeout_seconds()
             if event.task_type == TaskType.PIPELINE_AUDIT_PURGE:
                 from gluesync_scheduler.models.transactions_audit import purge_http_timeout_seconds
                 timeout = max(timeout, purge_http_timeout_seconds())
@@ -876,7 +956,7 @@ class ChainExecutionService:
                 requests.post,
                 endpoint,
                 json=payload,
-                headers={"Content-Type": "application/json"},
+                headers=internal_headers(),
                 timeout=timeout,
                 verify=verify,
             )
@@ -1202,10 +1282,10 @@ def _task_type_to_action(task_type: TaskType) -> Optional[str]:
     mapping = {
         TaskType.ENTITY_START: "play",
         TaskType.PIPELINE_START: "play",
-        TaskType.GROUP_START: "play",
+        TaskType.GROUP_START: "start-group",
         TaskType.ENTITY_STOP: "pause",
         TaskType.PIPELINE_STOP: "pause",
-        TaskType.GROUP_STOP: "pause",
+        TaskType.GROUP_STOP: "stop-group",
         TaskType.ENTITY_SNAPSHOT: "one-time-snapshot",
         TaskType.PIPELINE_SNAPSHOT: "one-time-snapshot",
         TaskType.GROUP_SNAPSHOT: "one-time-snapshot-group",

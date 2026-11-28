@@ -23,6 +23,8 @@
 
 import os
 import json
+import re
+import threading
 import time
 import argparse
 import logging
@@ -105,6 +107,59 @@ def _build_success_response(response):
     if isinstance(json_data, dict):
         _copy_success_payload_fields(safe, json_data)
     return safe
+
+
+# Default client timeout towards Core Hub when a caller gives none (pipeline commands). Requests
+# used to wait forever while the scheduled job gave up on its own internal call after 120 s, so a
+# command Core Hub answered later was applied although the job was reported failed (sandbox
+# finding slow-corehub-false-failure). The internal call now waits longer than this (job_service).
+def corehub_timeout_seconds() -> float:
+    try:
+        return max(1.0, float(os.getenv("CHRONOS_COREHUB_TIMEOUT", "300")))
+    except ValueError:
+        return 300.0
+
+
+# 502/503 mean Core Hub did not process the request: plain commands are sent again, so one
+# transient 5xx does not lose a scheduled run (sandbox finding no-retry-on-corehub-5xx). Callers
+# with raw=True (backup, audit, Visualize, ...) keep their own retry policies.
+_UNAVAILABLE_STATUSES = (502, 503)
+
+
+def corehub_retry_delays() -> List[float]:
+    try:
+        retries = max(0, int(os.getenv("CHRONOS_COREHUB_RETRIES", "2")))
+    except ValueError:
+        retries = 2
+    return [float(2 ** i) for i in range(retries)]  # 1 s, 2 s, ...
+
+
+# The last error Core Hub answered for each pipeline (time.time(), "Core Hub answered <status>: <reason>").
+# JobService.run_job adds it to the job error, so the user sees why Core Hub refused a command
+# (406 "pipeline in maintenance", ...) instead of only a generic "Failed to ...".
+_recent_hub_errors: Dict[str, tuple] = {}
+_recent_hub_errors_lock = threading.Lock()
+_PIPELINE_IN_PATH = re.compile(r"/pipelines/([^/?]+)/")
+
+
+def _remember_hub_error(url: str, status_code: int, reason: str) -> None:
+    match = _PIPELINE_IN_PATH.search(urlparse(url).path or "")
+    if not match:
+        return
+    text = f"Core Hub answered {status_code}: {str(reason).strip()[:300]}"
+    with _recent_hub_errors_lock:
+        _recent_hub_errors[match.group(1)] = (time.time(), text)
+
+
+def recent_core_hub_error(pipeline_id: Optional[str], since: float) -> Optional[str]:
+    """The last Core Hub error for ``pipeline_id`` recorded at or after ``since`` (time.time())."""
+    if not pipeline_id:
+        return None
+    with _recent_hub_errors_lock:
+        entry = _recent_hub_errors.get(str(pipeline_id))
+    if entry and entry[0] >= since:
+        return entry[1]
+    return None
 
 
 def _extract_error_message(response, default):
@@ -373,7 +428,8 @@ class CoreHubClient:
         logger.error("Token retrieval result: FAILED (no token available)")
         return None, False  # Return tuple: (token, from_sdk)
     
-    def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None, timeout=None, raw: bool = False, headers: Optional[Dict[str, str]] = None):
+    def fetch_core_hub(self, path: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None, timeout=None, raw: bool = False, headers: Optional[Dict[str, str]] = None,
+                       retry_unavailable: Optional[bool] = None):
         """
         Make an HTTP request to the CoreHub API.
 
@@ -385,6 +441,8 @@ class CoreHubClient:
             timeout: Optional request timeout in seconds
             raw: When True, return the Hub JSON payload as-is on HTTP 2xx
             headers: Optional extra request headers (kept on the 401 retry)
+            retry_unavailable: Send again after a 502/503 (CHRONOS_COREHUB_RETRIES); defaults to
+                ``not raw``. Pass False when the caller has its own retry policy.
 
         Returns:
             Response data as dictionary or None if request failed
@@ -406,11 +464,31 @@ class CoreHubClient:
             "raw": raw,
         }
 
+        if timeout is None:
+            timeout = corehub_timeout_seconds()
+            ctx["timeout"] = timeout
+        if retry_unavailable is None:
+            retry_unavailable = not raw
+        delays = corehub_retry_delays() if retry_unavailable else []
         try:
             response = self._do_request(method, url, request_headers, body, params, verify, timeout=timeout)
+            for delay in delays:
+                if response is None or response.status_code not in _UNAVAILABLE_STATUSES:
+                    break
+                logger.warning(f"Core Hub answered {response.status_code} to {method} {path}; retrying in {delay:.0f} s")
+                time.sleep(delay)
+                response = self._do_request(method, url, request_headers, body, params, verify, timeout=timeout)
             if response is None:
                 return None
             return self._interpret_response(response, ctx)
+        except requests.exceptions.Timeout:
+            message = (
+                f"Core Hub did not answer {method} {path} within {timeout:.0f} s "
+                "(timed out); the command may still be applied by Core Hub"
+            )
+            logger.error(message)
+            _remember_hub_error(url, 504, message)
+            return {"status": "error", "status_code": 504, "error": "timeout", "message": message}
         except Exception as e:
             logger.exception("Request failed with exception")
             return {
@@ -515,6 +593,7 @@ class CoreHubClient:
         logger.error(
             f"Request failed with status code {response.status_code}: {response.text}"
         )
+        _remember_hub_error(ctx.get("url") or "", response.status_code, _extract_error_message(response, response.text))
         return {
             "status": "error",
             "status_code": response.status_code,
@@ -610,31 +689,31 @@ class CoreHubClient:
     def _reinitialize_sdk_client():
         """Reset the shared SDK client so the next call performs a fresh login handshake.
 
-        Uses ``force_reconnect=True`` so :meth:`initialize` disconnects and
-        discards the old client instead of reusing a stale token from a
-        still-connected WebSocket.  When called from a thread executor (the
-        normal case for ``fetch_core_hub`` via ``run_in_executor``), the
-        coroutine is scheduled on the running event loop with
-        ``run_coroutine_threadsafe`` to avoid the "event loop is already
-        running" error that ``run_until_complete`` would raise.
+        Uses ``force_reconnect=True`` so :meth:`initialize` disconnects and discards the old
+        client instead of reusing a stale token. The reconnect must run on the loop the SDK lives
+        on (the app's main loop): the new WebSocket and its ping task belong to whichever loop
+        runs it, and a throw-away loop (asyncio.run from a worker thread) closes as soon as the
+        call returns, so Core Hub saw Chronos disconnect right after the retried call (sandbox
+        finding sdk-relogin-on-throwaway-event-loop).
         """
         import asyncio
 
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # We're in a thread executor — schedule on the main event loop
-            future = asyncio.run_coroutine_threadsafe(
-                gluesync_sdk_client.initialize(force_reconnect=True),
-                loop,
-            )
-            future.result(timeout=30)  # Wait up to 30s for reconnection
-        else:
-            # No running loop — safe to use asyncio.run
-            asyncio.run(gluesync_sdk_client.initialize(force_reconnect=True))
+        home = gluesync_sdk_client.home_loop
+        if home is not None and home.is_running():
+            try:
+                on_home = asyncio.get_running_loop() is home
+            except RuntimeError:
+                on_home = False
+            if on_home:
+                # Called synchronously on the loop itself: blocking here would deadlock it.
+                home.create_task(gluesync_sdk_client.initialize(force_reconnect=True))
+                return
+            asyncio.run_coroutine_threadsafe(
+                gluesync_sdk_client.initialize(force_reconnect=True), home,
+            ).result(timeout=30)
+            return
+        # No SDK loop running (CLI job runner, tests): a private loop is all there is.
+        asyncio.run(gluesync_sdk_client.initialize(force_reconnect=True))
 
     def _process_retry_response(self, retry_response, raw=False):
         """Convert a retry response into the standard result dict."""
@@ -1485,7 +1564,8 @@ class CoreHubClient:
         from gluesync_scheduler.models.visualize_refresh import post_visualize_refresh
 
         def _post(path, body):
-            return self.fetch_core_hub(path, method="POST", body=body)
+            # post_visualize_refresh has its own retry policy.
+            return self.fetch_core_hub(path, method="POST", body=body, retry_unavailable=False)
 
         return post_visualize_refresh(_post, viz_id, parameters, schedule_id)
 
@@ -1870,6 +1950,31 @@ class PipelineManager:
             # Wait a short time between entity operations to avoid overwhelming the Core Hub
             await asyncio.sleep(self.client.entity_start_timeout)
         
+        return success
+
+    async def start_groups(self, pipeline_id: str, group_ids: List[str], with_snapshot: bool = False,
+                           snapshot_write_method: str = 'UPSERT') -> bool:
+        """Start each group with Core Hub's start-group command, as scheduled group jobs do."""
+        loop = asyncio.get_running_loop()
+        success = True
+        for group_id in group_ids:
+            logger.info(f"Starting group {group_id} in pipeline {pipeline_id} (with_snapshot={with_snapshot})")
+            if not await loop.run_in_executor(
+                None, self.client.start_group, pipeline_id, group_id, with_snapshot, snapshot_write_method
+            ):
+                logger.error(f"Failed to start group {group_id}")
+                success = False
+        return success
+
+    async def stop_groups(self, pipeline_id: str, group_ids: List[str]) -> bool:
+        """Stop each group with Core Hub's stop-group command, as scheduled group jobs do."""
+        loop = asyncio.get_running_loop()
+        success = True
+        for group_id in group_ids:
+            logger.info(f"Stopping group {group_id} in pipeline {pipeline_id}")
+            if not await loop.run_in_executor(None, self.client.stop_group, pipeline_id, group_id):
+                logger.error(f"Failed to stop group {group_id}")
+                success = False
         return success
 
     async def redo_group(self, pipeline_id: str, group_id: str, with_snapshot: bool = False,

@@ -509,6 +509,17 @@ async def _cleanup_stale_webhooks():
         logger.warning("Stale webhook cleanup failed (non-fatal): %s", e)
 
 
+async def _reregister_platform_webhooks():
+    """Bring every platform-event trigger flow webhook in Core Hub up to date (secret header)."""
+    try:
+        from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+        done = await chain_execution_service.reregister_platform_event_webhooks()
+        if done:
+            logger.info("Startup re-registered %d platform event webhook(s) in CoreHub", done)
+    except Exception as e:
+        logger.warning("Platform event webhook re-registration failed (non-fatal): %s", e)
+
+
 # Strong reference to the Core Hub link task (see _corehub_link)
 _corehub_link_task = None
 
@@ -530,6 +541,7 @@ async def _corehub_link():
         logger.info("Gluesync Scheduler Module connected to Core Hub and loaded its jobs")
         _start_catchup(missed_runs)
         await _cleanup_stale_webhooks()
+        await _reregister_platform_webhooks()
     except asyncio.CancelledError:
         logger.info("Core Hub link cancelled before it completed")
         raise

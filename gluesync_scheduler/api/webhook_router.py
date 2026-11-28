@@ -27,7 +27,13 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
-from gluesync_scheduler.services.chain_execution_service import chain_execution_service
+import secrets
+
+from gluesync_scheduler.services.chain_execution_service import (
+    PLATFORM_WEBHOOK_SECRET_HEADER,
+    chain_execution_service,
+    platform_webhook_secret,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +47,22 @@ router = APIRouter(
 )
 
 _EXPECTED_MODULE = "chronos"
+
+
+def _platform_secret_ok(flow_id: int, provided: Optional[str]) -> bool:
+    """True when ``provided`` is the webhook secret of trigger flow ``flow_id``."""
+    if not provided:
+        return False
+    from gluesync_scheduler.db.database import SessionLocal
+    from gluesync_scheduler.models.models import TriggerFlow
+    db = SessionLocal()
+    try:
+        flow = db.query(TriggerFlow).filter(TriggerFlow.id == flow_id).first()
+        if flow is None or not flow.secret_token:
+            return False
+        return secrets.compare_digest(platform_webhook_secret(flow.id, flow.secret_token), provided.strip())
+    finally:
+        db.close()
 
 
 @router.post(
@@ -127,6 +149,7 @@ async def platform_event_notify(
     request: Request,
     x_trigger_flow_id: Optional[str] = Header(None, alias="X-Trigger-Flow-ID"),
     ext_module: Optional[str] = Header(None, alias="EXT_MODULE"),
+    webhook_secret: Optional[str] = Header(None, alias=PLATFORM_WEBHOOK_SECRET_HEADER),
 ) -> JSONResponse:
     """Endpoint called by the Gluesync corehub when a platform event fires.
 
@@ -136,6 +159,9 @@ async def platform_event_notify(
         Must be ``chronos``.
     ``X-Trigger-Flow-ID``
         The trigger flow ID to fire.
+    ``X-Chronos-Webhook-Secret``
+        The flow's webhook secret, which Chronos put in the webhook it registered in Core Hub.
+        A missing or wrong secret (or an unknown flow) is 401.
     """
     if not ext_module or ext_module.strip() != _EXPECTED_MODULE:
         logger.warning(
@@ -160,6 +186,13 @@ async def platform_event_notify(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid X-Trigger-Flow-ID header: {x_trigger_flow_id}",
+        )
+
+    if not _platform_secret_ok(flow_id, webhook_secret):
+        logger.warning("platform_event_notify: rejected callback for flow_id=%d — missing or wrong webhook secret", flow_id)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Missing or invalid {PLATFORM_WEBHOOK_SECRET_HEADER} header",
         )
 
     body: Dict[str, Any] = {}

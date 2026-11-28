@@ -59,7 +59,7 @@ AUDIT_STOP = "stop"
 CORE_HUB_AUDIT_PATH = "/pipelines/{pipeline_id}/transactions-audit/{action}"
 
 # Per attempt. Three attempts plus the 0+2 s backoff stay inside the default
-# internal HTTP timeout (SCHEDULER_INTERNAL_HTTP_TIMEOUT=120) of the job runner.
+# internal HTTP timeout (SCHEDULER_INTERNAL_HTTP_TIMEOUT, 900 s by default) of the job runner.
 CORE_HUB_AUDIT_TIMEOUT_SECONDS = 30
 # Retries after the first attempt (5xx and network errors only).
 CORE_HUB_AUDIT_RETRIES = 2
